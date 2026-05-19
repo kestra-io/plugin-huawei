@@ -1,8 +1,8 @@
-# Kestra Template Plugin
+# Kestra Huawei Plugin
 
 ## What
 
-- Provides plugin components under `io.kestra.plugin.templates`.
+- Provides plugin components under `io.kestra.plugin.huawei`.
 - Includes classes such as `Example`, `Trigger`.
 
 ## Why
@@ -25,12 +25,12 @@ Infrastructure dependencies (Docker Compose services):
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.templates.Example`
+- `io.kestra.plugin.huawei.Example`
 
 ### Project Structure
 
 ```
-plugin-template/
+plugin-huawei/
 ├── src/main/java/io/kestra/plugin/templates/
 ├── src/test/java/io/kestra/plugin/templates/
 ├── build.gradle
