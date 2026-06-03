@@ -2,44 +2,129 @@
 
 ## What
 
-- Provides plugin components under `io.kestra.plugin.huawei`.
-- Includes classes such as `Example`, `Trigger`.
+Provides Kestra plugin tasks and shared abstractions for Huawei Cloud services under `io.kestra.plugin.huawei`.
 
 ## Why
 
-- What user problem does this solve? Teams need a concrete starting point for building and validating new Kestra plugins without recreating the same project scaffolding from scratch.
-- Why would a team adopt this plugin in a workflow? It gives plugin authors a ready-made reference repo they can adapt alongside their own build, test, and publishing workflow.
-- What operational/business outcome does it enable? It shortens plugin delivery time, reduces setup mistakes, and makes internal or partner plugin development more repeatable.
+Teams using Huawei Cloud need first-class Kestra integrations for storage, authentication, and future services without hand-rolling HTTP calls or managing SDK lifecycle themselves.
 
 ## How
 
 ### Architecture
 
-Single-module plugin. Source packages under `io.kestra.plugin`:
+Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
-- `templates`
+- `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
+- `io.kestra.plugin.huawei.auth` — IAM authentication tasks (`GetToken`)
+- `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
+- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`)
+- `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
 
 Infrastructure dependencies (Docker Compose services):
 
-- `app`
+- `app` — Kestra application (for manual plugin testing)
+- `minio` — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin)
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.huawei.Example`
+- `io.kestra.plugin.huawei.auth.GetToken` — Obtains a short-lived Huawei Cloud IAM token via Keystone v3
+- `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
+- `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
+- `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
+- `io.kestra.plugin.huawei.obs.tasks.Copy` — Server-side copy of an OBS object within or between buckets; `delete=true` for move semantics
+- `io.kestra.plugin.huawei.obs.tasks.Delete` — Deletes a single OBS object by bucket/key (and optional versionId)
+- `io.kestra.plugin.huawei.obs.tasks.DeleteList` — Batch-deletes all objects matching a prefix/regexp filter in chunks of 1000
+- `io.kestra.plugin.huawei.obs.tasks.CreateBucket` — Creates an OBS bucket; idempotent if the caller already owns it
+- `io.kestra.plugin.huawei.obs.tasks.Downloads` — Lists matching objects, downloads each to Kestra storage, applies NONE/DELETE/MOVE action
+- `io.kestra.plugin.huawei.obs.tasks.Trigger` — Polling trigger that fires when new objects appear in a bucket; applies action after download to avoid re-triggering
+
+### Shared OBS Layer
+
+- `AbstractObs extends AbstractConnection implements AbstractObsInterface` — holds `endpointOverride`, `pathStyleAccess`, `authType`; exposes `protected ObsClient client(RunContext)` factory
+- `AbstractObsObject extends AbstractObs` — adds `bucket` property shared by all single-object tasks
+- `ObsUtils` — static endpoint resolution (override → region-derived → throws)
+- `ObsService` — static helpers: `buildClient(...)` (shared client factory for tasks and Trigger), `download(...)` (buffers via temp file → internal storage), and `list(...)` (paginated, optional regexp filter)
+- `AuthType` enum — `OBS` / `V2` / `V4` wrapping SDK `AuthTypeEnum`; use `V2` for MinIO/S3-compatible endpoints
+- `ListInterface` — shared property schema (`prefix`, `delimiter`, `marker`, `maxKeys`, `regexp`) implemented by List, DeleteList, Downloads, and Trigger
+- `ActionInterface` — shared post-download action schema (`action` enum: NONE/DELETE/MOVE; `moveTo.bucket`, `moveTo.keyPrefix`) implemented by Downloads and Trigger
+
+### Integration Tests
+
+Integration tests require MinIO. Start it with:
+
+```bash
+docker compose up -d minio
+```
+
+Then run tests with:
+
+```bash
+OBS_MINIO_TESTS=true ./gradlew test
+```
+
+Tests are guarded by `@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")` so they are skipped in CI unless the variable is set.
 
 ### Project Structure
 
 ```
 plugin-huawei/
-├── src/main/java/io/kestra/plugin/templates/
-├── src/test/java/io/kestra/plugin/templates/
+├── src/main/java/io/kestra/plugin/huawei/
+│   ├── AbstractConnection.java
+│   ├── AbstractConnectionInterface.java
+│   ├── ConnectionUtils.java
+│   ├── auth/
+│   │   ├── GetToken.java
+│   │   └── package-info.java
+│   └── obs/
+│       ├── AbstractObs.java
+│       ├── AbstractObsInterface.java
+│       ├── AbstractObsObject.java
+│       ├── ActionInterface.java
+│       ├── AuthType.java
+│       ├── ListInterface.java
+│       ├── ObsService.java
+│       ├── ObsUtils.java
+│       ├── package-info.java
+│       ├── models/
+│       │   └── ObsObject.java
+│       └── tasks/
+│           ├── Copy.java
+│           ├── CreateBucket.java
+│           ├── Delete.java
+│           ├── DeleteList.java
+│           ├── Download.java
+│           ├── Downloads.java
+│           ├── List.java
+│           ├── Trigger.java
+│           ├── Upload.java
+│           └── package-info.java
+├── src/test/java/io/kestra/plugin/huawei/
+│   ├── ConnectionUtilsTest.java
+│   ├── auth/
+│   │   ├── GetTokenFlowTest.java
+│   │   └── GetTokenTest.java
+│   └── obs/
+│       ├── AbstractMinioTest.java
+│       ├── CopyTest.java
+│       ├── CreateBucketTest.java
+│       ├── DeleteListTest.java
+│       ├── DeleteTest.java
+│       ├── DownloadTest.java
+│       ├── DownloadsTest.java
+│       ├── ListTest.java
+│       ├── ObsUtilsTest.java
+│       ├── TriggerTest.java
+│       └── UploadTest.java
 ├── build.gradle
+├── docker-compose.yml
 └── README.md
 ```
 
 ## Local rules
 
 - Base the wording on the implemented packages and classes, not on template README text.
+- OBS SDK: `com.huaweicloud:esdk-obs-java-bundle:3.25.5` (shaded, no BOM conflicts, slf4j excluded)
+- `AuthTypeEnum.V2` is required for MinIO; real OBS uses `AuthTypeEnum.OBS` by default
 
 ## References
 
