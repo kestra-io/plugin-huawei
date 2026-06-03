@@ -52,6 +52,10 @@
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)
 * Documentation for developing a plugin is included in the [Plugin Developer Guide](https://kestra.io/docs/plugin-developer-guide/)
 
+## Development
+
+* [Huawei Cloud account & API access — dev and CI setup](docs/huawei-cloud-setup.md): how to obtain AK/SK credentials, the recommended auth mechanism, the least-privilege IAM policy, and the GitHub Actions secret plan for integration tests.
+
 
 ## License
 Apache 2.0 © [Kestra Technologies](https://kestra.io)
