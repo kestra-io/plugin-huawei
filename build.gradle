@@ -49,6 +49,11 @@ dependencies {
     annotationProcessor group: "io.kestra", name: "processor", version: kestraVersion
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
+
+    // Huawei OBS SDK — shaded bundle, no BOM conflicts; exclude transitive slf4j to defer to Kestra's binding
+    api("com.huaweicloud:esdk-obs-java-bundle:3.25.5") {
+        exclude group: "org.slf4j"
+    }
 }
 
 
@@ -96,6 +101,8 @@ dependencies {
     testImplementation "org.junit.jupiter:junit-jupiter-engine"
     testImplementation "org.hamcrest:hamcrest"
     testImplementation "org.hamcrest:hamcrest-library"
+
+    testImplementation "org.wiremock:wiremock-jetty12"
 }
 
 /**********************************************************************************************************************\

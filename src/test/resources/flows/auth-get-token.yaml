@@ -1,0 +1,27 @@
+id: auth-get-token
+namespace: io.kestra.tests.huawei
+
+inputs:
+  - id: endpoint
+    type: STRING
+  - id: username
+    type: STRING
+    defaults: alice
+  - id: password
+    type: STRING
+    defaults: p4ss
+  - id: userDomain
+    type: STRING
+    defaults: acme-corp
+  - id: projectName
+    type: STRING
+    defaults: eu-west-101
+
+tasks:
+  - id: get_token
+    type: io.kestra.plugin.huawei.auth.GetToken
+    iamEndpointOverride: "{{ inputs.endpoint }}"
+    username: "{{ inputs.username }}"
+    password: "{{ inputs.password }}"
+    userDomain: "{{ inputs.userDomain }}"
+    projectName: "{{ inputs.projectName }}"
