@@ -11,7 +11,7 @@ public interface AbstractConnectionInterface {
     @Schema(
         title = "Access Key (AK) used to authenticate with Huawei Cloud.",
         description = "Huawei Cloud access key used together with `secretAccessKey` to sign API requests. " +
-            "Equivalent to AWS Access Key Id. Required for AK/SK-based authentication; not required when " +
+            "Required for AK/SK-based authentication; not required when " +
             "providing a pre-obtained `securityToken`. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
     @PluginProperty(group = "connection", secret = true)
@@ -19,7 +19,7 @@ public interface AbstractConnectionInterface {
 
     @Schema(
         title = "Secret Key (SK) used to authenticate with Huawei Cloud.",
-        description = "Huawei Cloud secret key paired with `accessKeyId`. Equivalent to AWS Secret Access Key. " +
+        description = "Huawei Cloud secret key paired with `accessKeyId`. " +
             "Required for AK/SK-based authentication. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
     @PluginProperty(group = "connection", secret = true)

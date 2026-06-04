@@ -7,8 +7,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * Shared listing configuration for OBS list operations.
  *
- * <p>Mirrors the {@code ListInterface} contract in plugin-aws S3 so future tasks (Downloads, Trigger)
- * can implement the same interface and share {@link ObsService#list} as-is.
+ * <p>Implemented by every OBS listing task (List, DeleteList, Downloads, Trigger) so they share a single
+ * property schema and reuse {@link ObsService#list} as-is.
  */
 public interface ListInterface {
 
