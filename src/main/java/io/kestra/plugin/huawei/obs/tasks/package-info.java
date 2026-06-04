@@ -1,6 +1,7 @@
 @PluginSubGroup(
     title = "OBS Tasks",
-    description = "Individual object-level tasks for Huawei Cloud Object Storage Service — upload, download, and list.",
+    description = "Object- and bucket-level tasks for Huawei Cloud Object Storage Service (OBS): " +
+        "upload, download, list, copy, delete, batch-delete, create buckets, and trigger flows on new objects.",
     categories = { PluginSubGroup.PluginCategory.STORAGE }
 )
 package io.kestra.plugin.huawei.obs.tasks;
