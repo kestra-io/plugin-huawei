@@ -123,9 +123,27 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
         runContext.logger().debug("Listing objects to delete in s3://{} prefix={}", rBucket, rPrefix);
 
         try (var obs = client(runContext)) {
-            var objects = ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp);
+            // Stream the listing and delete page-by-page so we never hold more than BATCH_SIZE keys in
+            // memory, regardless of how many objects match the filter.
+            var batch = new ArrayList<KeyAndVersion>(BATCH_SIZE);
+            // [0] matched, [1] deleted, [2] total size — boxed so the streaming lambda can mutate them.
+            var stats = new long[3];
 
-            if (objects.isEmpty()) {
+            ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp, obj -> {
+                stats[0]++;
+                stats[2] += obj.getSize() != null ? obj.getSize() : 0L;
+                batch.add(new KeyAndVersion(obj.getKey()));
+                if (batch.size() >= BATCH_SIZE) {
+                    stats[1] += deleteBatch(obs, rBucket, batch, runContext);
+                    batch.clear();
+                }
+            });
+            if (!batch.isEmpty()) {
+                stats[1] += deleteBatch(obs, rBucket, batch, runContext);
+                batch.clear();
+            }
+
+            if (stats[0] == 0) {
                 if (rErrorOnEmpty) {
                     throw new IllegalStateException(
                         "No objects matched the filter (bucket=" + rBucket + " prefix=" + rPrefix +
@@ -136,33 +154,33 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
                 return Output.builder().count(0).size(0L).build();
             }
 
-            long totalSize = objects.stream().mapToLong(o -> o.getSize() != null ? o.getSize() : 0L).sum();
-            runContext.logger().debug("Deleting {} objects ({} bytes total)", objects.size(), totalSize);
-
-            int deleted = 0;
-            for (int i = 0; i < objects.size(); i += BATCH_SIZE) {
-                var chunk = objects.subList(i, Math.min(i + BATCH_SIZE, objects.size()));
-                var kvs = chunk.stream()
-                    .map(o -> new KeyAndVersion(o.getKey()))
-                    .toList();
-
-                var req = new DeleteObjectsRequest(rBucket, false, kvs.toArray(KeyAndVersion[]::new));
-                var result = obs.deleteObjects(req);
-
-                deleted += result.getDeletedObjectResults().size();
-
-                var errors = result.getErrorResults();
-                if (errors != null && !errors.isEmpty()) {
-                    errors.forEach(e -> runContext.logger().warn(
-                        "Failed to delete s3://{}/{}: {} — {}",
-                        rBucket, e.getObjectKey(), e.getErrorCode(), e.getMessage()
-                    ));
-                }
-            }
-
-            runContext.metric(Counter.of("count", deleted));
-            return Output.builder().count(deleted).size(totalSize).build();
+            runContext.logger().debug("Deleted {} objects ({} bytes total)", stats[1], stats[2]);
+            runContext.metric(Counter.of("count", stats[1]));
+            return Output.builder().count(stats[1]).size(stats[2]).build();
         }
+    }
+
+    /**
+     * Deletes one batch of keys (at most {@link #BATCH_SIZE}) and returns the number successfully deleted.
+     * Per-object errors are logged as warnings; the batch does not fail the task.
+     */
+    private static int deleteBatch(
+        com.obs.services.ObsClient obs,
+        String bucket,
+        List<KeyAndVersion> keys,
+        RunContext runContext
+    ) {
+        var req = new DeleteObjectsRequest(bucket, false, keys.toArray(KeyAndVersion[]::new));
+        var result = obs.deleteObjects(req);
+
+        var errors = result.getErrorResults();
+        if (errors != null && !errors.isEmpty()) {
+            errors.forEach(e -> runContext.logger().warn(
+                "Failed to delete s3://{}/{}: {} — {}",
+                bucket, e.getObjectKey(), e.getErrorCode(), e.getMessage()
+            ));
+        }
+        return result.getDeletedObjectResults().size();
     }
 
     @Builder

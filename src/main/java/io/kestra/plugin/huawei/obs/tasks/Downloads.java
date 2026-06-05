@@ -129,13 +129,27 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
 
         runContext.logger().debug("Listing and downloading objects from s3://{} prefix={}", rBucket, rPrefix);
 
+        // Resolve MOVE destination up front so we validate config before streaming and keep the lambda lean.
+        final String rDestBucket;
+        final String rKeyPrefix;
+        if (rAction == Action.MOVE) {
+            if (moveTo == null) {
+                throw new IllegalArgumentException("action=MOVE requires moveTo to be configured");
+            }
+            rDestBucket = runContext.render(moveTo.getBucket()).as(String.class).orElse(rBucket);
+            rKeyPrefix = runContext.render(moveTo.getKeyPrefix()).as(String.class).orElse("");
+        } else {
+            rDestBucket = null;
+            rKeyPrefix = null;
+        }
+
         try (var obs = client(runContext)) {
-            var objects = ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp);
+            var enriched = new ArrayList<ObsObject>();
+            var outputFiles = new HashMap<String, URI>();
 
-            var enriched = new ArrayList<ObsObject>(objects.size());
-            var outputFiles = new HashMap<String, URI>(objects.size());
-
-            for (var obj : objects) {
+            // Stream the listing: download and apply the action per object in a single pass, so we never
+            // hold the full listing in addition to the output.
+            ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp, obj -> {
                 var result = ObsService.download(obs, runContext, rBucket, obj.getKey(), null);
                 enriched.add(ObsObject.builder()
                     .key(obj.getKey())
@@ -146,27 +160,17 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
                     .uri(result.uri())
                     .build());
                 outputFiles.put(obj.getKey(), result.uri());
-            }
 
-            if (rAction == Action.DELETE) {
-                for (var obj : objects) {
+                if (rAction == Action.DELETE) {
                     runContext.logger().debug("Deleting s3://{}/{}", rBucket, obj.getKey());
                     obs.deleteObject(new DeleteObjectRequest(rBucket, obj.getKey()));
-                }
-            } else if (rAction == Action.MOVE) {
-                if (moveTo == null) {
-                    throw new IllegalArgumentException("action=MOVE requires moveTo to be configured");
-                }
-                var rDestBucket = runContext.render(moveTo.getBucket()).as(String.class).orElse(rBucket);
-                var rKeyPrefix = runContext.render(moveTo.getKeyPrefix()).as(String.class).orElse("");
-
-                for (var obj : objects) {
+                } else if (rAction == Action.MOVE) {
                     var destKey = rKeyPrefix + obj.getKey();
                     runContext.logger().debug("Moving s3://{}/{} → s3://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
                     obs.copyObject(new CopyObjectRequest(rBucket, obj.getKey(), rDestBucket, destKey));
                     obs.deleteObject(new DeleteObjectRequest(rBucket, obj.getKey()));
                 }
-            }
+            });
 
             runContext.metric(Counter.of("size", enriched.size()));
             return Output.builder()

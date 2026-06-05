@@ -134,8 +134,21 @@ public final class ObsService {
     }
 
     /**
-     * Lists OBS objects with optional prefix/delimiter/marker/maxKeys filtering, iterates all pages,
-     * and applies an optional client-side regexp filter on the full key.
+     * Callback invoked once per matching object during a streaming {@link #list}.
+     *
+     * <p>Allowed to throw checked exceptions so callers can perform I/O (download, delete) inline
+     * without wrapping.
+     */
+    @FunctionalInterface
+    public interface ObsObjectConsumer {
+        void accept(ObsObject object) throws Exception;
+    }
+
+    /**
+     * Streams OBS objects to {@code consumer} one at a time, paginating through all pages and applying
+     * an optional client-side regexp filter on the full key. Nothing is accumulated in memory: this is
+     * the memory-safe primitive for callers that process-and-discard (delete, download) on buckets that
+     * may hold millions of objects.
      *
      * @param obs       open {@link ObsClient} (caller owns lifecycle)
      * @param bucket    bucket to list
@@ -144,18 +157,18 @@ public final class ObsService {
      * @param marker    listing start marker (exclusive); may be {@code null}
      * @param maxKeys   page size sent to OBS (1–1000); {@code null} defaults to 1000
      * @param regexp    client-side key filter; {@code null} means no filter
-     * @return all matching objects across all pages
+     * @param consumer  invoked for each matching object, in listing order
      */
-    public static List<ObsObject> list(
+    public static void list(
         ObsClient obs,
         String bucket,
         String prefix,
         String delimiter,
         String marker,
         Integer maxKeys,
-        String regexp
-    ) {
-        var result = new ArrayList<ObsObject>();
+        String regexp,
+        ObsObjectConsumer consumer
+    ) throws Exception {
         var currentMarker = marker;
         var pattern = regexp != null ? Pattern.compile(regexp) : null;
 
@@ -169,7 +182,7 @@ public final class ObsService {
             var listing = obs.listObjects(req);
             for (var sdkObj : listing.getObjects()) {
                 if (pattern == null || pattern.matcher(sdkObj.getObjectKey()).matches()) {
-                    result.add(ObsObject.from(sdkObj));
+                    consumer.accept(ObsObject.from(sdkObj));
                 }
             }
 
@@ -179,7 +192,37 @@ public final class ObsService {
                 break;
             }
         } while (true);
+    }
 
+    /**
+     * Lists OBS objects with optional prefix/delimiter/marker/maxKeys filtering, iterates all pages,
+     * and applies an optional client-side regexp filter on the full key.
+     *
+     * <p><strong>Loads every matching object into memory.</strong> Use only when the caller needs the
+     * full list (e.g. the {@code List} task, whose output is this list). For process-and-discard work
+     * prefer the streaming {@link #list(ObsClient, String, String, String, String, Integer, String, ObsObjectConsumer)}
+     * overload, which holds nothing.
+     *
+     * @return all matching objects across all pages
+     */
+    public static List<ObsObject> list(
+        ObsClient obs,
+        String bucket,
+        String prefix,
+        String delimiter,
+        String marker,
+        Integer maxKeys,
+        String regexp
+    ) {
+        var result = new ArrayList<ObsObject>();
+        try {
+            list(obs, bucket, prefix, delimiter, marker, maxKeys, regexp, result::add);
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            // result::add declares no checked exceptions, so this is unreachable in practice.
+            throw new RuntimeException(e);
+        }
         return Collections.unmodifiableList(result);
     }
 
