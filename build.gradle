@@ -50,8 +50,10 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
 
-    // Huawei OBS SDK — shaded bundle, no BOM conflicts; exclude transitive slf4j to defer to Kestra's binding
-    api("com.huaweicloud:esdk-obs-java-bundle:3.25.5") {
+    // Huawei OBS SDK — shaded bundle, no BOM conflicts; exclude transitive slf4j to defer to Kestra's binding.
+    // `implementation` (not `api`): the SDK is an internal detail bundled into the shadow JAR, not part of
+    // the plugin's public API, so it must not leak onto consumers' compile classpath or the Kestra classloader.
+    implementation("com.huaweicloud:esdk-obs-java-bundle:3.25.5") {
         exclude group: "org.slf4j"
     }
 }
