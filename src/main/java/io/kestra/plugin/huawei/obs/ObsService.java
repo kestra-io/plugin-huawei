@@ -37,6 +37,12 @@ public final class ObsService {
      * <p>Extracted as a static factory so that the {@link io.kestra.plugin.huawei.obs.tasks.Trigger},
      * which extends {@code AbstractTrigger} instead of {@code AbstractObs}, can share the same
      * client-creation logic without inheritance.
+     *
+     * <p><strong>Ownership:</strong> the returned {@code ObsClient} holds an HTTP connection pool and
+     * implements {@link AutoCloseable}. The caller owns its lifecycle and <em>must</em> close it —
+     * always wrap the result in a try-with-resources. A fresh client is created per call (no reuse
+     * across task/trigger runs), which keeps each run self-contained at the cost of pool setup;
+     * that trade-off is intentional for Kestra's run-isolated execution model.
      */
     public static ObsClient buildClient(
         AbstractConnection.HuaweiClientConfig config,
