@@ -341,7 +341,6 @@ public final class ObsService {
      * <p>OBS returns user metadata with an {@code x-obs-meta-} prefix; MinIO may double-prefix
      * to {@code x-amz-meta-x-obs-meta-}. We normalise to bare keys in all cases.
      */
-    @SuppressWarnings("unchecked")
     static Map<String, String> extractUserMetadata(com.obs.services.model.ObjectMetadata meta) {
         if (meta == null) {
             return Map.of();
