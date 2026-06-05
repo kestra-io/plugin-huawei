@@ -17,7 +17,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
 - `io.kestra.plugin.huawei.auth` — IAM authentication tasks (`GetToken`)
 - `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
-- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`)
+- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
 
 Infrastructure dependencies (Docker Compose services):
@@ -35,6 +35,7 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.obs.tasks.Delete` — Deletes a single OBS object by bucket/key (and optional versionId)
 - `io.kestra.plugin.huawei.obs.tasks.DeleteList` — Batch-deletes all objects matching a prefix/regexp filter in chunks of 1000
 - `io.kestra.plugin.huawei.obs.tasks.CreateBucket` — Creates an OBS bucket; idempotent if the caller already owns it
+- `io.kestra.plugin.huawei.obs.tasks.DeleteBucket` — Deletes an empty OBS bucket; idempotent by default (`errorOnMissing=false`) if the bucket is absent
 - `io.kestra.plugin.huawei.obs.tasks.Downloads` — Lists matching objects, downloads each to Kestra storage, applies NONE/DELETE/MOVE action
 - `io.kestra.plugin.huawei.obs.tasks.Trigger` — Polling trigger that fires when new objects appear in a bucket; applies action after download to avoid re-triggering
 
@@ -91,6 +92,7 @@ plugin-huawei/
 │           ├── Copy.java
 │           ├── CreateBucket.java
 │           ├── Delete.java
+│           ├── DeleteBucket.java
 │           ├── DeleteList.java
 │           ├── Download.java
 │           ├── Downloads.java
@@ -107,6 +109,7 @@ plugin-huawei/
 │       ├── AbstractMinioTest.java
 │       ├── CopyTest.java
 │       ├── CreateBucketTest.java
+│       ├── DeleteBucketTest.java
 │       ├── DeleteListTest.java
 │       ├── DeleteTest.java
 │       ├── DownloadTest.java
