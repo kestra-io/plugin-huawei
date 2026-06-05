@@ -8,15 +8,12 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
-import io.kestra.plugin.huawei.AbstractConnectionInterface;
-import io.kestra.plugin.huawei.obs.AbstractObsInterface;
+import io.kestra.plugin.huawei.obs.AbstractObsTrigger;
 import io.kestra.plugin.huawei.obs.ActionInterface;
-import io.kestra.plugin.huawei.obs.AuthType;
 import io.kestra.plugin.huawei.obs.ListInterface;
 import io.kestra.plugin.huawei.obs.ObsService;
 import io.kestra.plugin.huawei.obs.models.ObsObject;
@@ -108,40 +105,9 @@ import java.util.Optional;
         )
     }
 )
-public class Trigger extends AbstractTrigger
+public class Trigger extends AbstractObsTrigger
     implements PollingTriggerInterface, TriggerOutput<Downloads.Output>,
-    AbstractConnectionInterface, AbstractObsInterface, ListInterface, ActionInterface {
-
-    @PluginProperty(group = "connection", secret = true)
-    private Property<String> accessKeyId;
-
-    @PluginProperty(group = "connection", secret = true)
-    private Property<String> secretAccessKey;
-
-    @PluginProperty(group = "connection", secret = true)
-    private Property<String> securityToken;
-
-    @PluginProperty(group = "connection")
-    private Property<String> projectId;
-
-    @PluginProperty(group = "connection")
-    private Property<String> domainId;
-
-    @PluginProperty(group = "connection")
-    private Property<String> region;
-
-    @PluginProperty(group = "advanced")
-    private Property<String> endpointOverride;
-
-    @PluginProperty(group = "advanced")
-    private Property<Boolean> pathStyleAccess;
-
-    @PluginProperty(group = "advanced")
-    private Property<AuthType> authType;
-
-    @Builder.Default
-    @PluginProperty(group = "advanced")
-    private Property<String> endpointSuffix = Property.ofValue("myhuaweicloud.com");
+    ListInterface, ActionInterface {
 
     @Schema(title = "OBS bucket to watch.")
     @NotNull
@@ -186,12 +152,6 @@ public class Trigger extends AbstractTrigger
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext triggerContext) throws Exception {
         var runContext = conditionContext.getRunContext();
 
-        var config = huaweiClientConfig(runContext);
-        var rEndpointOverride = runContext.render(endpointOverride).as(String.class).orElse(null);
-        var rPathStyle = runContext.render(pathStyleAccess).as(Boolean.class).orElse(false);
-        var rAuthType = runContext.render(authType).as(AuthType.class).orElse(AuthType.OBS);
-        var rEndpointSuffix = runContext.render(endpointSuffix).as(String.class).orElse("myhuaweicloud.com");
-
         var rBucket = runContext.render(bucket).as(String.class).orElseThrow();
         var rPrefix = runContext.render(prefix).as(String.class).orElse(null);
         var rDelimiter = runContext.render(delimiter).as(String.class).orElse(null);
@@ -216,7 +176,7 @@ public class Trigger extends AbstractTrigger
             rKeyPrefix = null;
         }
 
-        try (var obs = ObsService.buildClient(config, rEndpointOverride, rPathStyle, rAuthType, rEndpointSuffix)) {
+        try (var obs = client(runContext)) {
             var enriched = new ArrayList<ObsObject>();
             var outputFiles = new HashMap<String, URI>();
 
