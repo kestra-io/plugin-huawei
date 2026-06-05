@@ -133,7 +133,7 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
         var rErrorOnEmpty = runContext.render(errorOnEmpty).as(Boolean.class).orElse(false);
         var rErrorOnFailure = runContext.render(errorOnFailure).as(Boolean.class).orElse(true);
 
-        runContext.logger().debug("Listing objects to delete in s3://{} prefix={}", rBucket, rPrefix);
+        runContext.logger().debug("Listing objects to delete in obs://{} prefix={}", rBucket, rPrefix);
 
         try (var obs = client(runContext)) {
             // Stream the listing and delete page-by-page so we never hold more than BATCH_SIZE keys in
@@ -173,7 +173,7 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
 
             if (stats[3] > 0 && rErrorOnFailure) {
                 throw new IllegalStateException(
-                    "Failed to delete " + stats[3] + " of " + stats[0] + " matched object(s) in s3://" +
+                    "Failed to delete " + stats[3] + " of " + stats[0] + " matched object(s) in obs://" +
                         rBucket + " (deleted=" + stats[1] + "); set errorOnFailure=false to tolerate " +
                         "partial failures and read the `errors` output instead"
                 );
@@ -205,7 +205,7 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
         if (errors != null && !errors.isEmpty()) {
             stats[3] += errors.size();
             errors.forEach(e -> runContext.logger().warn(
-                "Failed to delete s3://{}/{}: {} — {}",
+                "Failed to delete obs://{}/{}: {} — {}",
                 bucket, e.getObjectKey(), e.getErrorCode(), e.getMessage()
             ));
         }

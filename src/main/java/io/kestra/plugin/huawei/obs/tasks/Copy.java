@@ -114,7 +114,7 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
         var rToKey = runContext.render(to.key).as(String.class).orElseThrow();
 
         runContext.logger().debug(
-            "Copying OBS object s3://{}/{} → s3://{}/{} (delete={})",
+            "Copying OBS object obs://{}/{} → obs://{}/{} (delete={})",
             rFromBucket, rFromKey, rToBucket, rToKey, rDelete
         );
 
@@ -138,7 +138,7 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
                     result.getEtag()
                 );
 
-                runContext.logger().debug("Deleting source object s3://{}/{}", rFromBucket, rFromKey);
+                runContext.logger().debug("Deleting source object obs://{}/{}", rFromBucket, rFromKey);
                 var delReq = new DeleteObjectRequest(rFromBucket, rFromKey);
                 if (rFromVersionId != null && !rFromVersionId.isBlank()) {
                     delReq.setVersionId(rFromVersionId);

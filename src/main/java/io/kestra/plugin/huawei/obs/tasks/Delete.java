@@ -75,7 +75,7 @@ public class Delete extends AbstractObsObject implements RunnableTask<Delete.Out
         var rKey = runContext.render(key).as(String.class).orElseThrow();
         var rVersionId = runContext.render(versionId).as(String.class).orElse(null);
 
-        runContext.logger().debug("Deleting OBS object s3://{}/{}", rBucket, rKey);
+        runContext.logger().debug("Deleting OBS object obs://{}/{}", rBucket, rKey);
 
         try (var obs = client(runContext)) {
             var req = new DeleteObjectRequest(rBucket, rKey);

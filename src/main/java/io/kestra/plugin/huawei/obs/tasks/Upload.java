@@ -128,7 +128,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
         var fileUri = URI.create(rFrom);
         var fileSize = runContext.storage().getAttributes(fileUri).getSize();
 
-        runContext.logger().debug("Uploading to OBS s3://{}/{} ({} bytes)", rBucket, rKey, fileSize);
+        runContext.logger().debug("Uploading to OBS obs://{}/{} ({} bytes)", rBucket, rKey, fileSize);
 
         try (var obs = client(runContext)) {
             var meta = new ObjectMetadata();

@@ -126,7 +126,7 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
         var rRegexp = runContext.render(regexp).as(String.class).orElse(null);
         var rAction = runContext.render(action).as(Action.class).orElse(Action.NONE);
 
-        runContext.logger().debug("Listing and downloading objects from s3://{} prefix={}", rBucket, rPrefix);
+        runContext.logger().debug("Listing and downloading objects from obs://{} prefix={}", rBucket, rPrefix);
 
         // Resolve MOVE destination up front so we validate config before streaming and keep the lambda lean.
         final String rDestBucket;
@@ -161,11 +161,11 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
                 outputFiles.put(obj.getKey(), result.uri());
 
                 if (rAction == Action.DELETE) {
-                    runContext.logger().debug("Deleting s3://{}/{}", rBucket, obj.getKey());
+                    runContext.logger().debug("Deleting obs://{}/{}", rBucket, obj.getKey());
                     obs.deleteObject(new DeleteObjectRequest(rBucket, obj.getKey()));
                 } else if (rAction == Action.MOVE) {
                     var destKey = rKeyPrefix + obj.getKey();
-                    runContext.logger().debug("Moving s3://{}/{} → s3://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
+                    runContext.logger().debug("Moving obs://{}/{} → obs://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
                     // Copy is verified before the source is deleted, so a failed copy never loses data.
                     ObsService.move(obs, rBucket, obj.getKey(), rDestBucket, destKey, obj.getEtag(), obj.getSize());
                 }

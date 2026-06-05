@@ -165,7 +165,7 @@ public class Trigger extends AbstractObsTrigger
         var rRegexp = runContext.render(regexp).as(String.class).orElse(null);
         var rAction = runContext.render(action).as(Action.class).orElse(Action.DELETE);
 
-        runContext.logger().debug("Polling OBS bucket s3://{} prefix={}", rBucket, rPrefix);
+        runContext.logger().debug("Polling OBS bucket obs://{} prefix={}", rBucket, rPrefix);
 
         // Resolve MOVE destination up front so we validate config before streaming and keep the lambda lean.
         final String rDestBucket;
@@ -200,11 +200,11 @@ public class Trigger extends AbstractObsTrigger
                 outputFiles.put(obj.getKey(), result.uri());
 
                 if (rAction == Action.DELETE) {
-                    runContext.logger().debug("Deleting s3://{}/{}", rBucket, obj.getKey());
+                    runContext.logger().debug("Deleting obs://{}/{}", rBucket, obj.getKey());
                     obs.deleteObject(new DeleteObjectRequest(rBucket, obj.getKey()));
                 } else if (rAction == Action.MOVE) {
                     var destKey = rKeyPrefix + obj.getKey();
-                    runContext.logger().debug("Moving s3://{}/{} → s3://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
+                    runContext.logger().debug("Moving obs://{}/{} → obs://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
                     // Copy is verified before the source is deleted, so a failed copy never loses data.
                     ObsService.move(obs, rBucket, obj.getKey(), rDestBucket, destKey, obj.getEtag(), obj.getSize());
                 }
@@ -214,7 +214,7 @@ public class Trigger extends AbstractObsTrigger
                 return Optional.empty();
             }
 
-            runContext.logger().debug("Found {} new objects in s3://{}", enriched.size(), rBucket);
+            runContext.logger().debug("Found {} new objects in obs://{}", enriched.size(), rBucket);
 
             var output = Downloads.Output.builder()
                 .objects(List.copyOf(enriched))

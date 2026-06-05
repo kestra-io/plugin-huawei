@@ -117,7 +117,7 @@ public final class ObsService {
             req.setVersionId(versionId);
         }
 
-        runContext.logger().debug("Downloading OBS object s3://{}/{}", bucket, key);
+        runContext.logger().debug("Downloading OBS object obs://{}/{}", bucket, key);
 
         var sdkObj = obs.getObject(req);
         var sdkMeta = sdkObj.getMetadata();
@@ -198,7 +198,7 @@ public final class ObsService {
                 return;
             }
             throw new IllegalStateException(
-                "Copy verification failed: ETag mismatch at destination s3://" + destBucket + "/" + destKey +
+                "Copy verification failed: ETag mismatch at destination obs://" + destBucket + "/" + destKey +
                 " (source=" + src + ", copy=" + dst + "); source left intact to avoid data loss"
             );
         }
@@ -209,20 +209,20 @@ public final class ObsService {
             meta = obs.getObjectMetadata(destBucket, destKey);
         } catch (ObsException e) {
             throw new IllegalStateException(
-                "Copy verification failed: destination s3://" + destBucket + "/" + destKey +
+                "Copy verification failed: destination obs://" + destBucket + "/" + destKey +
                 " could not be read after copy; source left intact to avoid data loss", e
             );
         }
         if (meta == null) {
             throw new IllegalStateException(
-                "Copy verification failed: destination s3://" + destBucket + "/" + destKey +
+                "Copy verification failed: destination obs://" + destBucket + "/" + destKey +
                 " not found after copy; source left intact to avoid data loss"
             );
         }
         if (sourceSize != null && meta.getContentLength() != null
             && !sourceSize.equals(meta.getContentLength())) {
             throw new IllegalStateException(
-                "Copy verification failed: size mismatch at destination s3://" + destBucket + "/" + destKey +
+                "Copy verification failed: size mismatch at destination obs://" + destBucket + "/" + destKey +
                 " (source=" + sourceSize + ", copy=" + meta.getContentLength() +
                 "); source left intact to avoid data loss"
             );
