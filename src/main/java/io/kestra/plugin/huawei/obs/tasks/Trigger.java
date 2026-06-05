@@ -131,9 +131,6 @@ public class Trigger extends AbstractTrigger
     private Property<String> region;
 
     @PluginProperty(group = "advanced")
-    private Property<String> iamEndpointOverride;
-
-    @PluginProperty(group = "advanced")
     private Property<String> endpointOverride;
 
     @PluginProperty(group = "advanced")

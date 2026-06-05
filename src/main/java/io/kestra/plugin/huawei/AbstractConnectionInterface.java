@@ -28,8 +28,7 @@ public interface AbstractConnectionInterface {
     @Schema(
         title = "Pre-obtained Huawei Cloud IAM token used as bearer credential for downstream API calls.",
         description = "When set, downstream Huawei tasks send this value in the `X-Auth-Token` header instead of " +
-            "signing requests with AK/SK. Typically populated from the output of a previous `GetToken` task " +
-            "(`{{ outputs.get_token.token.tokenValue }}`). **Sensitive.**"
+            "signing requests with AK/SK. **Sensitive.**"
     )
     @PluginProperty(group = "connection", secret = true)
     Property<String> getSecurityToken();
@@ -52,20 +51,10 @@ public interface AbstractConnectionInterface {
 
     @Schema(
         title = "Huawei Cloud region.",
-        description = "Region identifier such as `eu-west-101`, `ap-southeast-1`, or `cn-north-4`. Used to build " +
-            "the default IAM endpoint when `iamEndpointOverride` is not set."
+        description = "Region identifier such as `eu-west-101`, `ap-southeast-1`, or `cn-north-4`."
     )
     @PluginProperty(group = "connection")
     Property<String> getRegion();
-
-    @Schema(
-        title = "Override for the IAM endpoint URL.",
-        description = "Full base URL to use instead of the region-derived default " +
-            "(`https://iam.<region>.myhuaweicloud.com`). Useful for sovereign clouds such as `myhuaweicloud.eu` " +
-            "or for routing through a private endpoint."
-    )
-    @PluginProperty(group = "advanced")
-    Property<String> getIamEndpointOverride();
 
     default AbstractConnection.HuaweiClientConfig huaweiClientConfig(final RunContext runContext) throws IllegalVariableEvaluationException {
         return new AbstractConnection.HuaweiClientConfig(
@@ -74,8 +63,7 @@ public interface AbstractConnectionInterface {
             runContext.render(this.getSecurityToken()).as(String.class).orElse(null),
             runContext.render(this.getProjectId()).as(String.class).orElse(null),
             runContext.render(this.getDomainId()).as(String.class).orElse(null),
-            runContext.render(this.getRegion()).as(String.class).orElse(null),
-            runContext.render(this.getIamEndpointOverride()).as(String.class).orElse(null)
+            runContext.render(this.getRegion()).as(String.class).orElse(null)
         );
     }
 }

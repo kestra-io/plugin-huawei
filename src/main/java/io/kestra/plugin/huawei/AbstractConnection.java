@@ -24,11 +24,9 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
     protected Property<String> domainId;
 
     protected Property<String> region;
-    protected Property<String> iamEndpointOverride;
 
     /**
      * Snapshot of all connection-level Huawei properties after templating has been rendered.
-     * Passed to {@link ConnectionUtils} so credential and endpoint resolution stay free of RunContext.
      */
     public record HuaweiClientConfig(
         @Nullable String accessKeyId,
@@ -36,8 +34,7 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
         @Nullable String securityToken,
         @Nullable String projectId,
         @Nullable String domainId,
-        @Nullable String region,
-        @Nullable String iamEndpointOverride
+        @Nullable String region
     ) {
     }
 }

@@ -14,8 +14,7 @@ Teams using Huawei Cloud need first-class Kestra integrations for storage, authe
 
 Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
-- `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
-- `io.kestra.plugin.huawei.auth` — IAM authentication tasks (`GetToken`)
+- `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`)
 - `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
 - `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
@@ -27,7 +26,6 @@ Infrastructure dependencies (Docker Compose services):
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.huawei.auth.GetToken` — Obtains a short-lived Huawei Cloud IAM token via Keystone v3
 - `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
 - `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
 - `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
@@ -72,10 +70,6 @@ plugin-huawei/
 ├── src/main/java/io/kestra/plugin/huawei/
 │   ├── AbstractConnection.java
 │   ├── AbstractConnectionInterface.java
-│   ├── ConnectionUtils.java
-│   ├── auth/
-│   │   ├── GetToken.java
-│   │   └── package-info.java
 │   └── obs/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
@@ -101,10 +95,6 @@ plugin-huawei/
 │           ├── Upload.java
 │           └── package-info.java
 ├── src/test/java/io/kestra/plugin/huawei/
-│   ├── ConnectionUtilsTest.java
-│   ├── auth/
-│   │   ├── GetTokenFlowTest.java
-│   │   └── GetTokenTest.java
 │   └── obs/
 │       ├── AbstractMinioTest.java
 │       ├── CopyTest.java
