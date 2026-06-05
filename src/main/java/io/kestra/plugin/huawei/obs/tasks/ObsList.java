@@ -21,6 +21,8 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.util.List;
+
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -44,7 +46,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: list_objects
-                    type: io.kestra.plugin.huawei.obs.tasks.List
+                    type: io.kestra.plugin.huawei.obs.tasks.ObsList
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -58,7 +60,7 @@ import lombok.experimental.SuperBuilder;
         @Metric(name = "size", type = Counter.TYPE)
     }
 )
-public class List extends AbstractObs implements RunnableTask<List.Output>, ListInterface {
+public class ObsList extends AbstractObs implements RunnableTask<ObsList.Output>, ListInterface {
 
     @Schema(title = "OBS bucket name to list objects from.")
     @NotNull
@@ -105,6 +107,6 @@ public class List extends AbstractObs implements RunnableTask<List.Output>, List
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(title = "List of objects matching the specified filters.")
-        private final java.util.List<ObsObject> objects;
+        private final List<ObsObject> objects;
     }
 }

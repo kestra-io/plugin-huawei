@@ -307,7 +307,7 @@ public final class ObsService {
      * and applies an optional client-side regexp filter on the full key.
      *
      * <p><strong>Loads every matching object into memory.</strong> Use only when the caller needs the
-     * full list (e.g. the {@code List} task, whose output is this list). For process-and-discard work
+     * full list (e.g. the {@code ObsList} task, whose output is this list). For process-and-discard work
      * prefer the streaming {@link #list(ObsClient, String, String, String, String, Integer, String, ObsObjectConsumer)}
      * overload, which holds nothing.
      *

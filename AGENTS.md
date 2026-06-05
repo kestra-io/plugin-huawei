@@ -16,7 +16,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
 - `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`)
 - `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
-- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
+- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `ObsList`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
 
 Infrastructure dependencies (Docker Compose services):
@@ -28,7 +28,7 @@ Infrastructure dependencies (Docker Compose services):
 
 - `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
 - `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
-- `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
+- `io.kestra.plugin.huawei.obs.tasks.ObsList` — Lists OBS objects with prefix/regexp filtering, full pagination
 - `io.kestra.plugin.huawei.obs.tasks.Copy` — Server-side copy of an OBS object within or between buckets; `delete=true` for move semantics
 - `io.kestra.plugin.huawei.obs.tasks.Delete` — Deletes a single OBS object by bucket/key (and optional versionId)
 - `io.kestra.plugin.huawei.obs.tasks.DeleteList` — Batch-deletes all objects matching a prefix/regexp filter in chunks of 1000
@@ -90,7 +90,7 @@ plugin-huawei/
 │           ├── DeleteList.java
 │           ├── Download.java
 │           ├── Downloads.java
-│           ├── List.java
+│           ├── ObsList.java
 │           ├── Trigger.java
 │           ├── Upload.java
 │           └── package-info.java
@@ -104,7 +104,7 @@ plugin-huawei/
 │       ├── DeleteTest.java
 │       ├── DownloadTest.java
 │       ├── DownloadsTest.java
-│       ├── ListTest.java
+│       ├── ObsListTest.java
 │       ├── ObsUtilsTest.java
 │       ├── TriggerTest.java
 │       └── UploadTest.java

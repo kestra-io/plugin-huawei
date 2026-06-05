@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 /**
  * Shared listing configuration for OBS list operations.
  *
- * <p>Implemented by every OBS listing task (List, DeleteList, Downloads, Trigger) so they share a single
+ * <p>Implemented by every OBS listing task (ObsList, DeleteList, Downloads, Trigger) so they share a single
  * property schema and reuse {@link ObsService#list} as-is.
  */
 public interface ListInterface {
