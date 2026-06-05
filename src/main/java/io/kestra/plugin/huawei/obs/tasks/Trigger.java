@@ -105,7 +105,7 @@ import java.util.Optional;
     }
 )
 public class Trigger extends AbstractObsTrigger
-    implements PollingTriggerInterface, TriggerOutput<Downloads.Output>,
+    implements PollingTriggerInterface, TriggerOutput<Trigger.Output>,
     ListInterface, ActionInterface {
 
     @Schema(title = "OBS bucket to watch.")
@@ -216,7 +216,7 @@ public class Trigger extends AbstractObsTrigger
 
             runContext.logger().debug("Found {} new objects in obs://{}", enriched.size(), rBucket);
 
-            var output = Downloads.Output.builder()
+            var output = Output.builder()
                 .objects(List.copyOf(enriched))
                 .outputFiles(Map.copyOf(outputFiles))
                 .build();
@@ -224,5 +224,23 @@ public class Trigger extends AbstractObsTrigger
             var execution = TriggerService.generateExecution(this, conditionContext, triggerContext, output);
             return Optional.of(execution);
         }
+    }
+
+    @Builder
+    @Getter
+    public static class Output implements io.kestra.core.models.tasks.Output {
+
+        @Schema(
+            title = "List of downloaded objects with internal storage URIs.",
+            description = "Each entry includes the original OBS metadata plus the `uri` field pointing to " +
+                "the downloaded file in Kestra internal storage."
+        )
+        private final List<ObsObject> objects;
+
+        @Schema(
+            title = "Map of object key to Kestra internal storage URI.",
+            description = "Convenient for downstream tasks that need to look up a file by its original OBS key."
+        )
+        private final Map<String, URI> outputFiles;
     }
 }
