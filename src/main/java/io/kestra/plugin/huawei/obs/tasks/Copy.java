@@ -1,7 +1,10 @@
 package io.kestra.plugin.huawei.obs.tasks;
 
+import com.obs.services.ObsClient;
+import com.obs.services.exception.ObsException;
 import com.obs.services.model.CopyObjectRequest;
 import com.obs.services.model.DeleteObjectRequest;
+import com.obs.services.model.ObjectMetadata;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -9,6 +12,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.obs.AbstractObs;
+import io.kestra.plugin.huawei.obs.ObsService;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -120,9 +124,20 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
                 req.setVersionId(rFromVersionId);
             }
 
+            // Capture the source metadata before the copy so we can verify the copy landed before
+            // deleting the source (move semantics) — a silently-incomplete copy must never lose data.
+            var sourceMeta = rDelete ? sourceMetadata(obs, rFromBucket, rFromKey, rFromVersionId) : null;
+
             var result = obs.copyObject(req);
 
             if (rDelete) {
+                ObsService.verifyServerSideCopy(
+                    obs, rToBucket, rToKey,
+                    sourceMeta != null ? sourceMeta.getEtag() : null,
+                    sourceMeta != null ? sourceMeta.getContentLength() : null,
+                    result.getEtag()
+                );
+
                 runContext.logger().debug("Deleting source object s3://{}/{}", rFromBucket, rFromKey);
                 var delReq = new DeleteObjectRequest(rFromBucket, rFromKey);
                 if (rFromVersionId != null && !rFromVersionId.isBlank()) {
@@ -137,6 +152,21 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
                 .eTag(result.getEtag())
                 .versionId(result.getVersionId())
                 .build();
+        }
+    }
+
+    /**
+     * Reads the source object's metadata (version-aware) so a move can verify the copy before deleting
+     * the source. Returns {@code null} if the source cannot be read, in which case verification falls
+     * back to a destination existence check.
+     */
+    private static ObjectMetadata sourceMetadata(ObsClient obs, String bucket, String key, String versionId) {
+        try {
+            return versionId != null && !versionId.isBlank()
+                ? obs.getObjectMetadata(bucket, key, versionId)
+                : obs.getObjectMetadata(bucket, key);
+        } catch (ObsException e) {
+            return null;
         }
     }
 

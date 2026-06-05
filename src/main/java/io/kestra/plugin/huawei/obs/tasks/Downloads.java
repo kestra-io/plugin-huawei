@@ -1,6 +1,5 @@
 package io.kestra.plugin.huawei.obs.tasks;
 
-import com.obs.services.model.CopyObjectRequest;
 import com.obs.services.model.DeleteObjectRequest;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -167,8 +166,8 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
                 } else if (rAction == Action.MOVE) {
                     var destKey = rKeyPrefix + obj.getKey();
                     runContext.logger().debug("Moving s3://{}/{} → s3://{}/{}", rBucket, obj.getKey(), rDestBucket, destKey);
-                    obs.copyObject(new CopyObjectRequest(rBucket, obj.getKey(), rDestBucket, destKey));
-                    obs.deleteObject(new DeleteObjectRequest(rBucket, obj.getKey()));
+                    // Copy is verified before the source is deleted, so a failed copy never loses data.
+                    ObsService.move(obs, rBucket, obj.getKey(), rDestBucket, destKey, obj.getEtag(), obj.getSize());
                 }
             });
 

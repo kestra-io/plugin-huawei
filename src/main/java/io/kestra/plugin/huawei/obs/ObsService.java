@@ -2,8 +2,12 @@ package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.ObsClient;
 import com.obs.services.ObsConfiguration;
+import com.obs.services.exception.ObsException;
+import com.obs.services.model.CopyObjectRequest;
+import com.obs.services.model.DeleteObjectRequest;
 import com.obs.services.model.GetObjectRequest;
 import com.obs.services.model.ListObjectsRequest;
+import com.obs.services.model.ObjectMetadata;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
 import io.kestra.plugin.huawei.obs.models.ObsObject;
@@ -137,6 +141,104 @@ public final class ObsService {
             sdkMeta.getContentType(),
             userMetadata
         );
+    }
+
+    /**
+     * Server-side moves an object: copies it to the destination, verifies the copy fully landed, and
+     * only then deletes the source. If verification fails the source is left intact and an exception is
+     * thrown, so a silently-incomplete copy (partial write, network glitch) can never lose data.
+     *
+     * @param obs        open {@link ObsClient} (caller owns lifecycle)
+     * @param srcBucket  source bucket
+     * @param srcKey     source key
+     * @param destBucket destination bucket
+     * @param destKey    destination key
+     * @param sourceEtag source ETag (e.g. from the listing); may be {@code null}
+     * @param sourceSize source size in bytes (e.g. from the listing); may be {@code null}
+     */
+    public static void move(
+        ObsClient obs,
+        String srcBucket,
+        String srcKey,
+        String destBucket,
+        String destKey,
+        String sourceEtag,
+        Long sourceSize
+    ) {
+        var copyResult = obs.copyObject(new CopyObjectRequest(srcBucket, srcKey, destBucket, destKey));
+        verifyServerSideCopy(obs, destBucket, destKey, sourceEtag, sourceSize, copyResult.getEtag());
+        obs.deleteObject(new DeleteObjectRequest(srcBucket, srcKey));
+    }
+
+    /**
+     * Confirms a server-side copy fully landed at the destination, throwing {@link IllegalStateException}
+     * (so the caller can safely abort before deleting any source) when it cannot be confirmed.
+     *
+     * <p>Verification first compares the copy's ETag against {@code sourceEtag}: simple (non-multipart)
+     * ETags are content MD5s and must match exactly. Multipart ETags (suffixed {@code -<n>}) legitimately
+     * change across a server-side copy, so when either side is multipart — or an ETag is unavailable — it
+     * falls back to confirming the destination exists with a content length matching {@code sourceSize}.
+     *
+     * @param copyEtag the ETag returned by the copy operation (destination ETag); may be {@code null}
+     */
+    public static void verifyServerSideCopy(
+        ObsClient obs,
+        String destBucket,
+        String destKey,
+        String sourceEtag,
+        Long sourceSize,
+        String copyEtag
+    ) {
+        var src = normalizeEtag(sourceEtag);
+        var dst = normalizeEtag(copyEtag);
+
+        // Simple (non-multipart) ETags are content MD5s and must match exactly.
+        if (src != null && dst != null && !src.contains("-") && !dst.contains("-")) {
+            if (src.equals(dst)) {
+                return;
+            }
+            throw new IllegalStateException(
+                "Copy verification failed: ETag mismatch at destination s3://" + destBucket + "/" + destKey +
+                " (source=" + src + ", copy=" + dst + "); source left intact to avoid data loss"
+            );
+        }
+
+        // Multipart or unavailable ETag: confirm the destination exists with the expected size instead.
+        ObjectMetadata meta;
+        try {
+            meta = obs.getObjectMetadata(destBucket, destKey);
+        } catch (ObsException e) {
+            throw new IllegalStateException(
+                "Copy verification failed: destination s3://" + destBucket + "/" + destKey +
+                " could not be read after copy; source left intact to avoid data loss", e
+            );
+        }
+        if (meta == null) {
+            throw new IllegalStateException(
+                "Copy verification failed: destination s3://" + destBucket + "/" + destKey +
+                " not found after copy; source left intact to avoid data loss"
+            );
+        }
+        if (sourceSize != null && meta.getContentLength() != null
+            && !sourceSize.equals(meta.getContentLength())) {
+            throw new IllegalStateException(
+                "Copy verification failed: size mismatch at destination s3://" + destBucket + "/" + destKey +
+                " (source=" + sourceSize + ", copy=" + meta.getContentLength() +
+                "); source left intact to avoid data loss"
+            );
+        }
+    }
+
+    /** Strips surrounding quotes and whitespace from an ETag; returns {@code null} for blank/absent values. */
+    private static String normalizeEtag(String etag) {
+        if (etag == null) {
+            return null;
+        }
+        var trimmed = etag.trim();
+        if (trimmed.length() >= 2 && trimmed.startsWith("\"") && trimmed.endsWith("\"")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+        }
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     /**
