@@ -21,8 +21,8 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
 Infrastructure dependencies (Docker Compose services):
 
-- `app` — Kestra application (for manual plugin testing)
-- `minio` — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin)
+- `app` (`docker-compose.yml`) — Kestra application for manual plugin testing
+- `minio` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
 
 ### Key Plugin Classes
 
@@ -52,7 +52,7 @@ Infrastructure dependencies (Docker Compose services):
 Integration tests require MinIO. Start it with:
 
 ```bash
-docker compose up -d minio
+docker compose -f docker-compose-ci.yml up -d
 ```
 
 Then run tests with:
@@ -61,7 +61,7 @@ Then run tests with:
 OBS_MINIO_TESTS=true ./gradlew test
 ```
 
-Tests are guarded by `@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")` so they are skipped in CI unless the variable is set.
+Tests are guarded by `@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")` so they are skipped in CI unless the variable is set. In CI, `.github/setup-unit.sh` brings up the `docker-compose-ci.yml` services automatically. To run against a live Huawei Cloud OBS endpoint instead of MinIO, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`).
 
 ### Project Structure
 

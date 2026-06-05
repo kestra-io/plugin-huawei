@@ -22,8 +22,9 @@ import java.util.UUID;
 /**
  * Base class for OBS integration tests.
  *
- * <p>By default targets a local MinIO instance. Override via environment variables for live QA
- * against real Huawei Cloud OBS:
+ * <p>By default targets a local MinIO instance (started in CI via {@code docker-compose-ci.yml},
+ * or locally with {@code docker compose -f docker-compose-ci.yml up -d}). Override via environment
+ * variables for live QA against real Huawei Cloud OBS:
  *
  * <pre>
  *   OBS_TEST_ENDPOINT=https://obs.eu-west-101.myhuaweicloud.eu
@@ -43,10 +44,6 @@ import java.util.UUID;
  * test run (prefix isolation in each test provides logical separation).
  *
  * <p>The test gate ({@code OBS_MINIO_TESTS=true}) is unchanged and must always be set.
- * Start MinIO for local runs:
- * <pre>
- *   docker compose up -d minio
- * </pre>
  */
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
