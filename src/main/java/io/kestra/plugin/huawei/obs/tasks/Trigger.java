@@ -144,7 +144,13 @@ public class Trigger extends AbstractObsTrigger
     @PluginProperty(group = "processing")
     private MoveTo moveTo;
 
+    @Schema(
+        title = "Polling interval.",
+        description = "How often the trigger polls the bucket for new objects, as an ISO-8601 duration " +
+            "(e.g. `PT60S`, `PT5M`). Defaults to 60 seconds."
+    )
     @Builder.Default
+    @PluginProperty(group = "advanced")
     private Duration interval = Duration.ofSeconds(60);
 
     @Override
