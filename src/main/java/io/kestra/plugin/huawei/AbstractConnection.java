@@ -27,6 +27,10 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
 
     /**
      * Snapshot of all connection-level Huawei properties after templating has been rendered.
+     *
+     * <p>This record carries <em>rendered</em> credentials in plaintext (AK/SK/security token). Its
+     * {@link #toString()} is overridden to redact those fields so the config can never leak secrets if
+     * it is accidentally logged or surfaced in an exception message.
      */
     public record HuaweiClientConfig(
         @Nullable String accessKeyId,
@@ -36,5 +40,20 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
         @Nullable String domainId,
         @Nullable String region
     ) {
+        @Override
+        public String toString() {
+            return "HuaweiClientConfig[" +
+                "accessKeyId=" + redact(accessKeyId) +
+                ", secretAccessKey=" + redact(secretAccessKey) +
+                ", securityToken=" + redact(securityToken) +
+                ", projectId=" + projectId +
+                ", domainId=" + domainId +
+                ", region=" + region +
+                ']';
+        }
+
+        private static String redact(@Nullable String value) {
+            return value == null ? "null" : "****";
+        }
     }
 }
