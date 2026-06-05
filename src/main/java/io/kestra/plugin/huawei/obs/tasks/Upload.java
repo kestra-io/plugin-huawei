@@ -94,12 +94,13 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
         title = "User-defined metadata to attach to the object.",
         description = """
             Key/value pairs stored as object metadata. Keys must be bare names without any prefix —
-            the OBS SDK prepends `x-obs-meta-` automatically. Values must be ASCII strings.
+            the OBS SDK prepends `x-obs-meta-` automatically. Values are stored as ASCII strings; any
+            non-string value (number, boolean) is converted via its string form.
             Example: `{ "author": "kestra", "env": "prod" }`.
             """
     )
     @PluginProperty(group = "advanced")
-    private Property<Map<String, String>> metadata;
+    private Property<Map<String, Object>> metadata;
 
     @Schema(
         title = "OBS storage class for the uploaded object.",
@@ -121,7 +122,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
         var rKey = runContext.render(key).as(String.class).orElseThrow();
         var rFrom = runContext.render(from).as(String.class).orElseThrow();
         var rContentType = runContext.render(contentType).as(String.class).orElse(null);
-        var rMetadata = runContext.render(metadata).asMap(String.class, String.class);
+        var rMetadata = runContext.render(metadata).asMap(String.class, Object.class);
         var rStorageClass = runContext.render(storageClass).as(StorageClassEnum.class).orElse(null);
 
         var fileUri = URI.create(rFrom);
@@ -136,7 +137,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
             if (rContentType != null) {
                 meta.setContentType(rContentType);
             }
-            rMetadata.forEach(meta::addUserMetadata);
+            rMetadata.forEach((k, v) -> meta.addUserMetadata(k, String.valueOf(v)));
             if (rStorageClass != null) {
                 meta.setObjectStorageClass(rStorageClass);
             }
