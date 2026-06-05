@@ -38,10 +38,9 @@ public interface ActionInterface {
         MOVE
     }
 
+    @lombok.Value
     @lombok.Builder
-    @lombok.Getter
-    @lombok.NoArgsConstructor
-    @lombok.AllArgsConstructor
+    @lombok.extern.jackson.Jacksonized
     class MoveTo {
 
         @Schema(title = "Destination bucket. Defaults to the source bucket when not set.")
