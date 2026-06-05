@@ -142,6 +142,10 @@ public class Trigger extends AbstractTrigger
     @PluginProperty(group = "advanced")
     private Property<AuthType> authType;
 
+    @Builder.Default
+    @PluginProperty(group = "advanced")
+    private Property<String> endpointSuffix = Property.ofValue("myhuaweicloud.com");
+
     @Schema(title = "OBS bucket to watch.")
     @NotNull
     @PluginProperty(group = "main")
@@ -189,6 +193,7 @@ public class Trigger extends AbstractTrigger
         var rEndpointOverride = runContext.render(endpointOverride).as(String.class).orElse(null);
         var rPathStyle = runContext.render(pathStyleAccess).as(Boolean.class).orElse(false);
         var rAuthType = runContext.render(authType).as(AuthType.class).orElse(AuthType.OBS);
+        var rEndpointSuffix = runContext.render(endpointSuffix).as(String.class).orElse("myhuaweicloud.com");
 
         var rBucket = runContext.render(bucket).as(String.class).orElseThrow();
         var rPrefix = runContext.render(prefix).as(String.class).orElse(null);
@@ -200,7 +205,7 @@ public class Trigger extends AbstractTrigger
 
         runContext.logger().debug("Polling OBS bucket s3://{} prefix={}", rBucket, rPrefix);
 
-        try (var obs = ObsService.buildClient(config, rEndpointOverride, rPathStyle, rAuthType)) {
+        try (var obs = ObsService.buildClient(config, rEndpointOverride, rPathStyle, rAuthType, rEndpointSuffix)) {
             var objects = ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp);
 
             if (objects.isEmpty()) {

@@ -42,7 +42,8 @@ public final class ObsService {
         AbstractConnection.HuaweiClientConfig config,
         String rEndpointOverride,
         Boolean rPathStyle,
-        AuthType rAuthType
+        AuthType rAuthType,
+        String rEndpointSuffix
     ) {
         if (config.accessKeyId() == null || config.accessKeyId().isBlank()) {
             throw new IllegalArgumentException(
@@ -57,7 +58,7 @@ public final class ObsService {
             );
         }
 
-        var endpoint = ObsUtils.obsEndpoint(rEndpointOverride, config.region());
+        var endpoint = ObsUtils.obsEndpoint(rEndpointOverride, config.region(), rEndpointSuffix);
         var obsConfig = new ObsConfiguration();
         obsConfig.setEndPoint(endpoint);
         obsConfig.setPathStyle(rPathStyle != null && rPathStyle);

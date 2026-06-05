@@ -5,6 +5,7 @@ import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
+import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -22,6 +23,9 @@ public abstract class AbstractObs extends AbstractConnection implements Abstract
     protected Property<Boolean> pathStyleAccess;
     protected Property<AuthType> authType;
 
+    @Builder.Default
+    protected Property<String> endpointSuffix = Property.ofValue("myhuaweicloud.com");
+
     /**
      * Builds a configured {@link ObsClient} from the rendered task properties.
      *
@@ -33,7 +37,8 @@ public abstract class AbstractObs extends AbstractConnection implements Abstract
             huaweiClientConfig(runContext),
             runContext.render(endpointOverride).as(String.class).orElse(null),
             runContext.render(pathStyleAccess).as(Boolean.class).orElse(false),
-            runContext.render(authType).as(AuthType.class).orElse(AuthType.OBS)
+            runContext.render(authType).as(AuthType.class).orElse(AuthType.OBS),
+            runContext.render(endpointSuffix).as(String.class).orElse("myhuaweicloud.com")
         );
     }
 }

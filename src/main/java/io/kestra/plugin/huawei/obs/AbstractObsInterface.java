@@ -40,4 +40,15 @@ public interface AbstractObsInterface {
     )
     @PluginProperty(group = "advanced")
     Property<AuthType> getAuthType();
+
+    @Schema(
+        title = "Domain suffix for the region-derived OBS endpoint.",
+        description = """
+            Suffix appended to build `https://obs.<region>.<endpointSuffix>` when no `endpointOverride`
+            is set. Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign
+            region (e.g. `eu-west-101`). Ignored when `endpointOverride` is set.
+            """
+    )
+    @PluginProperty(group = "advanced")
+    Property<String> getEndpointSuffix();
 }

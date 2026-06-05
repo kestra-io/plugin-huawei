@@ -6,9 +6,6 @@ package io.kestra.plugin.huawei.obs;
  */
 public final class ObsUtils {
 
-    /** Default OBS endpoint template; {@code %s} is the region identifier. */
-    public static final String DEFAULT_OBS_ENDPOINT_TEMPLATE = "https://obs.%s.myhuaweicloud.com";
-
     private ObsUtils() {
     }
 
@@ -17,17 +14,19 @@ public final class ObsUtils {
      *
      * <p>Resolution order:
      * <ol>
-     *   <li>Explicit {@code endpointOverride} — returned as-is (trailing slash stripped).</li>
-     *   <li>{@code region} — {@code https://obs.<region>.myhuaweicloud.com}.</li>
+     *   <li>Explicit {@code endpointOverride} — returned as-is (trailing slash stripped); {@code endpointSuffix} is ignored.</li>
+     *   <li>{@code region} — {@code https://obs.<region>.<suffix>}, where {@code suffix} defaults to
+     *       {@code myhuaweicloud.com} when blank or null.</li>
      *   <li>Neither set — throws {@link IllegalArgumentException}; OBS has no global fallback endpoint.</li>
      * </ol>
      */
-    public static String obsEndpoint(String endpointOverride, String region) {
+    public static String obsEndpoint(String endpointOverride, String region, String endpointSuffix) {
         if (isNotBlank(endpointOverride)) {
             return stripTrailingSlash(endpointOverride.trim());
         }
         if (isNotBlank(region)) {
-            return String.format(DEFAULT_OBS_ENDPOINT_TEMPLATE, region.trim());
+            var suffix = isNotBlank(endpointSuffix) ? endpointSuffix.trim() : "myhuaweicloud.com";
+            return "https://obs." + region.trim() + "." + suffix;
         }
         throw new IllegalArgumentException(
             "OBS requires either `endpointOverride` or `region` to be set. " +
