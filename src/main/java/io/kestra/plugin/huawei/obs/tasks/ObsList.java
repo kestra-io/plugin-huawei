@@ -21,6 +21,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @SuperBuilder
@@ -83,6 +84,20 @@ public class ObsList extends AbstractObs implements RunnableTask<ObsList.Output>
     @PluginProperty(group = "processing")
     private Property<String> regexp;
 
+    @Schema(
+        title = "Maximum total number of objects to return.",
+        description = """
+            Optional safety cap on the total number of objects this task accumulates in memory. Because the
+            output of this task *is* the full object list, a bucket holding millions of matching keys would
+            otherwise exhaust the JVM heap. When the match count exceeds this value the task fails fast —
+            before the full set is materialised — so the failure is a clear error rather than an
+            `OutOfMemoryError`. Leave unset for no cap. Unlike `maxKeys` (which only sizes each OBS page),
+            this bounds the total result set.
+            """
+    )
+    @PluginProperty(group = "reliability")
+    private Property<Integer> maxResults;
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rBucket = runContext.render(bucket).as(String.class).orElseThrow();
@@ -91,14 +106,27 @@ public class ObsList extends AbstractObs implements RunnableTask<ObsList.Output>
         var rMarker = runContext.render(marker).as(String.class).orElse(null);
         var rMaxKeys = runContext.render(maxKeys).as(Integer.class).orElse(1000);
         var rRegexp = runContext.render(regexp).as(String.class).orElse(null);
+        var rMaxResults = runContext.render(maxResults).as(Integer.class).orElse(null);
 
         runContext.logger().debug("Listing OBS bucket {} prefix={} regexp={}", rBucket, rPrefix, rRegexp);
 
         try (var obs = client(runContext)) {
-            var objects = ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp);
+            // Stream the listing into the output, failing fast if it grows past maxResults so a huge bucket
+            // surfaces a clear error instead of an OutOfMemoryError.
+            var objects = new ArrayList<ObsObject>();
+            ObsService.list(obs, rBucket, rPrefix, rDelimiter, rMarker, rMaxKeys, rRegexp, obj -> {
+                if (rMaxResults != null && objects.size() >= rMaxResults) {
+                    throw new IllegalStateException(
+                        "Listing in obs://" + rBucket + " matched more than maxResults=" + rMaxResults +
+                            " objects; narrow the prefix/regexp filter or raise maxResults. Aborted before " +
+                            "materialising the full result set to avoid memory exhaustion."
+                    );
+                }
+                objects.add(obj);
+            });
             runContext.logger().debug("Listed {} objects", objects.size());
             runContext.metric(Counter.of("size", objects.size()));
-            return Output.builder().objects(objects).build();
+            return Output.builder().objects(List.copyOf(objects)).build();
         }
     }
 

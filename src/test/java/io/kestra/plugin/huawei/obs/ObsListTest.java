@@ -11,6 +11,7 @@ import java.util.Collections;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
 class ObsListTest extends AbstractMinioTest {
@@ -75,6 +76,33 @@ class ObsListTest extends AbstractMinioTest {
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .maxKeys(Property.ofValue(2))
+            .build();
+
+        var output = task.run(runContext);
+        assertThat(output.getObjects().size(), equalTo(5));
+    }
+
+    @Test
+    void list_maxResultsExceeded_failsFast() {
+        // 5 objects match but maxResults=3 — the task must fail fast rather than materialise them all.
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = applyMinioConfig(ObsList.builder())
+            .bucket(Property.ofValue(testBucket))
+            .prefix(Property.ofValue(prefix))
+            .maxResults(Property.ofValue(3))
+            .build();
+
+        var thrown = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(thrown.getMessage(), containsString("maxResults=3"));
+    }
+
+    @Test
+    void list_maxResultsNotExceeded_returnsAll() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = applyMinioConfig(ObsList.builder())
+            .bucket(Property.ofValue(testBucket))
+            .prefix(Property.ofValue(prefix))
+            .maxResults(Property.ofValue(10))
             .build();
 
         var output = task.run(runContext);

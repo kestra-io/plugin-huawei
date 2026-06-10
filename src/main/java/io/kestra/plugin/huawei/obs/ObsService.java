@@ -16,9 +16,6 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -300,38 +297,6 @@ public final class ObsService {
                 break;
             }
         } while (true);
-    }
-
-    /**
-     * Lists OBS objects with optional prefix/delimiter/marker/maxKeys filtering, iterates all pages,
-     * and applies an optional client-side regexp filter on the full key.
-     *
-     * <p><strong>Loads every matching object into memory.</strong> Use only when the caller needs the
-     * full list (e.g. the {@code ObsList} task, whose output is this list). For process-and-discard work
-     * prefer the streaming {@link #list(ObsClient, String, String, String, String, Integer, String, ObsObjectConsumer)}
-     * overload, which holds nothing.
-     *
-     * @return all matching objects across all pages
-     */
-    public static List<ObsObject> list(
-        ObsClient obs,
-        String bucket,
-        String prefix,
-        String delimiter,
-        String marker,
-        Integer maxKeys,
-        String regexp
-    ) {
-        var result = new ArrayList<ObsObject>();
-        try {
-            list(obs, bucket, prefix, delimiter, marker, maxKeys, regexp, result::add);
-        } catch (RuntimeException e) {
-            throw e;
-        } catch (Exception e) {
-            // result::add declares no checked exceptions, so this is unreachable in practice.
-            throw new RuntimeException(e);
-        }
-        return Collections.unmodifiableList(result);
     }
 
     /**
