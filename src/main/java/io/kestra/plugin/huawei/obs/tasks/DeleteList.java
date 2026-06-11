@@ -32,7 +32,7 @@ import java.util.List;
 @Schema(
     title = "Delete all OBS objects matching a filter.",
     description = """
-        Lists objects matching the prefix/regexp filter (reusing the same logic as the `ObsList` task) and
+        Lists objects matching the prefix/regexp filter (reusing the same logic as the `List` task) and
         batch-deletes them in chunks of up to 1000 (the OBS multi-object delete limit). By default the
         task fails if OBS reports any per-object delete error (`errorOnFailure=true`). Set it to `false`
         for best-effort deletion: errors are then logged as warnings and the number of failures is
