@@ -54,35 +54,43 @@ wait_healthy() {
 }
 
 # DMS for Kafka — use the local Kafka container from docker-compose-ci.yml.
+# docker compose up is allowed to fail (bad image, no disk space, etc.) — we just skip.
 echo "Starting Kafka container for DMS Kafka integration tests..."
-docker compose -f docker-compose-ci.yml up -d kafka
-
-if wait_healthy kafka 36 5; then
-  echo "Kafka is healthy — enabling DMS Kafka integration tests."
-  {
-    echo "DMS_KAFKA_TESTS=true"
-    echo "DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092"
-  } >> "$GITHUB_ENV"
+if docker compose -f docker-compose-ci.yml up -d kafka 2>&1; then
+  if wait_healthy kafka 36 5; then
+    echo "Kafka is healthy — enabling DMS Kafka integration tests."
+    {
+      echo "DMS_KAFKA_TESTS=true"
+      echo "DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092"
+    } >> "$GITHUB_ENV"
+  else
+    echo "Kafka did not become healthy — DMS Kafka tests will be skipped."
+  fi
 else
-  echo "Kafka did not become healthy — DMS Kafka tests will be skipped."
+  echo "Kafka container failed to start — DMS Kafka tests will be skipped."
 fi
 
 # DMS for RocketMQ — use the local RocketMQ containers from docker-compose-ci.yml.
 echo "Starting RocketMQ containers for DMS RocketMQ integration tests..."
-docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv
-
-if wait_healthy rocketmq-namesrv 24 5; then
-  echo "RocketMQ namesrv is healthy — starting broker..."
-  docker compose -f docker-compose-ci.yml up -d rocketmq-broker
-  if wait_healthy rocketmq-broker 24 5; then
-    echo "RocketMQ broker is healthy — enabling DMS RocketMQ integration tests."
-    {
-      echo "DMS_ROCKETMQ_TESTS=true"
-      echo "DMS_ROCKETMQ_NAME_SERVER=localhost:9876"
-    } >> "$GITHUB_ENV"
+if docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv 2>&1; then
+  if wait_healthy rocketmq-namesrv 24 5; then
+    echo "RocketMQ namesrv is healthy — starting broker..."
+    if docker compose -f docker-compose-ci.yml up -d rocketmq-broker 2>&1; then
+      if wait_healthy rocketmq-broker 24 5; then
+        echo "RocketMQ broker is healthy — enabling DMS RocketMQ integration tests."
+        {
+          echo "DMS_ROCKETMQ_TESTS=true"
+          echo "DMS_ROCKETMQ_NAME_SERVER=localhost:9876"
+        } >> "$GITHUB_ENV"
+      else
+        echo "RocketMQ broker did not become healthy — DMS RocketMQ tests will be skipped."
+      fi
+    else
+      echo "RocketMQ broker container failed to start — DMS RocketMQ tests will be skipped."
+    fi
   else
-    echo "RocketMQ broker did not become healthy — DMS RocketMQ tests will be skipped."
+    echo "RocketMQ namesrv did not become healthy — DMS RocketMQ tests will be skipped."
   fi
 else
-  echo "RocketMQ namesrv did not become healthy — DMS RocketMQ tests will be skipped."
+  echo "RocketMQ namesrv container failed to start — DMS RocketMQ tests will be skipped."
 fi
