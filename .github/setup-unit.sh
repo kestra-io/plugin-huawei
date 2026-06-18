@@ -28,21 +28,61 @@ if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; th
   } >> "$GITHUB_ENV"
 else
   echo "No Huawei Cloud credentials — falling back to local MinIO for OBS integration tests."
-  docker compose -f docker-compose-ci.yml up -d
+  docker compose -f docker-compose-ci.yml up -d minio
   echo "OBS_MINIO_TESTS=true" >> "$GITHUB_ENV"
 fi
 
-# DMS for Kafka — always use the local Kafka container started above (no real Huawei DMS secrets needed).
-echo "Starting Kafka and RocketMQ containers for DMS integration tests..."
-docker compose -f docker-compose-ci.yml up -d kafka rocketmq-namesrv rocketmq-broker 2>/dev/null || true
+# Helper: wait for a Docker Compose service to reach the "healthy" state.
+# Usage: wait_healthy <service> <retries> <sleep_seconds>
+wait_healthy() {
+  local service="$1"
+  local retries="${2:-30}"
+  local delay="${3:-5}"
+  local i=0
+  while [ "$i" -lt "$retries" ]; do
+    local status
+    status=$(docker inspect --format='{{.State.Health.Status}}' \
+      "$(docker compose -f docker-compose-ci.yml ps -q "$service")" 2>/dev/null || true)
+    if [ "$status" = "healthy" ]; then
+      return 0
+    fi
+    i=$((i + 1))
+    echo "Waiting for $service to be healthy... ($i/$retries, current: ${status:-starting})"
+    sleep "$delay"
+  done
+  return 1
+}
 
-{
-  echo "DMS_KAFKA_TESTS=true"
-  echo "DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092"
-} >> "$GITHUB_ENV"
+# DMS for Kafka — use the local Kafka container from docker-compose-ci.yml.
+echo "Starting Kafka container for DMS Kafka integration tests..."
+docker compose -f docker-compose-ci.yml up -d kafka
 
-# DMS for RocketMQ — always use the local RocketMQ container.
-{
-  echo "DMS_ROCKETMQ_TESTS=true"
-  echo "DMS_ROCKETMQ_NAME_SERVER=localhost:9876"
-} >> "$GITHUB_ENV"
+if wait_healthy kafka 36 5; then
+  echo "Kafka is healthy — enabling DMS Kafka integration tests."
+  {
+    echo "DMS_KAFKA_TESTS=true"
+    echo "DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092"
+  } >> "$GITHUB_ENV"
+else
+  echo "Kafka did not become healthy — DMS Kafka tests will be skipped."
+fi
+
+# DMS for RocketMQ — use the local RocketMQ containers from docker-compose-ci.yml.
+echo "Starting RocketMQ containers for DMS RocketMQ integration tests..."
+docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv
+
+if wait_healthy rocketmq-namesrv 24 5; then
+  echo "RocketMQ namesrv is healthy — starting broker..."
+  docker compose -f docker-compose-ci.yml up -d rocketmq-broker
+  if wait_healthy rocketmq-broker 24 5; then
+    echo "RocketMQ broker is healthy — enabling DMS RocketMQ integration tests."
+    {
+      echo "DMS_ROCKETMQ_TESTS=true"
+      echo "DMS_ROCKETMQ_NAME_SERVER=localhost:9876"
+    } >> "$GITHUB_ENV"
+  else
+    echo "RocketMQ broker did not become healthy — DMS RocketMQ tests will be skipped."
+  fi
+else
+  echo "RocketMQ namesrv did not become healthy — DMS RocketMQ tests will be skipped."
+fi

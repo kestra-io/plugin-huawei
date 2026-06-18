@@ -52,6 +52,11 @@ services:
       - "10909:10909"
     environment:
       JAVA_OPT_EXT: "-Xms256m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 10911 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       rocketmq-namesrv:
         condition: service_healthy

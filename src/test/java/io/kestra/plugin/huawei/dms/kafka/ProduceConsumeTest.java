@@ -51,12 +51,13 @@ class ProduceConsumeTest extends AbstractDmsKafkaTest {
             .build()
             .run(runContext);
 
-        // Then consume
+        // Then consume — give enough time for group coordination + partition assignment.
         var consume = consumeBuilder()
             .topic(Property.ofValue(topic))
             .groupId(Property.ofValue(groupId))
             .maxRecords(Property.ofValue(3))
-            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .pollDuration(Property.ofValue(Duration.ofSeconds(2)))
             .build();
 
         var output = consume.run(runContext);
