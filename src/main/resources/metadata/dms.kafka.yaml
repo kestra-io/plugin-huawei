@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.dms.kafka
+name: "dms-kafka"
+title: "DMS for Kafka"
+description: "Produce, consume, trigger, and react to messages on Huawei Cloud DMS for Kafka"
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"

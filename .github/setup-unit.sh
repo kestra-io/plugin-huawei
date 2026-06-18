@@ -31,3 +31,18 @@ else
   docker compose -f docker-compose-ci.yml up -d
   echo "OBS_MINIO_TESTS=true" >> "$GITHUB_ENV"
 fi
+
+# DMS for Kafka — always use the local Kafka container started above (no real Huawei DMS secrets needed).
+echo "Starting Kafka and RocketMQ containers for DMS integration tests..."
+docker compose -f docker-compose-ci.yml up -d kafka rocketmq-namesrv rocketmq-broker 2>/dev/null || true
+
+{
+  echo "DMS_KAFKA_TESTS=true"
+  echo "DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092"
+} >> "$GITHUB_ENV"
+
+# DMS for RocketMQ — always use the local RocketMQ container.
+{
+  echo "DMS_ROCKETMQ_TESTS=true"
+  echo "DMS_ROCKETMQ_NAME_SERVER=localhost:9876"
+} >> "$GITHUB_ENV"

@@ -56,6 +56,22 @@ dependencies {
     implementation("com.huaweicloud:esdk-obs-java-bundle:3.25.5") {
         exclude group: "org.slf4j"
     }
+
+    // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
+    implementation("org.apache.kafka:kafka-clients:3.9.0") {
+        exclude group: "org.slf4j"
+    }
+
+    // DMS for RocketMQ — uses the Apache RocketMQ 4.x client (stable, widely supported).
+    // Exclude logging dependencies to defer to Kestra's binding.
+    implementation("org.apache.rocketmq:rocketmq-client:4.9.8") {
+        exclude group: "ch.qos.logback"
+        exclude group: "org.slf4j"
+    }
+    implementation("org.apache.rocketmq:rocketmq-acl:4.9.8") {
+        exclude group: "ch.qos.logback"
+        exclude group: "org.slf4j"
+    }
 }
 
 
