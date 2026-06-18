@@ -31,6 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class GetTokenTest {
 
     private static final String MOCK_TOKEN = "gAAAAABmocked-iam-token-value-12345";
+    private static final String TEMP_AK = "TEMPACCESSKEY12345";
+    private static final String TEMP_SK = "tempSecretKey9876543210";
+    private static final String SECURITY_TOKEN = "gAAAAABmocked-security-token-xyz";
     private static final String EXPIRES_AT = "2026-06-19T10:00:00.000000Z";
 
     private WireMockServer wireMock;
@@ -44,22 +47,20 @@ class GetTokenTest {
         wireMock.start();
         WireMock.configureFor("localhost", wireMock.port());
 
-        wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
+        wireMock.stubFor(post(urlPathEqualTo("/v3.0/OS-CREDENTIAL/securitytokens"))
             .willReturn(aResponse()
-                .withStatus(201)
+                .withStatus(200)
                 .withHeader("Content-Type", "application/json;charset=UTF-8")
-                .withHeader("X-Subject-Token", MOCK_TOKEN)
                 .withBody("""
                     {
-                      "token": {
-                        "expires_at": "%s",
-                        "issued_at": "2026-06-18T10:00:00.000000Z",
-                        "methods": ["hw_sdk_aksk"],
-                        "catalog": [],
-                        "roles": []
+                      "credential": {
+                        "access": "%s",
+                        "secret": "%s",
+                        "securitytoken": "%s",
+                        "expires_at": "%s"
                       }
                     }
-                    """.formatted(EXPIRES_AT))));
+                    """.formatted(TEMP_AK, TEMP_SK, SECURITY_TOKEN, EXPIRES_AT))));
     }
 
     @AfterAll
@@ -74,90 +75,63 @@ class GetTokenTest {
     }
 
     @Test
-    void run_projectScope_returnsToken() throws Exception {
+    void run_returnsTemporaryCredentials() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = GetToken.builder()
-            .accessKeyId(Property.ofValue("test-ak"))
-            .secretAccessKey(Property.ofValue("test-sk"))
             .region(Property.ofValue("eu-west-101"))
-            .projectId(Property.ofValue("test-project-id"))
-            .scope(Property.ofValue(GetToken.TokenScope.PROJECT))
+            .token(Property.ofValue(MOCK_TOKEN))
+            .durationSeconds(Property.ofValue(3600))
             .build();
 
         var output = task.run(runContext, wireMockUrl());
 
-        assertThat(output.getTokenValue(), equalTo(MOCK_TOKEN));
+        assertThat(output.getAccessKeyId(), equalTo(TEMP_AK));
+        assertThat(output.getSecretAccessKey(), equalTo(TEMP_SK));
+        assertThat(output.getSecurityToken(), equalTo(SECURITY_TOKEN));
         assertThat(output.getExpirationTime(), notNullValue());
-        assertThat(output.getExpirationTime().isAfter(Instant.now()), is(true));
         assertThat(output.getExpirationTime(), equalTo(OffsetDateTime.parse(EXPIRES_AT).toInstant()));
+        assertThat(output.getExpirationTime().isAfter(Instant.now()), is(true));
     }
 
     @Test
-    void run_domainScope_returnsToken() throws Exception {
+    void run_defaultDuration_usesNineHundredSeconds() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = GetToken.builder()
-            .accessKeyId(Property.ofValue("test-ak"))
-            .secretAccessKey(Property.ofValue("test-sk"))
             .region(Property.ofValue("eu-west-101"))
-            .domainId(Property.ofValue("test-domain-id"))
-            .scope(Property.ofValue(GetToken.TokenScope.DOMAIN))
+            .token(Property.ofValue(MOCK_TOKEN))
             .build();
 
         var output = task.run(runContext, wireMockUrl());
 
-        assertThat(output.getTokenValue(), equalTo(MOCK_TOKEN));
-        assertThat(output.getExpirationTime().isAfter(Instant.now()), is(true));
+        assertThat(output.getAccessKeyId(), equalTo(TEMP_AK));
+        assertThat(output.getSecurityToken(), equalTo(SECURITY_TOKEN));
     }
 
     @Test
-    void run_missingProjectId_throwsDescriptiveError() {
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = GetToken.builder()
-            .accessKeyId(Property.ofValue("test-ak"))
-            .secretAccessKey(Property.ofValue("test-sk"))
-            .region(Property.ofValue("eu-west-101"))
-            .scope(Property.ofValue(GetToken.TokenScope.PROJECT))
-            .build();
-
-        var ex = assertThrows(IllegalArgumentException.class,
-            () -> task.run(runContext, wireMockUrl()));
-        assertThat(ex.getMessage(), containsString("projectId"));
-        assertThat(ex.getMessage(), containsString("PROJECT"));
-    }
-
-    @Test
-    void run_missingDomainId_throwsDescriptiveError() {
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = GetToken.builder()
-            .accessKeyId(Property.ofValue("test-ak"))
-            .secretAccessKey(Property.ofValue("test-sk"))
-            .region(Property.ofValue("eu-west-101"))
-            .scope(Property.ofValue(GetToken.TokenScope.DOMAIN))
-            .build();
-
-        var ex = assertThrows(IllegalArgumentException.class,
-            () -> task.run(runContext, wireMockUrl()));
-        assertThat(ex.getMessage(), containsString("domainId"));
-        assertThat(ex.getMessage(), containsString("DOMAIN"));
-    }
-
-    @Test
-    void run_missingCredentials_throwsDescriptiveError() {
+    void run_missingToken_throwsDescriptiveError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = GetToken.builder()
             .region(Property.ofValue("eu-west-101"))
-            .projectId(Property.ofValue("test-project-id"))
-            .scope(Property.ofValue(GetToken.TokenScope.PROJECT))
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class,
             () -> task.run(runContext, wireMockUrl()));
-        assertThat(ex.getMessage(), containsString("accessKeyId"));
-        assertThat(ex.getMessage(), containsString("secretAccessKey"));
+        assertThat(ex.getMessage(), containsString("token"));
+    }
+
+    @Test
+    void run_missingRegion_throwsDescriptiveError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetToken.builder()
+            .token(Property.ofValue(MOCK_TOKEN))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> task.run(runContext, wireMockUrl()));
+        assertThat(ex.getMessage(), containsString("region"));
     }
 }

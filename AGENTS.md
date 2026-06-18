@@ -27,8 +27,8 @@ Infrastructure dependencies (Docker Compose services):
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`); central place for AK/SK credential wiring across all plugin tasks
-- `io.kestra.plugin.huawei.iam.tasks.GetToken` — Exchanges AK/SK credentials for a short-lived IAM token; supports `PROJECT` and `DOMAIN` scope; output `tokenValue` can be used as `securityToken` in downstream tasks
+- `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`, `iamClientWithToken`); central place for credential wiring across all plugin tasks
+- `io.kestra.plugin.huawei.iam.tasks.GetToken` — Exchanges an existing IAM token for short-lived STS credentials via `POST /v3.0/OS-CREDENTIAL/securitytokens`; outputs `accessKeyId`, `secretAccessKey`, `securityToken`, and `expirationTime` for use in downstream tasks
 - `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
 - `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
 - `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
@@ -136,7 +136,7 @@ plugin-huawei/
 - Base the wording on the implemented packages and classes, not on template README text.
 - OBS SDK: `com.huaweicloud:esdk-obs-java-bundle:3.25.5` (shaded, no BOM conflicts, slf4j excluded)
 - `AuthTypeEnum.V2` is required for MinIO; real OBS uses `AuthTypeEnum.OBS` by default
-- IAM SDK: `com.huaweicloud.sdk:huaweicloud-sdk-iam:3.1.130` (via `huaweicloud-sdk-bom` BOM); uses `GlobalCredentials` for IAM (global service) and `BasicCredentials` for regional services
+- IAM SDK: `com.huaweicloud.sdk:huaweicloud-sdk-iam:3.1.152` (via `huaweicloud-sdk-bom` BOM); uses `GlobalCredentials` for AK/SK-based IAM calls and `IAMCredentials` (token in `X-Auth-Token` header) for the STS `createTemporaryAccessKeyByToken` call
 - IAM tests use WireMock (`org.wiremock:wiremock-jetty12`) with `withEndpoint()` override to avoid network calls; production code uses `IamRegion.valueOf(region)` for endpoint resolution
 
 ## References

@@ -2,6 +2,7 @@ package io.kestra.plugin.huawei;
 
 import com.huaweicloud.sdk.core.auth.BasicCredentials;
 import com.huaweicloud.sdk.core.auth.GlobalCredentials;
+import com.huaweicloud.sdk.iam.v3.IAMCredentials;
 import com.huaweicloud.sdk.iam.v3.IamClient;
 import com.huaweicloud.sdk.iam.v3.region.IamRegion;
 
@@ -84,6 +85,37 @@ public final class ConnectionUtils {
     public static IamClient iamClient(AbstractConnection.HuaweiClientConfig config, String endpointOverride) {
         return IamClient.newBuilder()
             .withCredential(globalCredentials(config))
+            .withEndpoint(endpointOverride)
+            .build();
+    }
+
+    /**
+     * Builds an {@link IamClient} authenticated by an IAM token ({@code X-Auth-Token} header).
+     *
+     * <p>Used by {@code GetToken} to call the STS API. The STS endpoint authenticates via token,
+     * not AK/SK, so {@link IAMCredentials} is used instead of {@link GlobalCredentials}.
+     *
+     * @throws IllegalArgumentException if {@code region} is null or not a known IAM region
+     */
+    public static IamClient iamClientWithToken(String token, String region) {
+        if (region == null || region.isBlank()) {
+            throw new IllegalArgumentException(
+                "region is required to resolve the IAM endpoint — set the 'region' property (e.g. eu-west-101)");
+        }
+        return IamClient.newBuilder()
+            .withCredential(new IAMCredentials().withXAuthToken(token))
+            .withRegion(IamRegion.valueOf(region))
+            .build();
+    }
+
+    /**
+     * Builds a token-authenticated {@link IamClient} that sends all requests to {@code endpointOverride}.
+     *
+     * <p>Used in tests to point the client at a WireMock server. Not intended for production use.
+     */
+    public static IamClient iamClientWithToken(String token, String region, String endpointOverride) {
+        return IamClient.newBuilder()
+            .withCredential(new IAMCredentials().withXAuthToken(token))
             .withEndpoint(endpointOverride)
             .build();
     }
