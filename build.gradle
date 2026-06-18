@@ -72,6 +72,13 @@ dependencies {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
     }
+
+    // Huawei Cloud Java SDK v3 — modular SDK for IAM and other Huawei Cloud services.
+    // Version 3.1.152 is the earliest release that publishes a BOM artifact to Maven Central.
+    implementation enforcedPlatform("com.huaweicloud.sdk:huaweicloud-sdk-bom:3.1.152")
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-iam") {
+        exclude group: "org.slf4j"
+    }
 }
 
 
@@ -129,6 +136,13 @@ dependencies {
 dependencies {
     testImplementation enforcedPlatform("io.kestra:platform:$kestraVersion")
     testImplementation "io.qameta.allure:allure-junit5"
+}
+
+// logback-classic 1.3.12 (pinned by the Kestra platform BOM) requires logback-core 1.3.12.
+// Micronaut pulls in a newer logback-core constraint via micronaut-logging-bom, which causes
+// NoClassDefFoundError for JaninoEventEvaluatorBase at test startup. Force the correct version.
+configurations.testRuntimeClasspath {
+    resolutionStrategy.force "ch.qos.logback:logback-core:1.3.12"
 }
 
 configurations {

@@ -1,0 +1,9 @@
+group: io.kestra.plugin.huawei
+subGroup: iam
+name: "iam"
+title: "IAM"
+description: "Huawei Cloud Identity and Access Management (IAM) authentication tasks."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
