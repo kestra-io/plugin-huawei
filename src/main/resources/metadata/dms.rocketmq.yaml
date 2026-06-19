@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.dms.rocketmq
+name: "dms-rocketmq"
+title: "DMS for RocketMQ"
+description: "Publish, consume, trigger, and react to messages on Huawei Cloud DMS for RocketMQ"
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
