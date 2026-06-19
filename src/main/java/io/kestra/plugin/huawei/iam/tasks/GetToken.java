@@ -153,7 +153,7 @@ public class GetToken extends Task implements RunnableTask<GetToken.Output> {
                 "check that the token is valid and has not expired");
         }
 
-        var expirationTime = parseExpiresAt(credential.getExpiresAt());
+        var expirationTime = parseExpiresAt(runContext, credential.getExpiresAt());
         runContext.logger().debug("Temporary credentials obtained, expires at {}", expirationTime);
 
         return Output.builder()
@@ -178,13 +178,16 @@ public class GetToken extends Task implements RunnableTask<GetToken.Output> {
         return new CreateTemporaryAccessKeyByTokenRequest().withBody(body);
     }
 
-    private static Instant parseExpiresAt(String expiresAt) {
+    private Instant parseExpiresAt(RunContext runContext, String expiresAt) {
         if (expiresAt == null || expiresAt.isBlank()) {
             return Instant.now().plusSeconds(900);
         }
         try {
             return OffsetDateTime.parse(expiresAt).toInstant();
         } catch (Exception e) {
+            runContext.logger().warn(
+                "Could not parse IAM STS expires_at '{}', defaulting to 900 s — value: {}",
+                expiresAt, e.getMessage());
             return Instant.now().plusSeconds(900);
         }
     }
@@ -197,6 +200,7 @@ public class GetToken extends Task implements RunnableTask<GetToken.Output> {
             title = "Temporary Access Key ID.",
             description = "Short-lived Huawei Cloud access key. Pass as `accessKeyId` to downstream tasks."
         )
+        @PluginProperty(group = "connection", secret = true)
         private final String accessKeyId;
 
         @Schema(
@@ -206,7 +210,7 @@ public class GetToken extends Task implements RunnableTask<GetToken.Output> {
                 **Sensitive — treat as a secret and do not log.**
                 """
         )
-        @PluginProperty(secret = true)
+        @PluginProperty(group = "connection", secret = true)
         private final String secretAccessKey;
 
         @Schema(
@@ -217,13 +221,14 @@ public class GetToken extends Task implements RunnableTask<GetToken.Output> {
                 **Sensitive — treat as a secret and do not log.**
                 """
         )
-        @PluginProperty(secret = true)
+        @PluginProperty(group = "connection", secret = true)
         private final String securityToken;
 
         @Schema(
             title = "Credential expiration time.",
             description = "UTC instant at which the temporary credentials expire."
         )
+        @PluginProperty(group = "connection")
         private final Instant expirationTime;
     }
 }
