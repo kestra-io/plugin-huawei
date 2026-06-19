@@ -141,11 +141,26 @@ public class Trigger extends AbstractTrigger
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
         var runContext = conditionContext.getRunContext();
+        var rTopic = runContext.render(topic).as(String.class).orElseThrow();
+        var rGroupId = runContext.render(groupId).as(String.class).orElse("(none)");
+        var rNameServer = runContext.render(nameServerAddr).as(String.class).orElseThrow();
 
         var task = consumeTask();
-        var run = task.run(runContext);
+        Consume.Output run;
+        try {
+            run = task.run(runContext);
+        } catch (Exception e) {
+            runContext.logger().error(
+                "DMS RocketMQ trigger failed topic={} groupId={} nameServer={}: {}",
+                rTopic, rGroupId, rNameServer, e.getMessage()
+            );
+            throw e;
+        }
 
-        runContext.logger().debug("DMS RocketMQ trigger: {} messages", run.getMessagesCount());
+        runContext.logger().info(
+            "DMS RocketMQ trigger polled topic={} groupId={} nameServer={}: {} messages",
+            rTopic, rGroupId, rNameServer, run.getMessagesCount()
+        );
 
         if (run.getMessagesCount() == 0) {
             return Optional.empty();

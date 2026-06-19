@@ -19,6 +19,8 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.header.Header;
 
 import java.io.BufferedOutputStream;
@@ -31,6 +33,7 @@ import java.time.ZonedDateTime;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -40,9 +43,12 @@ import java.util.List;
 @Schema(
     title = "Consume messages from a Huawei DMS for Kafka topic.",
     description = """
-        Polls the configured topic until `maxRecords` or `maxDuration` is reached (at least one is required).
-        Messages are written to Kestra internal storage as ION at `uri`. Offsets are committed after all
-        records have been written, ensuring at-least-once delivery semantics.
+        Polls the configured topic until `maxRecords` or `maxDuration` is reached (at least one is required),
+        or until the topic is fully drained — whichever comes first. The task stops early when all assigned
+        partitions have been read to their current end offset, so `maxRecords` acts as an upper bound rather
+        than a target the task will block waiting for. Messages are written to Kestra internal storage as ION
+        at `uri`. Offsets are committed after all records have been written, ensuring at-least-once delivery
+        semantics.
         """
 )
 @Plugin(
@@ -90,7 +96,10 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
 
     @Schema(
         title = "Stop after consuming this many records.",
-        description = "At least one of `maxRecords` or `maxDuration` must be set."
+        description = """
+            Upper bound on the number of records to consume. The task may return fewer records if the topic
+            is drained before this limit is reached. At least one of `maxRecords` or `maxDuration` must be set.
+            """
     )
     @PluginProperty(group = "execution")
     private Property<Integer> maxRecords;
@@ -140,6 +149,9 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
                     total++;
                 }
                 finished = isFinished(runContext, total, started);
+                if (!finished && records.isEmpty()) {
+                    finished = isDrained(consumer);
+                }
             } while (!finished);
 
             output.flush();
@@ -167,6 +179,26 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         return count == 0
             && runContext.render(maxDuration).as(Duration.class).isEmpty()
             && runContext.render(maxRecords).as(Integer.class).isEmpty();
+    }
+
+    /**
+     * Returns true when every assigned partition's current position has reached the end offset,
+     * meaning the topic is fully drained. An empty assignment (before the first poll triggers
+     * group coordination) is treated as not-yet-drained to avoid a false early exit.
+     */
+    private boolean isDrained(KafkaConsumer<byte[], byte[]> consumer) {
+        var assignment = consumer.assignment();
+        if (assignment.isEmpty()) {
+            return false;
+        }
+        Map<TopicPartition, Long> endOffsets = consumer.endOffsets(assignment);
+        for (var tp : assignment) {
+            var end = endOffsets.getOrDefault(tp, 0L);
+            if (consumer.position(tp) < end) {
+                return false;
+            }
+        }
+        return true;
     }
 
     Message toMessage(ConsumerRecord<byte[], byte[]> record, SerdeType keyType, SerdeType valueType) throws Exception {

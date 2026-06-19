@@ -11,7 +11,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.*;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.greaterThanOrEqualTo;
+import static org.hamcrest.Matchers.lessThan;
+import static org.hamcrest.Matchers.notNullValue;
 
 @EnabledIfEnvironmentVariable(named = "DMS_ROCKETMQ_TESTS", matches = "true")
 class PublishConsumeTest extends AbstractDmsRocketMqTest {
@@ -63,6 +67,40 @@ class PublishConsumeTest extends AbstractDmsRocketMqTest {
 
         assertThat(output.getMessagesCount(), greaterThanOrEqualTo(0));
         assertThat(output.getUri(), notNullValue());
+    }
+
+    @Test
+    void consume_drainsEarly_whenFewerMessagesThanMaxRecords() throws Exception {
+        var topic = "kestra-drain-test-topic";
+        var producerGroup = "kestra-producer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
+        var consumerGroup = "kestra-consumer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        publishBuilder()
+            .topic(Property.ofValue(topic))
+            .groupId(Property.ofValue(producerGroup))
+            .from(List.of(
+                Map.of("body", "drain-msg-1"),
+                Map.of("body", "drain-msg-2")
+            ))
+            .build()
+            .run(runContext);
+
+        // maxRecords is far above the number of published messages; no maxDuration set.
+        // The pull loop must break on NO_NEW_MSG/NO_MATCHED_MSG and not hang.
+        var consume = consumeBuilder()
+            .topic(Property.ofValue(topic))
+            .groupId(Property.ofValue(consumerGroup))
+            .maxRecords(Property.ofValue(1000))
+            .build();
+
+        var started = System.currentTimeMillis();
+        var output = consume.run(runContext);
+        var elapsed = System.currentTimeMillis() - started;
+
+        assertThat(output.getUri(), notNullValue());
+        // Must complete promptly; RocketMQ pull-mode breaks on NO_NEW_MSG.
+        assertThat("task must not hang when topic is drained", elapsed, lessThan(60_000L));
     }
 
     @Test

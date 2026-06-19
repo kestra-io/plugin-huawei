@@ -158,11 +158,26 @@ public class Trigger extends AbstractTrigger
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
         var runContext = conditionContext.getRunContext();
+        var rTopic = runContext.render(topic).as(String.class).orElseThrow();
+        var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
+        var rBootstrap = runContext.render(bootstrapServers).as(String.class).orElseThrow();
 
         var task = consumeTask();
-        var run = task.run(runContext);
+        Consume.Output run;
+        try {
+            run = task.run(runContext);
+        } catch (Exception e) {
+            runContext.logger().error(
+                "DMS Kafka trigger failed topic={} groupId={} bootstrap={}: {}",
+                rTopic, rGroupId, rBootstrap, e.getMessage()
+            );
+            throw e;
+        }
 
-        runContext.logger().debug("DMS Kafka trigger: {} records", run.getMessagesCount());
+        runContext.logger().info(
+            "DMS Kafka trigger polled topic={} groupId={} bootstrap={}: {} records",
+            rTopic, rGroupId, rBootstrap, run.getMessagesCount()
+        );
 
         if (run.getMessagesCount() == 0) {
             return Optional.empty();

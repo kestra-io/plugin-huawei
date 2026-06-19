@@ -17,6 +17,7 @@ import org.apache.rocketmq.acl.common.AclClientRPCHook;
 import org.apache.rocketmq.acl.common.SessionCredentials;
 import org.apache.rocketmq.client.consumer.DefaultMQPullConsumer;
 import org.apache.rocketmq.client.consumer.DefaultMQPushConsumer;
+import org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely;
 import org.apache.rocketmq.client.producer.DefaultMQProducer;
 
 /**
@@ -144,7 +145,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
 
         if (config.accessKeyId() != null && config.secretAccessKey() != null) {
             var hook = new AclClientRPCHook(new SessionCredentials(config.accessKeyId(), config.secretAccessKey()));
-            consumer = new DefaultMQPushConsumer(consumerGroup, hook, null);
+            consumer = new DefaultMQPushConsumer(consumerGroup, hook, new AllocateMessageQueueAveragely());
         } else {
             consumer = new DefaultMQPushConsumer(consumerGroup);
         }

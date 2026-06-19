@@ -171,7 +171,7 @@ public class RealtimeTrigger extends AbstractTrigger
                 consumer = buildPushConsumer(runContext, rGroupId);
                 consumerRef.set(consumer);
 
-                logger.debug("Starting DMS RocketMQ realtime trigger triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
+                logger.info("Starting DMS RocketMQ realtime trigger triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
 
                 consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
                 consumer.subscribe(rTopic, rTags);
@@ -201,7 +201,7 @@ public class RealtimeTrigger extends AbstractTrigger
                 });
 
                 consumer.start();
-                logger.debug("DMS RocketMQ realtime trigger started triggerId={}", this.id);
+                logger.info("DMS RocketMQ realtime trigger started triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
 
                 // Block until stop()/kill() counts down stopSignal.
                 stopSignal.await();
@@ -209,7 +209,7 @@ public class RealtimeTrigger extends AbstractTrigger
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             } catch (Exception e) {
-                logger.error("DMS RocketMQ realtime trigger triggerId={} failed: {}", this.id, e.getMessage());
+                logger.error("DMS RocketMQ realtime trigger triggerId={} topic={} groupId={} failed: {}", this.id, rTopic, rGroupId, e.getMessage());
                 sink.error(e);
             } finally {
                 if (consumer != null) {
@@ -261,7 +261,7 @@ public class RealtimeTrigger extends AbstractTrigger
         if (rAk != null && rSk != null) {
             var hook = new org.apache.rocketmq.acl.common.AclClientRPCHook(
                 new org.apache.rocketmq.acl.common.SessionCredentials(rAk, rSk));
-            consumer = new DefaultMQPushConsumer(consumerGroup, hook, null);
+            consumer = new DefaultMQPushConsumer(consumerGroup, hook, new org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely());
         } else {
             consumer = new DefaultMQPushConsumer(consumerGroup);
         }

@@ -166,20 +166,20 @@ public class RealtimeTrigger extends AbstractTrigger
         var runContext = conditionContext.getRunContext();
         var consumeTask = buildConsumeTask();
 
+        var rTopic = runContext.render(topic).as(String.class).orElseThrow();
+        var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
+        var rKeySerdeType = runContext.render(keySerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
+        var rValueSerdeType = runContext.render(valueSerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
+
         return Flux.create(sink -> {
             var logger = runContext.logger();
             try {
-                var rTopic = runContext.render(topic).as(String.class).orElseThrow();
-                var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
-                var rKeySerdeType = runContext.render(keySerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
-                var rValueSerdeType = runContext.render(valueSerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
-
-                logger.debug("Starting DMS Kafka realtime trigger triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
+                logger.info("Starting DMS Kafka realtime trigger triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
 
                 try (var consumer = consumeTask.consumer(runContext, rGroupId)) {
                     kafkaConsumerRef.set(consumer);
                     consumer.subscribe(List.of(rTopic));
-                    logger.debug("DMS Kafka realtime trigger subscribed triggerId={}", this.id);
+                    logger.info("DMS Kafka realtime trigger subscribed triggerId={} topic={} groupId={}", this.id, rTopic, rGroupId);
 
                     while (isActive.get()) {
                         var records = consumer.poll(POLL_DURATION);
@@ -198,7 +198,7 @@ public class RealtimeTrigger extends AbstractTrigger
             } catch (WakeupException e) {
                 logger.debug("DMS Kafka realtime trigger triggerId={} woken up; stopping poll loop", this.id);
             } catch (Exception e) {
-                logger.error("DMS Kafka realtime trigger triggerId={} failed: {}", this.id, e.getMessage());
+                logger.error("DMS Kafka realtime trigger triggerId={} topic={} groupId={} failed: {}", this.id, rTopic, rGroupId, e.getMessage());
                 sink.error(e);
             } finally {
                 sink.complete();
