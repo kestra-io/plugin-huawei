@@ -5,6 +5,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -38,28 +39,63 @@ import java.util.Properties;
 @NoArgsConstructor
 public abstract class AbstractDmsKafka extends AbstractConnection implements DmsKafkaConnectionInterface {
 
+    @Schema(
+        title = "Kafka bootstrap servers.",
+        description = "Comma-separated list of `host:port` pairs that the Kafka client uses for the initial " +
+            "cluster connection. For DMS for Kafka, copy this value from the instance detail page in the console."
+    )
     @NotNull
     @PluginProperty(group = "connection")
     protected Property<String> bootstrapServers;
 
+    @Schema(
+        title = "SASL mechanism used for authentication.",
+        description = """
+            `PLAIN` — username/password (default, used by most DMS for Kafka instances).
+            `SCRAM_SHA_512` — stronger challenge-response, supported on newer instances.
+            `NONE` — no SASL; for VPC-internal clusters with no auth enabled.
+            """
+    )
     @Builder.Default
     @PluginProperty(group = "connection")
     protected Property<SaslMechanism> saslMechanism = Property.ofValue(SaslMechanism.PLAIN);
 
+    @Schema(
+        title = "SASL username.",
+        description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`."
+    )
     @PluginProperty(group = "connection", secret = true)
     protected Property<String> username;
 
+    @Schema(
+        title = "SASL password.",
+        description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`. " +
+            "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @PluginProperty(group = "connection", secret = true)
     protected Property<String> password;
 
+    @Schema(
+        title = "Enable TLS for the Kafka connection.",
+        description = "Set to `true` to use `SASL_SSL` instead of `SASL_PLAINTEXT`. " +
+            "DMS for Kafka instances accessed over the public internet require TLS."
+    )
     @Builder.Default
     @PluginProperty(group = "connection")
     protected Property<Boolean> sslEnabled = Property.ofValue(false);
 
+    @Schema(
+        title = "Key serializer/deserializer type.",
+        description = "`STRING` (default), `JSON`, or `BINARY`."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     protected Property<SerdeType> keySerdeType = Property.ofValue(SerdeType.STRING);
 
+    @Schema(
+        title = "Value serializer/deserializer type.",
+        description = "`STRING` (default), `JSON`, or `BINARY`."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     protected Property<SerdeType> valueSerdeType = Property.ofValue(SerdeType.STRING);

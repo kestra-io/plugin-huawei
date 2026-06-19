@@ -141,9 +141,15 @@ public class RealtimeTrigger extends AbstractTrigger
     @Getter(AccessLevel.NONE)
     private final AtomicBoolean isActive = new AtomicBoolean(true);
 
+    // stopSignal: counted down by stop() to wake the Flux await(); doneLatch: counted down by the
+    // Flux finally block so stop(wait=true) can confirm full teardown.
     @Builder.Default
     @Getter(AccessLevel.NONE)
-    private final CountDownLatch waitForTermination = new CountDownLatch(1);
+    private final CountDownLatch stopSignal = new CountDownLatch(1);
+
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    private final CountDownLatch doneLatch = new CountDownLatch(1);
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -170,7 +176,6 @@ public class RealtimeTrigger extends AbstractTrigger
                 consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_LAST_OFFSET);
                 consumer.subscribe(rTopic, rTags);
 
-                final var consumerFinal = consumer;
                 consumer.registerMessageListener((MessageListenerConcurrently) (msgs, ctx) -> {
                     for (var msg : msgs) {
                         if (!isActive.get()) {
@@ -198,8 +203,8 @@ public class RealtimeTrigger extends AbstractTrigger
                 consumer.start();
                 logger.debug("DMS RocketMQ realtime trigger started triggerId={}", this.id);
 
-                // Block until stop/kill signals the latch
-                waitForTermination.await();
+                // Block until stop()/kill() counts down stopSignal.
+                stopSignal.await();
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -214,22 +219,15 @@ public class RealtimeTrigger extends AbstractTrigger
                     }
                 }
                 sink.complete();
-                // Signal teardown complete so stop(wait=true) can return safely.
-                waitForTermination.countDown();
+                // Signal that teardown is fully complete so stop(wait=true) can return.
+                doneLatch.countDown();
             }
         });
     }
 
     @Override
     public void kill() {
-        isActive.set(false);
-        var c = consumerRef.get();
-        if (c != null) {
-            try {
-                c.shutdown();
-            } catch (Exception ignored) {
-            }
-        }
+        stop(true);
     }
 
     @Override
@@ -243,9 +241,10 @@ public class RealtimeTrigger extends AbstractTrigger
         }
         org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
             .debug("Stopping DMS RocketMQ realtime trigger triggerId={} (wait={})", this.id, wait);
+        stopSignal.countDown();
         if (wait) {
             try {
-                waitForTermination.await();
+                doneLatch.await();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
