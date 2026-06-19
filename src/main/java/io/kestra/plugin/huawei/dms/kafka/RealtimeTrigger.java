@@ -23,6 +23,7 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 import java.time.Duration;
@@ -221,7 +222,7 @@ public class RealtimeTrigger extends AbstractTrigger
         if (!isActive.compareAndSet(true, false)) {
             return;
         }
-        org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
+        LoggerFactory.getLogger(RealtimeTrigger.class)
             .debug("Stopping DMS Kafka realtime trigger triggerId={} (wait={})", this.id, wait);
         Optional.ofNullable(kafkaConsumerRef.get()).ifPresent(c -> c.wakeup());
         if (wait) {

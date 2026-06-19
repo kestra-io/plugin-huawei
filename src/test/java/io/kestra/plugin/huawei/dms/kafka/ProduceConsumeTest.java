@@ -16,6 +16,7 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "DMS_KAFKA_TESTS", matches = "true")
 class ProduceConsumeTest extends AbstractDmsKafkaTest {
@@ -115,14 +116,7 @@ class ProduceConsumeTest extends AbstractDmsKafkaTest {
             .groupId(Property.ofValue("some-group"))
             .build();
 
-        try {
-            consume.run(runContext);
-        } catch (IllegalArgumentException e) {
-            assertThat(e.getMessage(), containsString("maxRecords"));
-            return;
-        } catch (Exception ignored) {
-            // other exception is acceptable — just verifying IllegalArgumentException is thrown
-        }
-        // If we reach here the test still passes — the gated nature means we just verify structure
+        var ex = assertThrows(IllegalArgumentException.class, () -> consume.run(runContext));
+        assertThat(ex.getMessage(), containsString("maxRecords"));
     }
 }

@@ -31,6 +31,7 @@ import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.reactivestreams.Publisher;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 import java.util.concurrent.CountDownLatch;
@@ -104,6 +105,7 @@ public class RealtimeTrigger extends AbstractTrigger
         title = "Consumer or producer group ID.",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
+    @NotNull
     @PluginProperty(group = "main")
     private Property<String> groupId;
 
@@ -244,7 +246,7 @@ public class RealtimeTrigger extends AbstractTrigger
         if (!isActive.compareAndSet(true, false)) {
             return;
         }
-        org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
+        LoggerFactory.getLogger(RealtimeTrigger.class)
             .debug("Stopping DMS RocketMQ realtime trigger triggerId={} (wait={})", this.id, wait);
         stopSignal.countDown();
         if (wait) {

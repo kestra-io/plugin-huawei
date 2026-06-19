@@ -97,7 +97,7 @@ public class Consume extends AbstractDmsRocketMq implements RunnableTask<Consume
         var total = 0;
 
         DefaultMQPullConsumer consumer = buildPullConsumer(runContext, rGroupId);
-        try {
+        try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
             consumer.start();
             Set<MessageQueue> mqs = consumer.fetchSubscribeMessageQueues(rTopic);
             var started = ZonedDateTime.now();
@@ -109,44 +109,40 @@ public class Consume extends AbstractDmsRocketMq implements RunnableTask<Consume
                     offset = 0;
                 }
 
-                try (var output = new BufferedOutputStream(new FileOutputStream(tempFile, total > 0), FileSerde.BUFFER_SIZE)) {
-                    while (true) {
-                        var pullResult = consumer.pull(mq, rTags, offset, 32);
-                        if (pullResult.getPullStatus() == PullStatus.FOUND) {
-                            for (var msg : pullResult.getMsgFoundList()) {
-                                var body = rSerdeType.deserialize(msg.getBody());
-                                FileSerde.write(output, Message.builder()
-                                    .messageId(msg.getMsgId())
-                                    .body(body)
-                                    .topic(msg.getTopic())
-                                    .tags(msg.getTags())
-                                    .keys(msg.getKeys())
-                                    .bornTimestamp(msg.getBornTimestamp())
-                                    .build());
-                                total++;
-                                if (isFinished(runContext, total, started)) {
-                                    consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
-                                    output.flush();
-                                    break outer;
-                                }
+                while (true) {
+                    var pullResult = consumer.pull(mq, rTags, offset, 32);
+                    if (pullResult.getPullStatus() == PullStatus.FOUND) {
+                        for (var msg : pullResult.getMsgFoundList()) {
+                            var body = rSerdeType.deserialize(msg.getBody());
+                            FileSerde.write(output, Message.builder()
+                                .messageId(msg.getMsgId())
+                                .body(body)
+                                .topic(msg.getTopic())
+                                .tags(msg.getTags())
+                                .keys(msg.getKeys())
+                                .bornTimestamp(msg.getBornTimestamp())
+                                .build());
+                            total++;
+                            if (isFinished(runContext, total, started)) {
+                                consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
+                                break outer;
                             }
-                            consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
-                            offset = pullResult.getNextBeginOffset();
-                        } else if (pullResult.getPullStatus() == PullStatus.NO_NEW_MSG ||
-                            pullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {
-                            break;
-                        } else {
-                            break;
                         }
-
-                        if (isFinished(runContext, total, started)) {
-                            output.flush();
-                            break outer;
-                        }
+                        consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
+                        offset = pullResult.getNextBeginOffset();
+                    } else if (pullResult.getPullStatus() == PullStatus.NO_NEW_MSG ||
+                        pullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {
+                        break;
+                    } else {
+                        break;
                     }
-                    output.flush();
+
+                    if (isFinished(runContext, total, started)) {
+                        break outer;
+                    }
                 }
             }
+            output.flush();
         } finally {
             consumer.shutdown();
         }

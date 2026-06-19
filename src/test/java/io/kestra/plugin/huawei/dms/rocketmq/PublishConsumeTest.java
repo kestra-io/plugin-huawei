@@ -16,6 +16,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.lessThan;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "DMS_ROCKETMQ_TESTS", matches = "true")
 class PublishConsumeTest extends AbstractDmsRocketMqTest {
@@ -112,13 +113,7 @@ class PublishConsumeTest extends AbstractDmsRocketMqTest {
             .groupId(Property.ofValue("some-group"))
             .build();
 
-        try {
-            consume.run(runContext);
-        } catch (IllegalArgumentException e) {
-            assertThat(e.getMessage(), containsString("maxRecords"));
-            return;
-        } catch (Exception ignored) {
-            // other exceptions are acceptable
-        }
+        var ex = assertThrows(IllegalArgumentException.class, () -> consume.run(runContext));
+        assertThat(ex.getMessage(), containsString("maxRecords"));
     }
 }

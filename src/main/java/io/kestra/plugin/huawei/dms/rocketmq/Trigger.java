@@ -12,6 +12,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -111,6 +112,7 @@ public class Trigger extends AbstractTrigger
         title = "Consumer or producer group ID.",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
+    @NotNull
     @PluginProperty(group = "main")
     private Property<String> groupId;
 
@@ -138,6 +140,11 @@ public class Trigger extends AbstractTrigger
     @Schema(title = "Stop after this duration elapses per poll cycle.")
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
+
+    @AssertTrue(message = "At least one of 'maxRecords' or 'maxDuration' must be set")
+    public boolean isMaxConstraintSet() {
+        return maxRecords != null || maxDuration != null;
+    }
 
     @Override
     public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {

@@ -114,26 +114,23 @@ public class Publish extends AbstractDmsRocketMq implements RunnableTask<Publish
         try {
             producer.start();
 
-            var rows = Data.from(from).read(runContext).collectList().block();
-            if (rows != null) {
-                for (var map : rows) {
-                    var bodyBytes = rSerdeType.serialize(map.get("body"));
-                    var msgTags = map.containsKey("tags") ? String.valueOf(map.get("tags")) : rTags;
-                    var msgKeys = map.containsKey("keys") ? String.valueOf(map.get("keys")) : null;
+            for (var map : Data.from(from).read(runContext).toIterable()) {
+                var bodyBytes = rSerdeType.serialize(map.get("body"));
+                var msgTags = map.containsKey("tags") ? String.valueOf(map.get("tags")) : rTags;
+                var msgKeys = map.containsKey("keys") ? String.valueOf(map.get("keys")) : null;
 
-                    var msg = new Message(rTopic, msgTags, bodyBytes);
-                    if (msgKeys != null) {
-                        msg.setKeys(msgKeys);
-                    }
-
-                    var result = producer.send(msg);
-                    if (result.getSendStatus() != SendStatus.SEND_OK) {
-                        throw new IllegalStateException(
-                            "RocketMQ send failed for topic " + rTopic + ": status=" + result.getSendStatus()
-                        );
-                    }
-                    count++;
+                var msg = new Message(rTopic, msgTags, bodyBytes);
+                if (msgKeys != null) {
+                    msg.setKeys(msgKeys);
                 }
+
+                var result = producer.send(msg);
+                if (result.getSendStatus() != SendStatus.SEND_OK) {
+                    throw new IllegalStateException(
+                        "RocketMQ send failed for topic " + rTopic + ": status=" + result.getSendStatus()
+                    );
+                }
+                count++;
             }
         } finally {
             producer.shutdown();

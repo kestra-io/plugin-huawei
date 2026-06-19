@@ -33,7 +33,7 @@ import java.util.Properties;
  * held in the transient {@link Properties} object, never stored in a field.
  */
 @SuperBuilder
-@ToString
+@ToString(exclude = {"username", "password"})
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
@@ -128,8 +128,9 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
                     ? "org.apache.kafka.common.security.scram.ScramLoginModule"
                     : "org.apache.kafka.common.security.plain.PlainLoginModule";
                 // The JAAS config string is built from rendered secrets and never stored in a field.
+                // Values are escaped so a credential containing `"` or `\` cannot inject extra directives.
                 props.put(SaslConfigs.SASL_JAAS_CONFIG,
-                    loginModule + " required username=\"" + rUsername + "\" password=\"" + rPassword + "\";");
+                    loginModule + " required username=\"" + escapeJaas(rUsername) + "\" password=\"" + escapeJaas(rPassword) + "\";");
             }
         }
 
@@ -138,6 +139,11 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
         }
 
         return props;
+    }
+
+    /** Escapes backslash and double-quote so the value is safe to embed in a JAAS quoted string. */
+    private static String escapeJaas(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     /** Creates a byte-array producer using the shared connection properties. */

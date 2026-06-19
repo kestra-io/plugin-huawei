@@ -22,7 +22,6 @@ import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -120,36 +119,29 @@ public class Produce extends AbstractDmsKafka implements RunnableTask<Produce.Ou
 
         var count = 0;
         try (var producer = producer(runContext)) {
-            var rows = Data.from(from).read(runContext).collectList().block();
-            if (rows != null) {
-                var records = new ArrayList<ProducerRecord<byte[], byte[]>>(rows.size());
-                for (var map : rows) {
-                    var recordTopic = map.containsKey("topic")
-                        ? String.valueOf(map.get("topic"))
-                        : rTopic;
-                    if (recordTopic == null) {
-                        throw new IllegalArgumentException("Topic must be set either on the task or inside each message map");
-                    }
-
-                    var keyBytes = rKeySerdeType.serialize(map.get("key"));
-                    var valueBytes = rValueSerdeType.serialize(map.get("value"));
-                    var partition = (Integer) map.get("partition");
-                    var headers = buildHeaders(map.get("headers"));
-
-                    records.add(new ProducerRecord<byte[], byte[]>(recordTopic, partition, null, keyBytes, valueBytes, headers));
+            var sendError = new AtomicReference<Exception>();
+            for (var map : Data.from(from).read(runContext).toIterable()) {
+                var recordTopic = map.containsKey("topic")
+                    ? String.valueOf(map.get("topic"))
+                    : rTopic;
+                if (recordTopic == null) {
+                    throw new IllegalArgumentException("Topic must be set either on the task or inside each message map");
                 }
 
-                var sendError = new AtomicReference<Exception>();
-                for (var record : records) {
-                    producer.send(record, (metadata, exception) -> {
-                        if (exception != null) sendError.compareAndSet(null, exception);
-                    });
-                }
-                producer.flush();
-                if (sendError.get() != null) {
-                    throw sendError.get();
-                }
-                count = records.size();
+                var keyBytes = rKeySerdeType.serialize(map.get("key"));
+                var valueBytes = rValueSerdeType.serialize(map.get("value"));
+                var partition = (Integer) map.get("partition");
+                var headers = buildHeaders(map.get("headers"));
+
+                producer.send(
+                    new ProducerRecord<>(recordTopic, partition, null, keyBytes, valueBytes, headers),
+                    (metadata, exception) -> { if (exception != null) sendError.compareAndSet(null, exception); }
+                );
+                count++;
+            }
+            producer.flush();
+            if (sendError.get() != null) {
+                throw sendError.get();
             }
         }
 
