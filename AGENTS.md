@@ -15,7 +15,7 @@ Teams using Huawei Cloud need first-class Kestra integrations for storage, authe
 Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
 - `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
-- `io.kestra.plugin.huawei.iam.tasks` — IAM authentication tasks (`GetToken`)
+- `io.kestra.plugin.huawei.iam.tasks` — IAM authentication tasks (`GetTemporaryCredentials`)
 - `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
 - `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
@@ -28,7 +28,7 @@ Infrastructure dependencies (Docker Compose services):
 ### Key Plugin Classes
 
 - `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`, `iamClientWithToken`); central place for credential wiring across all plugin tasks
-- `io.kestra.plugin.huawei.iam.tasks.GetToken` — Exchanges an existing IAM token for short-lived STS credentials via `POST /v3.0/OS-CREDENTIAL/securitytokens`; outputs `accessKeyId`, `secretAccessKey`, `securityToken`, and `expirationTime` for use in downstream tasks
+- `io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials` — Obtains short-lived STS credentials (temporary AK/SK + security token) via two auth methods: `PASSWORD` (authenticates with IAM username/password via `POST /v3/auth/tokens`, then exchanges the session token for STS credentials via `POST /v3.0/OS-CREDENTIAL/securitytokens`) and `TOKEN` (exchanges an existing `X-Auth-Token` directly); outputs `accessKeyId`, `secretAccessKey`, `securityToken`, and `expirationTime`
 - `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
 - `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
 - `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
@@ -83,7 +83,7 @@ plugin-huawei/
 │   ├── ConnectionUtils.java
 │   ├── iam/
 │   │   └── tasks/
-│   │       ├── GetToken.java
+│   │       ├── GetTemporaryCredentials.java
 │   │       └── package-info.java
 │   └── obs/
 │       ├── AbstractObs.java
@@ -112,7 +112,7 @@ plugin-huawei/
 ├── src/test/java/io/kestra/plugin/huawei/
 │   ├── iam/
 │   │   └── tasks/
-│   │       └── GetTokenTest.java
+│   │       └── GetTemporaryCredentialsTest.java
 │   └── obs/
 │       ├── AbstractMinioTest.java
 │       ├── CopyTest.java
