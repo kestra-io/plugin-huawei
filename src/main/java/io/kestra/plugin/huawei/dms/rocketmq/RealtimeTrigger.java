@@ -73,34 +73,66 @@ import java.util.concurrent.atomic.AtomicReference;
 public class RealtimeTrigger extends AbstractTrigger
     implements RealtimeTriggerInterface, TriggerOutput<Message>, DmsRocketMqConnectionInterface {
 
+    @Schema(
+        title = "Name server address.",
+        description = "Address of the RocketMQ name server, e.g. `dms-host:8100`. For DMS for RocketMQ, " +
+            "copy the name server address from the instance detail page in the Huawei Cloud console."
+    )
     @NotNull
     @PluginProperty(group = "connection")
     private Property<String> nameServerAddr;
 
+    @Schema(
+        title = "DMS instance ID.",
+        description = "Huawei Cloud DMS for RocketMQ instance ID. Required when the instance uses instance isolation. " +
+            "Leave empty for shared DMS instances."
+    )
     @PluginProperty(group = "connection")
     private Property<String> instanceId;
 
+    @Schema(title = "Topic to publish to or consume from.")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
+    @Schema(
+        title = "Consumer or producer group ID.",
+        description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
+    )
     @PluginProperty(group = "main")
     private Property<String> groupId;
 
+    @Schema(
+        title = "Tag filter expression.",
+        description = "Server-side filter applied by the broker. Use `*` (default) to receive all tags, " +
+            "or a specific tag to filter messages."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<String> tags = Property.ofValue("*");
 
+    @Schema(
+        title = "Message body serializer/deserializer.",
+        description = "`STRING` (default) or `JSON`."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<RocketMqSerdeType> serdeType = Property.ofValue(RocketMqSerdeType.STRING);
 
     // accessKeyId and secretAccessKey for the ACL hook come from AbstractConnection via the Consume task
 
+    @Schema(
+        title = "Huawei Cloud access key ID.",
+        description = "AK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @Builder.Default
     @PluginProperty(group = "connection", secret = true)
     private Property<String> accessKeyId = null;
 
+    @Schema(
+        title = "Huawei Cloud secret access key.",
+        description = "SK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @Builder.Default
     @PluginProperty(group = "connection", secret = true)
     private Property<String> secretAccessKey = null;
@@ -182,13 +214,22 @@ public class RealtimeTrigger extends AbstractTrigger
                     }
                 }
                 sink.complete();
+                // Signal teardown complete so stop(wait=true) can return safely.
+                waitForTermination.countDown();
             }
         });
     }
 
     @Override
     public void kill() {
-        stop(true);
+        isActive.set(false);
+        var c = consumerRef.get();
+        if (c != null) {
+            try {
+                c.shutdown();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     @Override
@@ -202,7 +243,6 @@ public class RealtimeTrigger extends AbstractTrigger
         }
         org.slf4j.LoggerFactory.getLogger(RealtimeTrigger.class)
             .debug("Stopping DMS RocketMQ realtime trigger triggerId={} (wait={})", this.id, wait);
-        waitForTermination.countDown();
         if (wait) {
             try {
                 waitForTermination.await();

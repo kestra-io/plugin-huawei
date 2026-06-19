@@ -5,6 +5,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
+import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -37,6 +38,7 @@ import java.util.Properties;
 @NoArgsConstructor
 public abstract class AbstractDmsKafka extends AbstractConnection implements DmsKafkaConnectionInterface {
 
+    @NotNull
     @PluginProperty(group = "connection")
     protected Property<String> bootstrapServers;
 

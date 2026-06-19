@@ -5,6 +5,7 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
+import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -30,15 +31,18 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer;
 @NoArgsConstructor
 public abstract class AbstractDmsRocketMq extends AbstractConnection implements DmsRocketMqConnectionInterface {
 
+    @NotNull
     @PluginProperty(group = "connection")
     protected Property<String> nameServerAddr;
 
     @PluginProperty(group = "connection")
     protected Property<String> instanceId;
 
+    @NotNull
     @PluginProperty(group = "main")
     protected Property<String> topic;
 
+    @NotNull
     @PluginProperty(group = "main")
     protected Property<String> groupId;
 

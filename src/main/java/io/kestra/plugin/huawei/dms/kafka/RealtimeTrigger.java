@@ -77,28 +77,63 @@ public class RealtimeTrigger extends AbstractTrigger
     // Finite poll duration prevents busy-spinning when the broker is idle or unreachable.
     private static final Duration POLL_DURATION = Duration.ofSeconds(2);
 
+    @Schema(
+        title = "Kafka bootstrap servers.",
+        description = "Comma-separated list of `host:port` pairs that the Kafka client uses for the initial " +
+            "cluster connection. For DMS for Kafka, copy this value from the instance detail page in the console."
+    )
     @NotNull
     @PluginProperty(group = "connection")
     private Property<String> bootstrapServers;
 
+    @Schema(
+        title = "SASL mechanism used for authentication.",
+        description = """
+            `PLAIN` — username/password (default, used by most DMS for Kafka instances).
+            `SCRAM_SHA_512` — stronger challenge-response, supported on newer instances.
+            `NONE` — no SASL; for VPC-internal clusters with no auth enabled.
+            """
+    )
     @Builder.Default
     @PluginProperty(group = "connection")
     private Property<SaslMechanism> saslMechanism = Property.ofValue(SaslMechanism.PLAIN);
 
+    @Schema(
+        title = "SASL username.",
+        description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`."
+    )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> username;
 
+    @Schema(
+        title = "SASL password.",
+        description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`. " +
+            "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> password;
 
+    @Schema(
+        title = "Enable TLS for the Kafka connection.",
+        description = "Set to `true` to use `SASL_SSL` instead of `SASL_PLAINTEXT`. " +
+            "DMS for Kafka instances accessed over the public internet require TLS."
+    )
     @Builder.Default
     @PluginProperty(group = "connection")
     private Property<Boolean> sslEnabled = Property.ofValue(false);
 
+    @Schema(
+        title = "Key serializer/deserializer type.",
+        description = "`STRING` (default), `JSON`, or `BINARY`."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> keySerdeType = Property.ofValue(SerdeType.STRING);
 
+    @Schema(
+        title = "Value serializer/deserializer type.",
+        description = "`STRING` (default), `JSON`, or `BINARY`."
+    )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> valueSerdeType = Property.ofValue(SerdeType.STRING);

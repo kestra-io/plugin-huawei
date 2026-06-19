@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 @SuperBuilder
 @ToString
@@ -138,10 +139,16 @@ public class Produce extends AbstractDmsKafka implements RunnableTask<Produce.Ou
                     records.add(new ProducerRecord<byte[], byte[]>(recordTopic, partition, null, keyBytes, valueBytes, headers));
                 }
 
+                var sendError = new AtomicReference<Exception>();
                 for (var record : records) {
-                    producer.send(record);
+                    producer.send(record, (metadata, exception) -> {
+                        if (exception != null) sendError.compareAndSet(null, exception);
+                    });
                 }
                 producer.flush();
+                if (sendError.get() != null) {
+                    throw sendError.get();
+                }
                 count = records.size();
             }
         }
