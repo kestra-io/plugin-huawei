@@ -67,6 +67,7 @@ import java.util.Optional;
 public class Trigger extends AbstractTrigger
     implements PollingTriggerInterface, TriggerOutput<Consume.Output>, DmsKafkaConnectionInterface {
 
+    @Schema(title = "Polling interval.", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Duration interval = Duration.ofSeconds(60);

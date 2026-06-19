@@ -22,7 +22,7 @@ class PublishConsumeTest extends AbstractDmsRocketMqTest {
 
     @Test
     void publish_happyPath_messagesDelivered() throws Exception {
-        var topic = "kestra-test-topic";
+        var topic = "kestra-test-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 12);
         var groupId = "kestra-producer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
         var runContext = runContextFactory.of(Collections.emptyMap());
 
@@ -42,7 +42,7 @@ class PublishConsumeTest extends AbstractDmsRocketMqTest {
 
     @Test
     void consume_afterPublish_readsMessages() throws Exception {
-        var topic = "kestra-consume-test-topic";
+        var topic = "kestra-consume-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 12);
         var producerGroup = "kestra-producer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
         var consumerGroup = "kestra-consumer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -65,13 +65,13 @@ class PublishConsumeTest extends AbstractDmsRocketMqTest {
 
         var output = consume.run(runContext);
 
-        assertThat(output.getMessagesCount(), greaterThanOrEqualTo(0));
+        assertThat(output.getMessagesCount(), greaterThanOrEqualTo(1));
         assertThat(output.getUri(), notNullValue());
     }
 
     @Test
     void consume_drainsEarly_whenFewerMessagesThanMaxRecords() throws Exception {
-        var topic = "kestra-drain-test-topic";
+        var topic = "kestra-drain-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 12);
         var producerGroup = "kestra-producer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
         var consumerGroup = "kestra-consumer-" + IdUtils.create().toLowerCase().replace("_", "-").substring(0, 8);
         var runContext = runContextFactory.of(Collections.emptyMap());

@@ -234,6 +234,8 @@ public class RealtimeTrigger extends AbstractTrigger
     }
 
     private Consume buildConsumeTask() {
+        // maxRecords=1 satisfies the non-null validation check; Consume.run() is never called here —
+        // only consumer() and toMessage() are reused, so maxRecords has no runtime effect.
         return Consume.builder()
             .id(this.id)
             .type(Consume.class.getName())

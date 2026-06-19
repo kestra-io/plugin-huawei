@@ -11,9 +11,14 @@ import io.kestra.core.models.triggers.RealtimeTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
+import io.kestra.core.runners.RunContext;
+import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.plugin.huawei.dms.rocketmq.models.Message;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import org.apache.rocketmq.acl.common.AclClientRPCHook;
+import org.apache.rocketmq.acl.common.SessionCredentials;
+import org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -251,7 +256,7 @@ public class RealtimeTrigger extends AbstractTrigger
         }
     }
 
-    private DefaultMQPushConsumer buildPushConsumer(io.kestra.core.runners.RunContext runContext, String consumerGroup) throws io.kestra.core.exceptions.IllegalVariableEvaluationException {
+    private DefaultMQPushConsumer buildPushConsumer(RunContext runContext, String consumerGroup) throws IllegalVariableEvaluationException {
         var rNameServer = runContext.render(nameServerAddr).as(String.class).orElseThrow();
         var rAk = runContext.render(accessKeyId).as(String.class).orElse(null);
         var rSk = runContext.render(secretAccessKey).as(String.class).orElse(null);
@@ -259,9 +264,8 @@ public class RealtimeTrigger extends AbstractTrigger
 
         DefaultMQPushConsumer consumer;
         if (rAk != null && rSk != null) {
-            var hook = new org.apache.rocketmq.acl.common.AclClientRPCHook(
-                new org.apache.rocketmq.acl.common.SessionCredentials(rAk, rSk));
-            consumer = new DefaultMQPushConsumer(consumerGroup, hook, new org.apache.rocketmq.client.consumer.rebalance.AllocateMessageQueueAveragely());
+            var hook = new AclClientRPCHook(new SessionCredentials(rAk, rSk));
+            consumer = new DefaultMQPushConsumer(consumerGroup, hook, new AllocateMessageQueueAveragely());
         } else {
             consumer = new DefaultMQPushConsumer(consumerGroup);
         }

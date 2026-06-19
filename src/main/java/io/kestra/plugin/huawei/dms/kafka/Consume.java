@@ -130,6 +130,8 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         var rKeySerdeType = runContext.render(keySerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
         var rValueSerdeType = runContext.render(valueSerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
         var rPollDuration = runContext.render(pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5));
+        var rMaxRecords = runContext.render(maxRecords).as(Integer.class).orElse(null);
+        var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(null);
 
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         var total = 0;
@@ -148,7 +150,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
                     FileSerde.write(output, toMessage(record, rKeySerdeType, rValueSerdeType));
                     total++;
                 }
-                finished = isFinished(runContext, total, started);
+                finished = isFinished(rMaxRecords, rMaxDuration, total, started);
                 if (!finished && records.isEmpty()) {
                     finished = isDrained(consumer);
                 }
@@ -167,18 +169,14 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
             .build();
     }
 
-    private boolean isFinished(RunContext runContext, int count, ZonedDateTime start) throws Exception {
-        var rMax = runContext.render(maxRecords).as(Integer.class);
-        if (rMax.isPresent() && count >= rMax.get()) {
+    private boolean isFinished(Integer rMax, Duration rDuration, int count, ZonedDateTime start) {
+        if (rMax != null && count >= rMax) {
             return true;
         }
-        var rDuration = runContext.render(maxDuration).as(Duration.class);
-        if (rDuration.isPresent() && ZonedDateTime.now().toEpochSecond() > start.plus(rDuration.get()).toEpochSecond()) {
+        if (rDuration != null && ZonedDateTime.now().toEpochSecond() > start.plus(rDuration).toEpochSecond()) {
             return true;
         }
-        return count == 0
-            && runContext.render(maxDuration).as(Duration.class).isEmpty()
-            && runContext.render(maxRecords).as(Integer.class).isEmpty();
+        return count == 0 && rDuration == null && rMax == null;
     }
 
     /**

@@ -36,6 +36,7 @@ public interface DmsRocketMqConnectionInterface {
         title = "Consumer or producer group ID.",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
+    @NotNull
     @PluginProperty(group = "main")
     Property<String> getGroupId();
 
