@@ -245,6 +245,18 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     @PluginProperty(group = "connection")
     private Property<String> projectName;
 
+    @Schema(
+        title = "IAM endpoint domain suffix.",
+        description = """
+            Domain suffix used to build the IAM endpoint URL.
+            Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign cloud
+            (region `eu-west-101` / EU-Dublin).
+            """
+    )
+    @PluginProperty(group = "connection")
+    @Builder.Default
+    private Property<String> endpointSuffix = Property.ofValue("myhuaweicloud.com");
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         return run(runContext, null);
@@ -266,6 +278,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
             .scope(scope)
             .projectName(projectName)
             .durationSeconds(durationSeconds)
+            .endpointSuffix(endpointSuffix)
             .build();
 
         var temp = ConnectionUtils.exchangeForTemporaryCredentials(runContext, config, rRegion, endpointOverride);

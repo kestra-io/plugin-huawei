@@ -1,5 +1,6 @@
 package io.kestra.plugin.huawei;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.huaweicloud.sdk.core.auth.BasicCredentials;
 import com.huaweicloud.sdk.core.auth.GlobalCredentials;
 import com.huaweicloud.sdk.iam.v3.IAMCredentials;
@@ -11,6 +12,7 @@ import com.huaweicloud.sdk.iam.v3.model.TokenAuth;
 import com.huaweicloud.sdk.iam.v3.model.TokenAuthIdentity;
 import com.huaweicloud.sdk.iam.v3.region.IamRegion;
 import io.kestra.core.runners.RunContext;
+import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.AuthMethod;
 import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
 import jakarta.annotation.Nullable;
@@ -76,15 +78,20 @@ public final class ConnectionUtils {
     ) throws Exception {
         var rAuthMethod = runContext.render(config.getAuthMethod()).as(AuthMethod.class).orElse(AuthMethod.PASSWORD);
         var rDuration = runContext.render(config.getDurationSeconds()).as(Integer.class).orElse(900);
+        var rSuffix = runContext.render(config.getEndpointSuffix()).as(String.class).orElse("myhuaweicloud.com");
+
+        // Derive the IAM base URL unless the caller supplied an explicit override (e.g. WireMock in tests).
+        var iamBaseUrl = endpointOverride != null
+            ? endpointOverride
+            : "https://iam." + region + "." + rSuffix;
 
         var resolvedToken = switch (rAuthMethod) {
             case TOKEN -> resolveIamToken(runContext, config);
-            case PASSWORD -> obtainTokenByPassword(runContext, config, region, endpointOverride);
+            case PASSWORD -> obtainTokenByPassword(runContext, config, region, iamBaseUrl);
         };
 
-        var client = endpointOverride != null
-            ? iamClientWithToken(resolvedToken, region, endpointOverride)
-            : iamClientWithToken(resolvedToken, region);
+        // Both the token call and the STS call must target the same partition.
+        var client = iamClientWithToken(resolvedToken, region, iamBaseUrl);
 
         var response = client.createTemporaryAccessKeyByToken(buildStsRequest(resolvedToken, rDuration));
 
@@ -124,7 +131,7 @@ public final class ConnectionUtils {
         RunContext runContext,
         TemporaryCredentialsConfig config,
         String region,
-        @Nullable String endpointOverride
+        String iamBaseUrl
     ) throws Exception {
         var rUsername = runContext.render(config.getUsername()).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(
@@ -138,10 +145,6 @@ public final class ConnectionUtils {
                 "account name visible under My Credentials → Domain Name in the console"));
         var rScope = runContext.render(config.getScope()).as(TokenScope.class).orElse(TokenScope.PROJECT);
         var rProjectName = runContext.render(config.getProjectName()).as(String.class).orElse(null);
-
-        var iamEndpoint = endpointOverride != null
-            ? endpointOverride
-            : "https://iam." + region + ".myhuaweicloud.com";
 
         var scopeJson = buildScopeJson(rScope, rDomainName, rProjectName != null ? rProjectName : region);
         var requestBody = """
@@ -169,7 +172,7 @@ public final class ConnectionUtils {
 
         var httpClient = HttpClient.newHttpClient();
         var request = HttpRequest.newBuilder()
-            .uri(URI.create(iamEndpoint + "/v3/auth/tokens"))
+            .uri(URI.create(iamBaseUrl + "/v3/auth/tokens"))
             .header("Content-Type", "application/json;charset=UTF-8")
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build();
@@ -178,8 +181,9 @@ public final class ConnectionUtils {
 
         if (httpResponse.statusCode() != 201) {
             throw new IllegalStateException(
-                "IAM password authentication failed (HTTP " + httpResponse.statusCode() + ") — " +
-                "check that username, password, and domainName are correct and the user is not locked");
+                "IAM password authentication failed (HTTP " + httpResponse.statusCode() + ")" +
+                parseIamError(httpResponse.body()) +
+                " — check that username, password, and domainName are correct and the user is not locked");
         }
 
         var xSubjectToken = httpResponse.headers().firstValue("X-Subject-Token").orElse(null);
@@ -190,6 +194,52 @@ public final class ConnectionUtils {
 
         runContext.logger().debug("IAM session token obtained via password authentication");
         return xSubjectToken;
+    }
+
+    /**
+     * Parses Huawei IAM error JSON ({@code {"error":{"code":...,"message":...,"title":...}}}) and
+     * returns a formatted detail string to append to exception messages.
+     *
+     * <p>Only the three safe fields from the error object are included — the response body for
+     * this endpoint never echoes back submitted credentials.  Falls back to a truncated raw body
+     * when the JSON shape is absent or unparseable.
+     */
+    private static String parseIamError(String body) {
+        if (body == null || body.isBlank()) {
+            return "";
+        }
+        try {
+            var root = JacksonMapper.ofJson().readTree(body);
+            var error = root.path("error");
+            if (!error.isMissingNode()) {
+                var sb = new StringBuilder(": ");
+                var message = textOrNull(error.path("message"));
+                var code = textOrNull(error.path("code"));
+                var title = textOrNull(error.path("title"));
+                if (message != null) {
+                    sb.append(message);
+                }
+                if (code != null) {
+                    sb.append(message != null ? " [" : "[").append("code=").append(code);
+                    if (title != null) {
+                        sb.append(", title=").append(title);
+                    }
+                    sb.append(']');
+                } else if (title != null) {
+                    sb.append(message != null ? " [" : "[").append(title).append(']');
+                }
+                return sb.length() > 2 ? sb.toString() : "";
+            }
+        } catch (Exception ignored) {
+            // JSON parse failure — fall back to safe raw body excerpt
+        }
+        // Truncate to avoid oversized messages; 200 chars is enough to show the error reason
+        var excerpt = body.length() > 200 ? body.substring(0, 200) + "…" : body;
+        return ": " + excerpt;
+    }
+
+    private static String textOrNull(JsonNode node) {
+        return node.isMissingNode() || node.isNull() ? null : node.asText();
     }
 
     private static String buildScopeJson(TokenScope scope, String domainName, String projectName) {

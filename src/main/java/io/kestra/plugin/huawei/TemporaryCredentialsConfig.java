@@ -116,6 +116,18 @@ public class TemporaryCredentialsConfig {
     @Builder.Default
     private Property<Integer> durationSeconds = Property.ofValue(900);
 
+    @Schema(
+        title = "Huawei Cloud IAM endpoint suffix.",
+        description = """
+            Domain suffix used to build the IAM endpoint URL when no explicit endpoint override is set.
+            Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign cloud
+            (region `eu-west-101` / EU-Dublin).
+            """
+    )
+    @PluginProperty(group = "connection")
+    @Builder.Default
+    private Property<String> endpointSuffix = Property.ofValue("myhuaweicloud.com");
+
     @Override
     public String toString() {
         return "TemporaryCredentialsConfig[authMethod=" + authMethod +
@@ -126,6 +138,7 @@ public class TemporaryCredentialsConfig {
             ", scope=" + scope +
             ", projectName=" + projectName +
             ", durationSeconds=" + durationSeconds +
+            ", endpointSuffix=" + endpointSuffix +
             ']';
     }
 

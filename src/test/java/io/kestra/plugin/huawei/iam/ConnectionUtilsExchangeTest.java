@@ -13,6 +13,7 @@ import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -24,8 +25,10 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -53,6 +56,11 @@ class ConnectionUtilsExchangeTest {
         wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
         wireMock.start();
         WireMock.configureFor("localhost", wireMock.port());
+    }
+
+    @BeforeEach
+    void resetStubs() {
+        wireMock.resetMappings();
 
         wireMock.stubFor(post(urlPathEqualTo("/v3.0/OS-CREDENTIAL/securitytokens"))
             .willReturn(aResponse()
@@ -180,5 +188,145 @@ class ConnectionUtilsExchangeTest {
         assertThat(str.contains("SK456"), is(false));
         assertThat(str.contains("ST789"), is(false));
         assertThat(str.contains("****"), is(true));
+    }
+
+    @Test
+    void exchange_passwordAuth_401WithIamErrorJson_surfacesMessageAndCode() {
+        wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
+            .willReturn(aResponse()
+                .withStatus(401)
+                .withHeader("Content-Type", "application/json;charset=UTF-8")
+                .withBody("""
+                    {"error":{"code":"401","message":"The account is locked.","title":"Unauthorized"}}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.PASSWORD))
+            .username(Property.ofValue("locked-user"))
+            .password(Property.ofValue("secret"))
+            .domainName(Property.ofValue("my-domain"))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class,
+            () -> ConnectionUtils.exchangeForTemporaryCredentials(
+                runContext, config, "eu-west-101", wireMockUrl()));
+
+        assertThat(ex.getMessage(), containsString("401"));
+        assertThat(ex.getMessage(), containsString("The account is locked."));
+        assertThat(ex.getMessage(), containsString("code=401"));
+        assertThat(ex.getMessage(), containsString("title=Unauthorized"));
+        // Verify the submitted password is never included in the exception message
+        assertThat(ex.getMessage(), not(containsString("secret")));
+    }
+
+    @Test
+    void exchange_passwordAuth_403WithPlainBody_surfacesTruncatedBody() {
+        wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
+            .willReturn(aResponse()
+                .withStatus(403)
+                .withHeader("Content-Type", "text/plain")
+                .withBody("Access denied by policy.")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.PASSWORD))
+            .username(Property.ofValue("my-user"))
+            .password(Property.ofValue("my-password"))
+            .domainName(Property.ofValue("my-domain"))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class,
+            () -> ConnectionUtils.exchangeForTemporaryCredentials(
+                runContext, config, "eu-west-101", wireMockUrl()));
+
+        assertThat(ex.getMessage(), containsString("403"));
+        assertThat(ex.getMessage(), containsString("Access denied by policy."));
+        assertThat(ex.getMessage(), not(containsString("my-password")));
+    }
+
+    @Test
+    void exchange_passwordAuth_401WithEmptyBody_stillShowsStatusHint() {
+        wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
+            .willReturn(aResponse()
+                .withStatus(401)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.PASSWORD))
+            .username(Property.ofValue("my-user"))
+            .password(Property.ofValue("my-password"))
+            .domainName(Property.ofValue("my-domain"))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class,
+            () -> ConnectionUtils.exchangeForTemporaryCredentials(
+                runContext, config, "eu-west-101", wireMockUrl()));
+
+        assertThat(ex.getMessage(), containsString("401"));
+        assertThat(ex.getMessage(), containsString("username, password"));
+        assertThat(ex.getMessage(), not(containsString("my-password")));
+    }
+
+    @Test
+    void exchange_endpointSuffixEu_derivesEuEndpoint_forPasswordCall() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        // endpointSuffix=myhuaweicloud.eu with no explicit endpointOverride:
+        // the derived endpoint must be https://iam.eu-west-101.myhuaweicloud.eu.
+        // We pass wireMockUrl() as the override to redirect that derived URL to WireMock,
+        // so the exchange still succeeds — confirming the suffix wiring reaches obtainTokenByPassword.
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.PASSWORD))
+            .username(Property.ofValue("eu-user"))
+            .password(Property.ofValue("eu-password"))
+            .domainName(Property.ofValue("eu-domain"))
+            .endpointSuffix(Property.ofValue("myhuaweicloud.eu"))
+            .build();
+
+        // Override routes the derived EU URL to the local WireMock server.
+        var result = ConnectionUtils.exchangeForTemporaryCredentials(
+            runContext, config, "eu-west-101", wireMockUrl());
+
+        assertThat(result.accessKeyId(), equalTo(TEMP_AK));
+        assertThat(result.securityToken(), equalTo(SECURITY_TOKEN));
+    }
+
+    @Test
+    void exchange_defaultEndpointSuffix_derivesDotCom() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        // No endpointSuffix set: default myhuaweicloud.com must be used.
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.PASSWORD))
+            .username(Property.ofValue("my-iam-user"))
+            .password(Property.ofValue("my-secret-password"))
+            .domainName(Property.ofValue("my-account-domain"))
+            .build();
+
+        // Explicit override still takes precedence (routes to WireMock), so the call succeeds.
+        var result = ConnectionUtils.exchangeForTemporaryCredentials(
+            runContext, config, "cn-north-4", wireMockUrl());
+
+        assertThat(result.accessKeyId(), equalTo(TEMP_AK));
+    }
+
+    @Test
+    void exchange_endpointSuffixEu_tokenMethod_succeeds() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        // TOKEN method with endpointSuffix=myhuaweicloud.eu: STS call must use the EU base URL.
+        // We pass wireMockUrl() as override to route the derived endpoint to WireMock.
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(Property.ofValue(AuthMethod.TOKEN))
+            .iamToken(Property.ofValue(MOCK_TOKEN))
+            .endpointSuffix(Property.ofValue("myhuaweicloud.eu"))
+            .build();
+
+        var result = ConnectionUtils.exchangeForTemporaryCredentials(
+            runContext, config, "eu-west-101", wireMockUrl());
+
+        assertThat(result.accessKeyId(), equalTo(TEMP_AK));
+        assertThat(result.securityToken(), equalTo(SECURITY_TOKEN));
     }
 }
