@@ -77,7 +77,7 @@ public class TemporaryCredentialsConfig {
             **My Credentials → Domain Name**.
             """
     )
-    @PluginProperty(group = "connection")
+    @PluginProperty(group = "connection", secret = true)
     private Property<String> domainName;
 
     @Schema(
@@ -133,7 +133,7 @@ public class TemporaryCredentialsConfig {
         return "TemporaryCredentialsConfig[authMethod=" + authMethod +
             ", username=" + username +
             ", password=" + redact(password) +
-            ", domainName=" + domainName +
+            ", domainName=" + redact(domainName) +
             ", iamToken=" + redact(iamToken) +
             ", scope=" + scope +
             ", projectName=" + projectName +

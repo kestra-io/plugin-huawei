@@ -218,7 +218,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
             **My Credentials → Domain Name**.
             """
     )
-    @PluginProperty(group = "connection")
+    @PluginProperty(group = "connection", secret = true)
     private Property<String> domainName;
 
     @Schema(
