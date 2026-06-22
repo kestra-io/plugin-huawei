@@ -1,6 +1,5 @@
 package io.kestra.plugin.huawei.dms.rocketmq;
 
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -85,7 +84,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
      *
      * <p>The caller is responsible for starting and shutting down the producer.
      */
-    protected DefaultMQProducer buildProducer(RunContext runContext, String producerGroup) throws IllegalVariableEvaluationException {
+    protected DefaultMQProducer buildProducer(RunContext runContext, String producerGroup) throws Exception {
         var config = huaweiClientConfig(runContext);
         DefaultMQProducer producer;
 
@@ -112,7 +111,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
      *
      * <p>The caller is responsible for starting and shutting down the consumer.
      */
-    protected DefaultMQPullConsumer buildPullConsumer(RunContext runContext, String consumerGroup) throws IllegalVariableEvaluationException {
+    protected DefaultMQPullConsumer buildPullConsumer(RunContext runContext, String consumerGroup) throws Exception {
         var config = huaweiClientConfig(runContext);
         DefaultMQPullConsumer consumer;
 
@@ -139,7 +138,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
      *
      * <p>The caller is responsible for starting and shutting down the consumer.
      */
-    protected DefaultMQPushConsumer buildPushConsumer(RunContext runContext, String consumerGroup) throws IllegalVariableEvaluationException {
+    protected DefaultMQPushConsumer buildPushConsumer(RunContext runContext, String consumerGroup) throws Exception {
         var config = huaweiClientConfig(runContext);
         DefaultMQPushConsumer consumer;
 

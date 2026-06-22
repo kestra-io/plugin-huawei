@@ -12,7 +12,8 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
 import io.kestra.core.models.triggers.TriggerService;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
+import io.kestra.plugin.huawei.AbstractConnectionInterface;
+import io.kestra.plugin.huawei.TemporaryCredentialsConfig;
 import io.kestra.plugin.huawei.dms.rocketmq.models.Message;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
@@ -77,7 +78,7 @@ import java.util.concurrent.atomic.AtomicReference;
     }
 )
 public class RealtimeTrigger extends AbstractTrigger
-    implements RealtimeTriggerInterface, TriggerOutput<Message>, DmsRocketMqConnectionInterface {
+    implements RealtimeTriggerInterface, TriggerOutput<Message>, DmsRocketMqConnectionInterface, AbstractConnectionInterface {
 
     @Schema(
         title = "Name server address.",
@@ -126,23 +127,26 @@ public class RealtimeTrigger extends AbstractTrigger
     @PluginProperty(group = "processing")
     private Property<RocketMqSerdeType> serdeType = Property.ofValue(RocketMqSerdeType.STRING);
 
-    // accessKeyId and secretAccessKey for the ACL hook come from AbstractConnection via the Consume task
-
-    @Schema(
-        title = "Huawei Cloud access key ID.",
-        description = "AK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
-    )
-    @Builder.Default
     @PluginProperty(group = "connection", secret = true)
-    private Property<String> accessKeyId = null;
+    private Property<String> accessKeyId;
 
-    @Schema(
-        title = "Huawei Cloud secret access key.",
-        description = "SK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
-    )
-    @Builder.Default
     @PluginProperty(group = "connection", secret = true)
-    private Property<String> secretAccessKey = null;
+    private Property<String> secretAccessKey;
+
+    @PluginProperty(group = "connection", secret = true)
+    private Property<String> securityToken;
+
+    @PluginProperty(group = "connection")
+    private Property<String> projectId;
+
+    @PluginProperty(group = "connection")
+    private Property<String> domainId;
+
+    @PluginProperty(group = "connection")
+    private Property<String> region;
+
+    @PluginProperty(group = "connection")
+    private Property<TemporaryCredentialsConfig> temporaryCredentials;
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
@@ -258,21 +262,21 @@ public class RealtimeTrigger extends AbstractTrigger
         }
     }
 
-    private DefaultMQPushConsumer buildPushConsumer(RunContext runContext, String consumerGroup) throws IllegalVariableEvaluationException {
-        var rNameServer = runContext.render(nameServerAddr).as(String.class).orElseThrow();
-        var rAk = runContext.render(accessKeyId).as(String.class).orElse(null);
-        var rSk = runContext.render(secretAccessKey).as(String.class).orElse(null);
-        var rInstanceId = runContext.render(instanceId).as(String.class).orElse(null);
-
+    private DefaultMQPushConsumer buildPushConsumer(RunContext runContext, String consumerGroup) throws Exception {
+        var config = huaweiClientConfig(runContext);
         DefaultMQPushConsumer consumer;
-        if (rAk != null && rSk != null) {
-            var hook = new AclClientRPCHook(new SessionCredentials(rAk, rSk));
+
+        if (config.accessKeyId() != null && config.secretAccessKey() != null) {
+            var hook = new AclClientRPCHook(new SessionCredentials(config.accessKeyId(), config.secretAccessKey()));
             consumer = new DefaultMQPushConsumer(consumerGroup, hook, new AllocateMessageQueueAveragely());
         } else {
             consumer = new DefaultMQPushConsumer(consumerGroup);
         }
 
+        var rNameServer = runContext.render(nameServerAddr).as(String.class).orElseThrow();
         consumer.setNamesrvAddr(rNameServer);
+
+        var rInstanceId = runContext.render(instanceId).as(String.class).orElse(null);
         if (rInstanceId != null && !rInstanceId.isBlank()) {
             consumer.setNamespace(rInstanceId);
         }
