@@ -1,7 +1,6 @@
 package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.ObsClient;
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
@@ -32,7 +31,7 @@ public abstract class AbstractObs extends AbstractConnection implements Abstract
      * <p>OBS uses AK/SK signing — the SDK does not support IAM token auth for object operations,
      * so both {@code accessKeyId} and {@code secretAccessKey} must be present.
      */
-    protected ObsClient client(RunContext runContext) throws IllegalVariableEvaluationException {
+    protected ObsClient client(RunContext runContext) throws Exception {
         return ObsService.buildClient(
             huaweiClientConfig(runContext),
             runContext.render(endpointOverride).as(String.class).orElse(null),

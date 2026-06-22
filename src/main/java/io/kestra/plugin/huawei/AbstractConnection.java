@@ -25,6 +25,8 @@ public abstract class AbstractConnection extends Task implements AbstractConnect
 
     protected Property<String> region;
 
+    protected Property<TemporaryCredentialsConfig> temporaryCredentials;
+
     /**
      * Snapshot of all connection-level Huawei properties after templating has been rendered.
      *

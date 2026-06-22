@@ -14,21 +14,33 @@ Teams using Huawei Cloud need first-class Kestra integrations for storage, authe
 
 Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
-- `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`)
+- `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`, `TemporaryCredentialsConfig`)
 - `io.kestra.plugin.huawei.iam.tasks` — IAM authentication tasks (`GetTemporaryCredentials`)
-- `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
+- `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AbstractObsTrigger`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
 - `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
+- `io.kestra.plugin.huawei.dms.kafka` — DMS for Kafka tasks/triggers (`AbstractDmsKafka`, `DmsKafkaConnectionInterface`, `SaslMechanism`, `SerdeType`, `Produce`, `Consume`, `Trigger`, `RealtimeTrigger`)
+- `io.kestra.plugin.huawei.dms.kafka.models` — DMS Kafka output models (`Message`)
+- `io.kestra.plugin.huawei.dms.rocketmq` — DMS for RocketMQ tasks/triggers (`AbstractDmsRocketMq`, `DmsRocketMqConnectionInterface`, `RocketMqSerdeType`, `Publish`, `Consume`, `Trigger`, `RealtimeTrigger`)
+- `io.kestra.plugin.huawei.dms.rocketmq.models` — DMS RocketMQ output models (`Message`)
 
 Infrastructure dependencies (Docker Compose services):
 
 - `app` (`docker-compose.yml`) — Kestra application for manual plugin testing
 - `minio` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
+- `kafka` (`docker-compose-ci.yml`) — KRaft-mode Kafka broker for DMS Kafka integration tests (port 9092, no auth)
+- `rocketmq-namesrv` / `rocketmq-broker` (`docker-compose-ci.yml`) — Apache RocketMQ 4.9.8 for DMS RocketMQ integration tests (namesrv port 9876, broker port 10911)
 
 ### Key Plugin Classes
 
-- `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`, `iamClientWithToken`); central place for credential wiring across all plugin tasks
-- `io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials` — Obtains short-lived STS credentials (temporary AK/SK + security token) via two auth methods: `PASSWORD` (authenticates with IAM username/password via `POST /v3/auth/tokens`, then exchanges the session token for STS credentials via `POST /v3.0/OS-CREDENTIAL/securitytokens`) and `TOKEN` (exchanges an existing `X-Auth-Token` directly); outputs `accessKeyId`, `secretAccessKey`, `securityToken`, and `expirationTime`
+**Auth / IAM**
+
+- `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`, `iamClientWithToken`); also exposes `exchangeForTemporaryCredentials(RunContext, TemporaryCredentialsConfig, region, endpointOverride)` which drives both the inline connection-layer exchange and the `GetTemporaryCredentials` task
+- `io.kestra.plugin.huawei.TemporaryCredentialsConfig` — Nested configuration block for inline IAM credential exchange; holds `authMethod`, `iamToken` (TOKEN path), `username`/`password`/`domainName` (PASSWORD path), `scope`, `projectName`, `durationSeconds`; set as `temporaryCredentials` on any connection
+- `io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials` — **Escape-hatch task**: obtains short-lived STS credentials and exposes them as task outputs (`accessKeyId`, `secretAccessKey`, `securityToken`, `expirationTime`) for manual wiring into downstream tasks or external systems; delegates to `ConnectionUtils.exchangeForTemporaryCredentials`
+
+**OBS**
+
 - `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
 - `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
 - `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
@@ -40,9 +52,64 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.obs.tasks.Downloads` — Lists matching objects, downloads each to Kestra storage, applies NONE/DELETE/MOVE action
 - `io.kestra.plugin.huawei.obs.tasks.Trigger` — Polling trigger that fires when new objects appear in a bucket; applies action after download to avoid re-triggering
 
+**DMS for Kafka**
+
+- `io.kestra.plugin.huawei.dms.kafka.Produce` — Sends messages to a DMS Kafka topic; supports STRING/JSON/BINARY serialization and per-record header/partition overrides
+- `io.kestra.plugin.huawei.dms.kafka.Consume` — Polls a DMS Kafka topic until `maxRecords`/`maxDuration`; writes ION to internal storage; commits offsets on exit
+- `io.kestra.plugin.huawei.dms.kafka.Trigger` — Polling trigger delegating to `Consume`; fires when new records are found
+- `io.kestra.plugin.huawei.dms.kafka.RealtimeTrigger` — Persistent consumer; fires one execution per record; `kill()`/`stop()` via `AtomicBoolean + CountDownLatch + consumer.wakeup()`
+
+**DMS for RocketMQ**
+
+- `io.kestra.plugin.huawei.dms.rocketmq.Publish` — Sends messages to a DMS RocketMQ topic via `DefaultMQProducer`; supports STRING/JSON body serialization
+- `io.kestra.plugin.huawei.dms.rocketmq.Consume` — Pull-mode loop until `maxRecords`/`maxDuration`; writes ION to internal storage
+- `io.kestra.plugin.huawei.dms.rocketmq.Trigger` — Polling trigger delegating to `Consume`; fires when new messages are found
+- `io.kestra.plugin.huawei.dms.rocketmq.RealtimeTrigger` — Push consumer via `DefaultMQPushConsumer`; fires one execution per message; stops via `CountDownLatch`
+
+### Inline Temporary Credentials via `pluginDefaults`
+
+The preferred way to use short-lived credentials is the `temporaryCredentials` nested block on any OBS (or future) task. Set it once via `pluginDefaults` and every task in the namespace obtains fresh STS credentials without manual output wiring:
+
+```yaml
+pluginDefaults:
+  - type: io.kestra.plugin.huawei.obs.tasks
+    values:
+      region: eu-west-101
+      temporaryCredentials:
+        authMethod: PASSWORD
+        username: my-iam-user
+        password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
+        domainName: my-account-domain
+        durationSeconds: 3600
+
+tasks:
+  - id: upload
+    type: io.kestra.plugin.huawei.obs.tasks.Upload
+    bucket: my-bucket
+    from: "{{ inputs.file }}"
+    key: uploads/data.csv
+```
+
+The `GetTemporaryCredentials` task is an escape hatch for the rare cases where you need the raw credential values in subsequent steps or external systems.
+
+**Limitation:** the exchange runs once per task execution. For `RealtimeTrigger` or long-running `Consume` tasks that outlive `durationSeconds`, the temporary credentials will expire mid-run. Use long-lived AK/SK properties or schedule a refresh externally in that case.
+
+### Connection-Layer Credential Exchange
+
+`AbstractConnectionInterface.huaweiClientConfig(RunContext)` checks for `temporaryCredentials` before falling back to static AK/SK properties. The exchange path:
+
+1. `huaweiClientConfig` renders `temporaryCredentials` as `TemporaryCredentialsConfig`
+2. Delegates to `ConnectionUtils.exchangeForTemporaryCredentials(runContext, config, region, endpointOverride)`
+3. For PASSWORD method: `POST /v3/auth/tokens` via `java.net.http.HttpClient` → returns `X-Subject-Token` header
+4. For both methods: `IamClient.createTemporaryAccessKeyByToken(...)` → STS credential in response body
+5. Returns `HuaweiClientConfig` populated with the temporary AK/SK + security token
+
+A second overload `huaweiClientConfig(RunContext, String iamEndpointOverride)` accepts an IAM endpoint override; `null` uses the production endpoint derived from `region`. Tests use this overload to redirect IAM calls to WireMock.
+
 ### Shared OBS Layer
 
 - `AbstractObs extends AbstractConnection implements AbstractObsInterface` — holds `endpointOverride`, `pathStyleAccess`, `authType`; exposes `protected ObsClient client(RunContext)` factory
+- `AbstractObsTrigger extends AbstractTrigger implements AbstractConnectionInterface, AbstractObsInterface` — mirrors `AbstractObs` for triggers; holds all connection fields (including `temporaryCredentials`) and the same `client(RunContext)` factory
 - `AbstractObsObject extends AbstractObs` — adds `bucket` property shared by all single-object tasks
 - `ObsUtils` — static endpoint resolution (override → region-derived → throws)
 - `ObsService` — static helpers: `buildClient(...)` (shared client factory for tasks and Trigger), `download(...)` (buffers via temp file → internal storage), and `list(...)` (paginated, optional regexp filter)
@@ -52,19 +119,41 @@ Infrastructure dependencies (Docker Compose services):
 
 ### Integration Tests
 
-Integration tests require MinIO. Start it with:
+**OBS integration tests** require MinIO. Start it with:
 
 ```bash
-docker compose -f docker-compose-ci.yml up -d
+docker compose -f docker-compose-ci.yml up -d minio
 ```
 
-Then run tests with:
+Then run:
 
 ```bash
 OBS_MINIO_TESTS=true ./gradlew test
 ```
 
-Tests are guarded by `@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")` so they are skipped unless the variable is set. To run against a live Huawei Cloud OBS endpoint instead of MinIO, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`, and optionally `OBS_TEST_BUCKET` to reuse a pre-created bucket).
+**DMS Kafka integration tests** require a Kafka broker:
+
+```bash
+docker compose -f docker-compose-ci.yml up -d kafka
+DMS_KAFKA_TESTS=true DMS_KAFKA_BOOTSTRAP_SERVERS=localhost:9092 ./gradlew test
+```
+
+**DMS RocketMQ integration tests** require RocketMQ namesrv and broker:
+
+```bash
+docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv rocketmq-broker
+DMS_ROCKETMQ_TESTS=true DMS_ROCKETMQ_NAME_SERVER=localhost:9876 ./gradlew test
+```
+
+All tests are guarded by `@EnabledIfEnvironmentVariable` so they are skipped unless the matching gate variable is set.
+
+To run OBS tests against a live Huawei Cloud OBS endpoint instead of MinIO, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`, and optionally `OBS_TEST_BUCKET` to reuse a pre-created bucket).
+
+IAM/WireMock tests run without any env gate:
+
+```bash
+./gradlew test
+```
 
 In CI, `.github/setup-unit.sh` decides the target:
 
@@ -81,6 +170,31 @@ plugin-huawei/
 │   ├── AbstractConnection.java
 │   ├── AbstractConnectionInterface.java
 │   ├── ConnectionUtils.java
+│   ├── TemporaryCredentialsConfig.java
+│   ├── dms/
+│   │   ├── kafka/
+│   │   │   ├── AbstractDmsKafka.java
+│   │   │   ├── Consume.java
+│   │   │   ├── DmsKafkaConnectionInterface.java
+│   │   │   ├── Produce.java
+│   │   │   ├── RealtimeTrigger.java
+│   │   │   ├── SaslMechanism.java
+│   │   │   ├── SerdeType.java
+│   │   │   ├── Trigger.java
+│   │   │   ├── package-info.java
+│   │   │   └── models/
+│   │   │       └── Message.java
+│   │   └── rocketmq/
+│   │       ├── AbstractDmsRocketMq.java
+│   │       ├── Consume.java
+│   │       ├── DmsRocketMqConnectionInterface.java
+│   │       ├── Publish.java
+│   │       ├── RealtimeTrigger.java
+│   │       ├── RocketMqSerdeType.java
+│   │       ├── Trigger.java
+│   │       ├── package-info.java
+│   │       └── models/
+│   │           └── Message.java
 │   ├── iam/
 │   │   └── tasks/
 │   │       ├── GetTemporaryCredentials.java
@@ -89,6 +203,7 @@ plugin-huawei/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
 │       ├── AbstractObsObject.java
+│       ├── AbstractObsTrigger.java
 │       ├── ActionInterface.java
 │       ├── AuthType.java
 │       ├── ListInterface.java
@@ -110,7 +225,17 @@ plugin-huawei/
 │           ├── Upload.java
 │           └── package-info.java
 ├── src/test/java/io/kestra/plugin/huawei/
+│   ├── dms/
+│   │   ├── kafka/
+│   │   │   ├── AbstractDmsKafkaTest.java
+│   │   │   ├── ProduceConsumeTest.java
+│   │   │   └── TriggerTest.java
+│   │   └── rocketmq/
+│   │       ├── AbstractDmsRocketMqTest.java
+│   │       └── PublishConsumeTest.java
 │   ├── iam/
+│   │   ├── ConnectionUtilsExchangeTest.java
+│   │   ├── TemporaryCredentialsConnectionTest.java
 │   │   └── tasks/
 │   │       └── GetTemporaryCredentialsTest.java
 │   └── obs/
@@ -138,6 +263,10 @@ plugin-huawei/
 - `AuthTypeEnum.V2` is required for MinIO; real OBS uses `AuthTypeEnum.OBS` by default
 - IAM SDK: `com.huaweicloud.sdk:huaweicloud-sdk-iam:3.1.152` (via `huaweicloud-sdk-bom` BOM); uses `GlobalCredentials` for AK/SK-based IAM calls and `IAMCredentials` (token in `X-Auth-Token` header) for the STS `createTemporaryAccessKeyByToken` call
 - IAM tests use WireMock (`org.wiremock:wiremock-jetty12`) with `withEndpoint()` override to avoid network calls; production code uses `IamRegion.valueOf(region)` for endpoint resolution
+- `TemporaryCredentialsConfig` uses field name `iamToken` (not `token`) to avoid clashing with the existing `securityToken` connection property; `GetTemporaryCredentials` keeps its public field named `token` for backward compatibility and maps it to `iamToken` when building the config
+- DMS Kafka uses `org.apache.kafka:kafka-clients:3.9.0` (standard Kafka wire protocol; no Huawei SDK)
+- DMS RocketMQ uses `org.apache.rocketmq:rocketmq-client:4.9.8` + `rocketmq-acl:4.9.8`; AK/SK passed via `AclClientRPCHook`; logback/slf4j excluded
+- DMS Kafka integration test gate: `DMS_KAFKA_TESTS=true`; DMS RocketMQ gate: `DMS_ROCKETMQ_TESTS=true`
 
 ## References
 

@@ -1,12 +1,5 @@
 package io.kestra.plugin.huawei.iam.tasks;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByTokenRequest;
-import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByTokenRequestBody;
-import com.huaweicloud.sdk.iam.v3.model.IdentityToken;
-import com.huaweicloud.sdk.iam.v3.model.TokenAuth;
-import com.huaweicloud.sdk.iam.v3.model.TokenAuthIdentity;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -15,6 +8,7 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.Task;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.ConnectionUtils;
+import io.kestra.plugin.huawei.TemporaryCredentialsConfig;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -24,14 +18,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.util.List;
-import java.util.Map;
 
 @SuperBuilder
 @ToString
@@ -55,6 +42,11 @@ import java.util.Map;
 
         The returned `accessKeyId`, `secretAccessKey`, and `securityToken` expire at
         `expirationTime`; refresh before that deadline.
+
+        **Escape-hatch task:** for zero-wiring workflows, prefer the `temporaryCredentials` block on
+        the connection layer (configurable via `pluginDefaults`) so credentials are obtained inline
+        without manual output references. Use this task only when you need the raw credential values
+        in subsequent steps or external systems.
         """
 )
 @Plugin(
@@ -262,162 +254,28 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
         var rRegion = runContext.render(region).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(
                 "region is required to resolve the IAM endpoint — set the 'region' property (e.g. eu-west-101)"));
-        var rAuthMethod = runContext.render(authMethod).as(AuthMethod.class).orElse(AuthMethod.PASSWORD);
-        var rDuration = runContext.render(durationSeconds).as(Integer.class).orElse(900);
 
-        var resolvedToken = switch (rAuthMethod) {
-            case TOKEN -> resolveTokenFromProperty(runContext);
-            case PASSWORD -> obtainTokenByPassword(runContext, rRegion, endpointOverride);
-        };
+        // Map this task's `token` field to `iamToken` in TemporaryCredentialsConfig (different name,
+        // same concept — `token` is kept for backward compatibility of this task's public schema).
+        var config = TemporaryCredentialsConfig.builder()
+            .authMethod(authMethod)
+            .iamToken(token)
+            .username(username)
+            .password(password)
+            .domainName(domainName)
+            .scope(scope)
+            .projectName(projectName)
+            .durationSeconds(durationSeconds)
+            .build();
 
-        var client = endpointOverride != null
-            ? ConnectionUtils.iamClientWithToken(resolvedToken, rRegion, endpointOverride)
-            : ConnectionUtils.iamClientWithToken(resolvedToken, rRegion);
-
-        var response = client.createTemporaryAccessKeyByToken(buildStsRequest(resolvedToken, rDuration));
-
-        var credential = response.getCredential();
-        if (credential == null) {
-            throw new IllegalStateException(
-                "IAM STS returned a successful response but the credential body is missing — " +
-                "check that the token is valid and has not expired");
-        }
-
-        var expirationTime = parseExpiresAt(runContext, credential.getExpiresAt());
-        runContext.logger().debug("Temporary credentials obtained, expires at {}", expirationTime);
+        var temp = ConnectionUtils.exchangeForTemporaryCredentials(runContext, config, rRegion, endpointOverride);
 
         return Output.builder()
-            .accessKeyId(credential.getAccess())
-            .secretAccessKey(credential.getSecret())
-            .securityToken(credential.getSecuritytoken())
-            .expirationTime(expirationTime)
+            .accessKeyId(temp.accessKeyId())
+            .secretAccessKey(temp.secretAccessKey())
+            .securityToken(temp.securityToken())
+            .expirationTime(temp.expiresAt())
             .build();
-    }
-
-    private String resolveTokenFromProperty(RunContext runContext) throws Exception {
-        return runContext.render(token).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException(
-                "token is required when authMethod is TOKEN — provide an existing IAM X-Auth-Token " +
-                "or switch to authMethod=PASSWORD to authenticate with username and password"));
-    }
-
-    /**
-     * Obtains an IAM session token via {@code POST /v3/auth/tokens}.
-     *
-     * <p>This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used
-     * here — there is no valid credential to supply to the client builder before the call succeeds.
-     * We use {@code java.net.http.HttpClient} directly instead, which keeps the credential-less
-     * nature explicit and avoids surprising NPE behaviour in SDK internals.
-     */
-    private String obtainTokenByPassword(RunContext runContext, String rRegion, String endpointOverride) throws Exception {
-        var rUsername = runContext.render(username).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException(
-                "username is required when authMethod is PASSWORD"));
-        var rPassword = runContext.render(password).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException(
-                "password is required when authMethod is PASSWORD"));
-        var rDomainName = runContext.render(domainName).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException(
-                "domainName is required when authMethod is PASSWORD — this is the Huawei Cloud " +
-                "account name visible under My Credentials → Domain Name in the console"));
-        var rScope = runContext.render(scope).as(TokenScope.class).orElse(TokenScope.PROJECT);
-        var rProjectName = runContext.render(projectName).as(String.class).orElse(null);
-
-        var iamEndpoint = endpointOverride != null
-            ? endpointOverride
-            : "https://iam." + rRegion + ".myhuaweicloud.com";
-
-        var scopeJson = buildScopeJson(rScope, rDomainName, rProjectName != null ? rProjectName : rRegion);
-        var requestBody = """
-            {
-              "auth": {
-                "identity": {
-                  "methods": ["password"],
-                  "password": {
-                    "user": {
-                      "name": %s,
-                      "password": %s,
-                      "domain": { "name": %s }
-                    }
-                  }
-                },
-                "scope": %s
-              }
-            }
-            """.formatted(
-            jsonString(rUsername),
-            jsonString(rPassword),
-            jsonString(rDomainName),
-            scopeJson
-        );
-
-        var httpClient = HttpClient.newHttpClient();
-        var request = HttpRequest.newBuilder()
-            .uri(URI.create(iamEndpoint + "/v3/auth/tokens"))
-            .header("Content-Type", "application/json;charset=UTF-8")
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-            .build();
-
-        var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (httpResponse.statusCode() != 201) {
-            throw new IllegalStateException(
-                "IAM password authentication failed (HTTP " + httpResponse.statusCode() + ") — " +
-                "check that username, password, and domainName are correct and the user is not locked");
-        }
-
-        var xSubjectToken = httpResponse.headers().firstValue("X-Subject-Token").orElse(null);
-        if (xSubjectToken == null || xSubjectToken.isBlank()) {
-            throw new IllegalStateException(
-                "IAM /v3/auth/tokens returned 201 but the X-Subject-Token response header is missing");
-        }
-
-        runContext.logger().debug("IAM session token obtained via password authentication");
-        return xSubjectToken;
-    }
-
-    private static String buildScopeJson(TokenScope scope, String domainName, String projectName) {
-        return switch (scope) {
-            case PROJECT -> """
-                { "project": { "name": %s } }
-                """.formatted(jsonString(projectName)).strip();
-            case DOMAIN -> """
-                { "domain": { "name": %s } }
-                """.formatted(jsonString(domainName)).strip();
-        };
-    }
-
-    /** Produces a JSON-safe quoted string, escaping backslash and double-quote characters. */
-    private static String jsonString(String value) {
-        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-    }
-
-    private static CreateTemporaryAccessKeyByTokenRequest buildStsRequest(String tokenValue, int duration) {
-        var identityToken = new IdentityToken()
-            .withId(tokenValue)
-            .withDurationSeconds(duration);
-
-        var identity = new TokenAuthIdentity()
-            .withMethods(List.of(TokenAuthIdentity.MethodsEnum.TOKEN))
-            .withToken(identityToken);
-
-        var auth = new TokenAuth().withIdentity(identity);
-        var body = new CreateTemporaryAccessKeyByTokenRequestBody().withAuth(auth);
-        return new CreateTemporaryAccessKeyByTokenRequest().withBody(body);
-    }
-
-    private Instant parseExpiresAt(RunContext runContext, String expiresAt) {
-        if (expiresAt == null || expiresAt.isBlank()) {
-            return Instant.now().plusSeconds(900);
-        }
-        try {
-            return OffsetDateTime.parse(expiresAt).toInstant();
-        } catch (Exception e) {
-            runContext.logger().warn(
-                "Could not parse IAM STS expires_at '{}', defaulting to 900 s — value: {}",
-                expiresAt, e.getMessage());
-            return Instant.now().plusSeconds(900);
-        }
     }
 
     @Builder
