@@ -8,6 +8,27 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class DataArtsUtilsTest {
 
+    // ── DataArtsService.isTerminalState ──────────────────────────────────────────
+
+    @Test
+    void isTerminalState_null_returnsFalse() {
+        assertThat(DataArtsService.isTerminalState(null), equalTo(false));
+    }
+
+    @Test
+    void isTerminalState_knownTerminalStatuses_returnTrue() {
+        for (var status : new String[]{"success", "fail", "running-exception", "manual-stop"}) {
+            assertThat("expected terminal for: " + status, DataArtsService.isTerminalState(status), equalTo(true));
+        }
+    }
+
+    @Test
+    void isTerminalState_nonTerminalStatuses_returnFalse() {
+        for (var status : new String[]{"waiting", "running", "pause"}) {
+            assertThat("expected non-terminal for: " + status, DataArtsService.isTerminalState(status), equalTo(false));
+        }
+    }
+
     @Test
     void endpointOverride_winsOverRegion() {
         var endpoint = DataArtsUtils.dataArtsEndpoint("https://custom.dataarts.endpoint.com", "eu-west-101");

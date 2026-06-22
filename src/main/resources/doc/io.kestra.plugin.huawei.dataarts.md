@@ -47,7 +47,7 @@ When `wait: true`, the task polls until the run reaches a terminal state (`succe
 
 Outputs: `jobName`, `instanceId`, `status`, `planTime`, `startTime`, `endTime`, `lastUpdateTime`, `errorMessage`.
 
-**Gotcha**: the DataArts Factory start API is asynchronous — the new instance may not appear in the list immediately. `StartJobRun` retries the instance list up to 10 times (spaced by `interval`) before giving up with a clear error.
+**Gotcha**: the DataArts Factory start API is asynchronous — the new instance may not appear in the list immediately. `StartJobRun` retries the instance list (spaced by `interval`) until the new instance appears or `maxDuration` is exhausted, then fails with a clear error. Increase `maxDuration` if jobs take longer than the default 1 hour to appear.
 
 ### GetJobRun
 

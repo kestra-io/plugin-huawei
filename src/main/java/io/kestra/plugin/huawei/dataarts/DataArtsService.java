@@ -31,6 +31,12 @@ import java.util.Set;
  * <p>The Huawei v3 Java SDK does not generate typed methods for the DLF job lifecycle, so requests
  * are built manually and signed via the SDK core's {@link AKSKSigner}. The JDK {@link HttpClient}
  * handles transport.
+ *
+ * <p><b>Transport exemption</b>: this class uses {@link java.net.http.HttpClient} (JDK) instead of
+ * the Kestra internal HTTP client. The Huawei SDK's {@link AKSKSigner} requires a
+ * {@link com.huaweicloud.sdk.core.http.HttpRequest} to compute the HMAC-SHA256 canonical request;
+ * the Kestra client does not expose a compatible request type, so the raw JDK client is the only
+ * viable transport here.
  */
 public final class DataArtsService {
 
@@ -48,8 +54,11 @@ public final class DataArtsService {
 
     /**
      * Terminal states: the job run will not advance further once in one of these states.
+     * Returns {@code false} for {@code null} status (freshly-queued instances whose status
+     * field has not yet been populated by the API).
      */
     public static boolean isTerminalState(String status) {
+        if (status == null) return false;
         return switch (status) {
             case "success", "fail", "running-exception", "manual-stop" -> true;
             default -> false;
@@ -150,7 +159,8 @@ public final class DataArtsService {
             offset += limit;
         }
 
-        // Sort newest first: prefer planTime, fall back to startTime, then 0.
+        // Sort newest first across all pages: the API does not guarantee stable ordering when
+        // results span multiple pages, so a client-side sort is required for correctness.
         result.sort((a, b) -> {
             var ta = a.getPlanTime() != null ? a.getPlanTime() : (a.getStartTime() != null ? a.getStartTime() : 0L);
             var tb = b.getPlanTime() != null ? b.getPlanTime() : (b.getStartTime() != null ? b.getStartTime() : 0L);

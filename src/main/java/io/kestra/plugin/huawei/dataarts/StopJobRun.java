@@ -137,6 +137,13 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
         var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
         var current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
         while (!DataArtsService.isTerminalState(current.getStatus())) {
+            runContext.logger().debug("Waiting for job '{}' instance {} to stop, status={}", rJobName, rInstanceId, current.getStatus());
+            try {
+                Thread.sleep(rInterval.toMillis());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
             if (System.currentTimeMillis() > deadline) {
                 throw new IllegalStateException(
                     "DataArts Factory job '" + rJobName + "' instance " + rInstanceId +
@@ -144,8 +151,6 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
                     " — current status: " + current.getStatus() +
                     ". Increase maxDuration or check the DataArts Studio console.");
             }
-            runContext.logger().debug("Waiting for job '{}' instance {} to stop, status={}", rJobName, rInstanceId, current.getStatus());
-            Thread.sleep(rInterval.toMillis());
             current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
         }
 
@@ -168,35 +173,27 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(title = "Job name.")
-        @PluginProperty(group = "main")
         private final String jobName;
 
         @Schema(title = "Job run instance ID.")
-        @PluginProperty(group = "main")
         private final Long instanceId;
 
         @Schema(title = "Final status of the job run after stopping.")
-        @PluginProperty(group = "main")
         private final String status;
 
         @Schema(title = "Scheduled plan time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long planTime;
 
         @Schema(title = "Actual start time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long startTime;
 
         @Schema(title = "End time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long endTime;
 
         @Schema(title = "Last update time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long lastUpdateTime;
 
         @Schema(title = "Error message when the job run failed; null otherwise.")
-        @PluginProperty(group = "main")
         private final String errorMessage;
     }
 }

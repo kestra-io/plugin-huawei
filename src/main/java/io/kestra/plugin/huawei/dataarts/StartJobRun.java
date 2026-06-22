@@ -181,7 +181,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
 
         // Resolve the new instance — the start API returns 204 with no body.
         var instance = resolveNewestInstance(
-            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInterval, waterMark);
+            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInterval, rMaxDuration, waterMark);
 
         runContext.logger().info("Job '{}' started, instanceId={}, status={}", rJobName, instance.getInstanceId(), instance.getStatus());
 
@@ -194,6 +194,12 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         var current = instance;
 
         while (!DataArtsService.isTerminalState(current.getStatus())) {
+            try {
+                Thread.sleep(rInterval.toMillis());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
             if (System.currentTimeMillis() > deadline) {
                 throw new IllegalStateException(
                     "DataArts Factory job '" + rJobName + "' (instance " + current.getInstanceId() +
@@ -201,7 +207,6 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
                     " — current status: " + current.getStatus() +
                     ". Use StopJobRun to cancel it, or increase maxDuration.");
             }
-            Thread.sleep(rInterval.toMillis());
             current = DataArtsService.getInstance(
                 config, rEndpoint, rProjectId, rWorkspaceId, rJobName, current.getInstanceId());
             runContext.logger().debug("Job '{}' instanceId={} status={}", rJobName, current.getInstanceId(), current.getStatus());
@@ -221,17 +226,28 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     }
 
     /**
-     * Polls the instance list until an instance with instanceId > waterMark appears.
-     * The water mark is snapshotted before the start call to avoid picking up a recent prior run
+     * Polls the instance list until an instance with instanceId > waterMark appears, bounded by
+     * {@code maxDuration}. The deadline is shared with the main polling loop so resolution and
+     * status polling together respect the user-configured timeout.
+     *
+     * <p>The water mark is snapshotted before the start call to avoid picking up a recent prior run
      * whose planTime/startTime could sort newer than the one just triggered.
+     *
+     * <p><b>Known limitation</b>: the waterMark is derived from at most the first-page results
+     * (top 10 instances by recency). If the job has more than 10 prior runs, instances ranked 11th
+     * or lower are not inspected, so the waterMark may undercount. In that unlikely edge case a
+     * concurrent run with a lower ID than the 10th-most-recent could theoretically be mistaken for
+     * the new run. In practice jobs that are triggered infrequently are unaffected.
      */
     private JobRun resolveNewestInstance(
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint, String projectId, String workspaceId,
-        String jobName, Duration interval, long waterMark
+        String jobName, Duration interval, Duration maxDuration, long waterMark
     ) throws Exception {
-        for (int attempt = 0; attempt < 10; attempt++) {
+        var deadline = System.currentTimeMillis() + maxDuration.toMillis();
+        int attempt = 0;
+        while (System.currentTimeMillis() < deadline) {
             var instances = DataArtsService.listInstancesFirstPage(config, endpoint, projectId, workspaceId, jobName, 10);
             var newInstance = instances.stream()
                 .filter(r -> r.getInstanceId() != null && r.getInstanceId() > waterMark)
@@ -239,12 +255,18 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
             if (newInstance.isPresent()) {
                 return newInstance.get();
             }
-            runContext.logger().debug("New instance not yet visible for job '{}' (waterMark={}), waiting {} (attempt {}/10)", jobName, waterMark, interval, attempt + 1);
-            Thread.sleep(interval.toMillis());
+            attempt++;
+            runContext.logger().debug("New instance not yet visible for job '{}' (waterMark={}), waiting {} (attempt {})", jobName, waterMark, interval, attempt);
+            try {
+                Thread.sleep(interval.toMillis());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw ie;
+            }
         }
         throw new IllegalStateException(
-            "DataArts Factory job '" + jobName + "' was started but no new instance appeared within the expected time — " +
-            "the job may have been queued but not yet scheduled. Try increasing the polling interval.");
+            "DataArts Factory job '" + jobName + "' was started but no new instance appeared within " + maxDuration +
+            " — the job may have been queued but not yet scheduled. Try increasing maxDuration or the polling interval.");
     }
 
     private static Output buildOutput(JobRun run) {
@@ -265,35 +287,27 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(title = "Job name.")
-        @PluginProperty(group = "main")
         private final String jobName;
 
         @Schema(title = "Job run instance ID.")
-        @PluginProperty(group = "main")
         private final Long instanceId;
 
         @Schema(title = "Terminal status of the job run.")
-        @PluginProperty(group = "main")
         private final String status;
 
         @Schema(title = "Scheduled plan time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long planTime;
 
         @Schema(title = "Actual start time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long startTime;
 
         @Schema(title = "End time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long endTime;
 
         @Schema(title = "Last update time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long lastUpdateTime;
 
         @Schema(title = "Error message when the job run failed; null otherwise.")
-        @PluginProperty(group = "main")
         private final String errorMessage;
     }
 }

@@ -111,7 +111,7 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
             run = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
         } else {
             runContext.logger().debug("Resolving latest instance for job '{}'", rJobName);
-            var instances = DataArtsService.listInstances(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, 10);
+            var instances = DataArtsService.listInstancesFirstPage(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, 1);
             if (instances.isEmpty()) {
                 throw new IllegalStateException(
                     "No job run instances found for job '" + rJobName +
@@ -139,35 +139,27 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(title = "Job name.")
-        @PluginProperty(group = "main")
         private final String jobName;
 
         @Schema(title = "Job run instance ID.")
-        @PluginProperty(group = "main")
         private final Long instanceId;
 
         @Schema(title = "Current status of the job run.")
-        @PluginProperty(group = "main")
         private final String status;
 
         @Schema(title = "Scheduled plan time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long planTime;
 
         @Schema(title = "Actual start time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long startTime;
 
         @Schema(title = "End time (epoch milliseconds); null if still running.")
-        @PluginProperty(group = "main")
         private final Long endTime;
 
         @Schema(title = "Last update time (epoch milliseconds).")
-        @PluginProperty(group = "main")
         private final Long lastUpdateTime;
 
         @Schema(title = "Error message when the job run failed; null otherwise.")
-        @PluginProperty(group = "main")
         private final String errorMessage;
     }
 }

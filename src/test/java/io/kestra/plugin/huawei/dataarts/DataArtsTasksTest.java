@@ -492,7 +492,7 @@ class DataArtsTasksTest {
     void getJobRun_noInstances_throws() {
         wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
             .withQueryParam("jobName", WireMock.equalTo("empty_job"))
-            .withQueryParam("limit", WireMock.equalTo("10"))
+            .withQueryParam("limit", WireMock.equalTo("1"))
             .withQueryParam("offset", WireMock.equalTo("0"))
             .willReturn(aResponse()
                 .withStatus(200)
@@ -628,6 +628,76 @@ class DataArtsTasksTest {
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), containsString("endpointOverride"));
         assertThat(ex.getMessage(), containsString("region"));
+    }
+
+    /**
+     * Verifies that null status (freshly-queued instance) does not cause an NPE in the polling
+     * loop via isTerminalState — the loop must treat null as non-terminal and continue polling.
+     */
+    @Test
+    void startJobRun_nullStatusInstance_treatedAsNonTerminal() throws Exception {
+        var nullStatusJob = "null_status_job";
+
+        // Pre-start: no prior runs.
+        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+            .inScenario("null-status")
+            .whenScenarioStateIs(Scenario.STARTED)
+            .withQueryParam("jobName", WireMock.equalTo(nullStatusJob))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"instances\":[]}"))
+            .willSetStateTo("post-start"));
+
+        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/start"))
+            .willReturn(aResponse().withStatus(204)));
+
+        // Post-start: instance visible with null status (freshly queued).
+        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+            .inScenario("null-status")
+            .whenScenarioStateIs("post-start")
+            .withQueryParam("jobName", WireMock.equalTo(nullStatusJob))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"instances":[{"instanceId": 333, "planTime": 1700000000000}]}
+                    """)));
+
+        // Instance detail starts with null status, transitions to success.
+        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/instances/333"))
+            .inScenario("null-status-detail")
+            .whenScenarioStateIs(Scenario.STARTED)
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"instanceId\": 333, \"planTime\": 1700000000000}"))
+            .willSetStateTo("succeeded"));
+
+        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/instances/333"))
+            .inScenario("null-status-detail")
+            .whenScenarioStateIs("succeeded")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(instanceDetailBody(333, "success"))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = StartJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(nullStatusJob))
+            .wait(Property.ofValue(true))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
+            .interval(Property.ofValue(Duration.ofMillis(50)))
+            .build();
+
+        var output = task.run(runContext);
+        assertThat(output.getInstanceId(), equalTo(333L));
+        assertThat(output.getStatus(), equalTo("success"));
     }
 
     // ── Authentication ───────────────────────────────────────────────────────────
