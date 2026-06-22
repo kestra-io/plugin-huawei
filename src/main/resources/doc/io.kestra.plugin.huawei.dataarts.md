@@ -65,7 +65,7 @@ Stops an in-progress DataArts Factory job run instance.
 
 Required: `jobName`, `instanceId`, `projectId`.
 
-Optional: `wait` (default `true`), `interval` (default 3 s).
+Optional: `wait` (default `true`), `maxDuration` (default 10 minutes), `interval` (default 3 s).
 
 When `wait: true`, polls until the instance confirms `manual-stop` or another terminal state.
 

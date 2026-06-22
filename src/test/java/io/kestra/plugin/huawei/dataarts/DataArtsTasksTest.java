@@ -21,6 +21,7 @@ import java.util.Map;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -172,6 +173,12 @@ class DataArtsTasksTest {
         assertThat(output.getStartTime(), equalTo(1700000001000L));
         assertThat(output.getEndTime(), equalTo(1700000060000L));
         assertThat(output.getErrorMessage(), org.hamcrest.Matchers.nullValue());
+
+        // Guard against Content-Type duplication: a doubled header arrives as
+        // "application/json, application/json" (comma-joined). The not(containing(","))
+        // matcher fails if the signer loop appends a second content-type value.
+        wireMock.verify(postRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/start"))
+            .withHeader("Content-Type", WireMock.not(WireMock.containing(","))));
     }
 
     @Test

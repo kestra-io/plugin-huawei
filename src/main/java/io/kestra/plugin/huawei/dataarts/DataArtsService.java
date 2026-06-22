@@ -289,9 +289,12 @@ public final class DataArtsService {
         var sdkReq = sdkReqBuilder.build();
 
         // Sign with AK/SK if available; otherwise fall back to X-Auth-Token.
+        // Content-Type is NOT set here — AKSKSigner includes it in the signed headers map
+        // (from withContentType above), so the loop below supplies exactly one value that
+        // matches what was signed. Setting it here too would produce a doubled header on
+        // the wire and break the HMAC verification on the server.
         var jdkReqBuilder = java.net.http.HttpRequest.newBuilder()
             .uri(URI.create(url))
-            .header("Content-Type", "application/json")
             .timeout(Duration.ofSeconds(30));
 
         if (workspaceId != null && !workspaceId.isBlank()) {
