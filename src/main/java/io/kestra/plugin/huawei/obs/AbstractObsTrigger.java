@@ -23,7 +23,7 @@ import lombok.experimental.SuperBuilder;
  * supplied by {@link AbstractConnectionInterface} and {@link AbstractObsInterface}, exactly as for tasks.
  */
 @SuperBuilder
-@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken"})
+@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken", "temporaryCredentials"})
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
