@@ -1,7 +1,6 @@
 package io.kestra.plugin.huawei.iam;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
-import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
@@ -55,7 +54,6 @@ class ConnectionUtilsExchangeTest {
     void startWireMock() {
         wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
         wireMock.start();
-        WireMock.configureFor("localhost", wireMock.port());
     }
 
     @BeforeEach

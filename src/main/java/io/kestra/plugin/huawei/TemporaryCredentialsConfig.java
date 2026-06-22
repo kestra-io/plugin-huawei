@@ -6,6 +6,7 @@ import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.AuthMethod;
 import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.experimental.SuperBuilder;
@@ -24,6 +25,7 @@ import lombok.experimental.SuperBuilder;
  */
 @SuperBuilder
 @Getter
+@EqualsAndHashCode
 @NoArgsConstructor
 public class TemporaryCredentialsConfig {
 

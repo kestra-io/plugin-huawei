@@ -11,6 +11,10 @@ import com.huaweicloud.sdk.iam.v3.model.IdentityToken;
 import com.huaweicloud.sdk.iam.v3.model.TokenAuth;
 import com.huaweicloud.sdk.iam.v3.model.TokenAuthIdentity;
 import com.huaweicloud.sdk.iam.v3.region.IamRegion;
+import io.kestra.core.http.HttpRequest;
+import io.kestra.core.http.client.HttpClient;
+import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.AuthMethod;
@@ -18,9 +22,6 @@ import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
 import jakarta.annotation.Nullable;
 
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -84,6 +85,10 @@ public final class ConnectionUtils {
         var rSuffix = runContext.render(config.getEndpointSuffix()).as(String.class).orElse("myhuaweicloud.com");
 
         // Derive the IAM base URL unless the caller supplied an explicit override (e.g. WireMock in tests).
+        if (endpointOverride == null && (region == null || region.isBlank())) {
+            throw new IllegalArgumentException(
+                "region is required to resolve the IAM endpoint — set the 'region' property (e.g. eu-west-101)");
+        }
         var iamBaseUrl = endpointOverride != null
             ? endpointOverride
             : "https://iam." + region + "." + rSuffix;
@@ -126,15 +131,12 @@ public final class ConnectionUtils {
                 "or switch to authMethod=PASSWORD to authenticate with username and password"));
     }
 
-    // This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used —
-    // there is no valid credential to supply to the client builder before the call succeeds.
-    // A shared JDK HttpClient is used instead, keeping the credential-less nature explicit.
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
-
     /**
      * Obtains an IAM session token via {@code POST /v3/auth/tokens}.
+     *
+     * <p>This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used —
+     * there is no valid credential to supply to the client builder before the call succeeds.
+     * Kestra's HTTP client is used instead, constructed per-call inside try-with-resources.
      */
     private static String obtainTokenByPassword(
         RunContext runContext,
@@ -162,30 +164,40 @@ public final class ConnectionUtils {
         var requestBody = buildPasswordAuthBody(rUsername, rPassword, rDomainName, rScope,
             rProjectName != null ? rProjectName : region);
 
-        var request = HttpRequest.newBuilder()
-            .uri(URI.create(iamBaseUrl + "/v3/auth/tokens"))
-            .header("Content-Type", "application/json;charset=UTF-8")
-            .timeout(Duration.ofSeconds(30))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+        var httpConfig = HttpConfiguration.builder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .readTimeout(Duration.ofSeconds(30))
+            .allowFailed(Property.ofValue(true))
             .build();
 
-        var httpResponse = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+        var request = HttpRequest.builder()
+            .method("POST")
+            .uri(URI.create(iamBaseUrl + "/v3/auth/tokens"))
+            .body(HttpRequest.StringRequestBody.builder()
+                .content(requestBody)
+                .contentType("application/json")
+                .build())
+            .build();
 
-        if (httpResponse.statusCode() != 201) {
-            throw new IllegalStateException(
-                "IAM password authentication failed (HTTP " + httpResponse.statusCode() + ")" +
-                parseIamError(httpResponse.body()) +
-                " — check that username, password, and domainName are correct and the user is not locked");
+        try (var httpClient = new HttpClient(runContext, httpConfig)) {
+            var httpResponse = httpClient.request(request, String.class);
+
+            if (httpResponse.getStatus().getCode() != 201) {
+                throw new IllegalStateException(
+                    "IAM password authentication failed (HTTP " + httpResponse.getStatus().getCode() + ")" +
+                    parseIamError(httpResponse.getBody()) +
+                    " — check that username, password, and domainName are correct and the user is not locked");
+            }
+
+            var xSubjectToken = httpResponse.getHeaders().firstValue("X-Subject-Token").orElse(null);
+            if (xSubjectToken == null || xSubjectToken.isBlank()) {
+                throw new IllegalStateException(
+                    "IAM /v3/auth/tokens returned 201 but the X-Subject-Token response header is missing");
+            }
+
+            runContext.logger().debug("IAM session token obtained via password authentication");
+            return xSubjectToken;
         }
-
-        var xSubjectToken = httpResponse.headers().firstValue("X-Subject-Token").orElse(null);
-        if (xSubjectToken == null || xSubjectToken.isBlank()) {
-            throw new IllegalStateException(
-                "IAM /v3/auth/tokens returned 201 but the X-Subject-Token response header is missing");
-        }
-
-        runContext.logger().debug("IAM session token obtained via password authentication");
-        return xSubjectToken;
     }
 
     private static String buildPasswordAuthBody(
@@ -289,7 +301,7 @@ public final class ConnectionUtils {
      * specific project; when omitted the SDK will attempt to auto-resolve it, which may fail for
      * certain endpoints.
      */
-    public static BasicCredentials projectCredentials(AbstractConnection.HuaweiClientConfig config) {
+    static BasicCredentials projectCredentials(AbstractConnection.HuaweiClientConfig config) {
         var creds = new BasicCredentials()
             .withAk(config.accessKeyId())
             .withSk(config.secretAccessKey());
@@ -309,7 +321,7 @@ public final class ConnectionUtils {
      * account; when omitted the SDK will attempt to auto-resolve it from the AK, which requires
      * an extra network call and may fail in isolated environments.
      */
-    public static GlobalCredentials globalCredentials(AbstractConnection.HuaweiClientConfig config) {
+    static GlobalCredentials globalCredentials(AbstractConnection.HuaweiClientConfig config) {
         var creds = new GlobalCredentials()
             .withAk(config.accessKeyId())
             .withSk(config.secretAccessKey());
@@ -331,7 +343,7 @@ public final class ConnectionUtils {
      *
      * @throws IllegalArgumentException if {@code config.region()} is null or not a known IAM region
      */
-    public static IamClient iamClient(AbstractConnection.HuaweiClientConfig config) {
+    static IamClient iamClient(AbstractConnection.HuaweiClientConfig config) {
         if (config.region() == null || config.region().isBlank()) {
             throw new IllegalArgumentException(
                 "region is required to resolve the IAM endpoint — set the 'region' property (e.g. eu-west-101)");
@@ -347,7 +359,7 @@ public final class ConnectionUtils {
      *
      * <p>Used in tests to point the client at a WireMock server. Not intended for production use.
      */
-    public static IamClient iamClient(AbstractConnection.HuaweiClientConfig config, String endpointOverride) {
+    static IamClient iamClient(AbstractConnection.HuaweiClientConfig config, String endpointOverride) {
         return IamClient.newBuilder()
             .withCredential(globalCredentials(config))
             .withEndpoint(endpointOverride)
@@ -362,7 +374,7 @@ public final class ConnectionUtils {
      *
      * @throws IllegalArgumentException if {@code region} is null or not a known IAM region
      */
-    public static IamClient iamClientWithToken(String token, String region) {
+    static IamClient iamClientWithToken(String token, String region) {
         if (region == null || region.isBlank()) {
             throw new IllegalArgumentException(
                 "region is required to resolve the IAM endpoint — set the 'region' property (e.g. eu-west-101)");

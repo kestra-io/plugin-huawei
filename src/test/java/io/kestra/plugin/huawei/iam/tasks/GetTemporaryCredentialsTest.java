@@ -9,6 +9,7 @@ import io.kestra.core.runners.RunContextFactory;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
@@ -46,6 +47,11 @@ class GetTemporaryCredentialsTest {
         wireMock = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
         wireMock.start();
         WireMock.configureFor("localhost", wireMock.port());
+    }
+
+    @BeforeEach
+    void resetStubs() {
+        wireMock.resetMappings();
 
         // STS endpoint — used by both PASSWORD and TOKEN paths
         wireMock.stubFor(post(urlPathEqualTo("/v3.0/OS-CREDENTIAL/securitytokens"))
