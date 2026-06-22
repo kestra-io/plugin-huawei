@@ -23,6 +23,8 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dms.kafka.models` — DMS Kafka output models (`Message`)
 - `io.kestra.plugin.huawei.dms.rocketmq` — DMS for RocketMQ tasks/triggers (`AbstractDmsRocketMq`, `DmsRocketMqConnectionInterface`, `RocketMqSerdeType`, `Publish`, `Consume`, `Trigger`, `RealtimeTrigger`)
 - `io.kestra.plugin.huawei.dms.rocketmq.models` — DMS RocketMQ output models (`Message`)
+- `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
+- `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -65,6 +67,14 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.dms.rocketmq.Consume` — Pull-mode loop until `maxRecords`/`maxDuration`; writes ION to internal storage
 - `io.kestra.plugin.huawei.dms.rocketmq.Trigger` — Polling trigger delegating to `Consume`; fires when new messages are found
 - `io.kestra.plugin.huawei.dms.rocketmq.RealtimeTrigger` — Push consumer via `DefaultMQPushConsumer`; fires one execution per message; stops via `CountDownLatch`
+
+**DataArts Studio**
+
+- `io.kestra.plugin.huawei.dataarts.StartJobRun` — Starts a DataArts Factory (DLF) batch job; resolves the new instance by querying the instance list (the start API returns 204 with no ID); optionally polls until terminal state
+- `io.kestra.plugin.huawei.dataarts.GetJobRun` — Fetches status and metadata of a DataArts Factory job run by `instanceId` or resolves the latest instance when `instanceId` is omitted
+- `io.kestra.plugin.huawei.dataarts.StopJobRun` — Stops a running DataArts Factory job run instance; optionally polls until `manual-stop` is confirmed
+- `io.kestra.plugin.huawei.dataarts.DataArtsService` — Static REST helpers for the DataArts Factory V1 API; uses `AKSKSigner.getInstance().sign(request, credentials)` from the SDK core for HMAC-SHA256 signing; JDK `HttpClient` for transport
+- `io.kestra.plugin.huawei.dataarts.DataArtsUtils` — Static endpoint resolution (`endpointOverride` → region-derived → throws); mirrors `ObsUtils`
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -195,6 +205,17 @@ plugin-huawei/
 │   │       ├── package-info.java
 │   │       └── models/
 │   │           └── Message.java
+│   ├── dataarts/
+│   │   ├── AbstractDataArts.java
+│   │   ├── DataArtsConnectionInterface.java
+│   │   ├── DataArtsService.java
+│   │   ├── DataArtsUtils.java
+│   │   ├── GetJobRun.java
+│   │   ├── StartJobRun.java
+│   │   ├── StopJobRun.java
+│   │   ├── package-info.java
+│   │   └── models/
+│   │       └── JobRun.java
 │   ├── iam/
 │   │   └── tasks/
 │   │       ├── GetTemporaryCredentials.java
@@ -225,6 +246,9 @@ plugin-huawei/
 │           ├── Upload.java
 │           └── package-info.java
 ├── src/test/java/io/kestra/plugin/huawei/
+│   ├── dataarts/
+│   │   ├── DataArtsTasksTest.java
+│   │   └── DataArtsUtilsTest.java
 │   ├── dms/
 │   │   ├── kafka/
 │   │   │   ├── AbstractDmsKafkaTest.java
@@ -267,6 +291,8 @@ plugin-huawei/
 - DMS Kafka uses `org.apache.kafka:kafka-clients:3.9.0` (standard Kafka wire protocol; no Huawei SDK)
 - DMS RocketMQ uses `org.apache.rocketmq:rocketmq-client:4.9.8` + `rocketmq-acl:4.9.8`; AK/SK passed via `AclClientRPCHook`; logback/slf4j excluded
 - DMS Kafka integration test gate: `DMS_KAFKA_TESTS=true`; DMS RocketMQ gate: `DMS_ROCKETMQ_TESTS=true`
+- DataArts Studio SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dataartsstudio` (version managed by `huaweicloud-sdk-bom`); used for the SDK core's `AKSKSigner` only — the DLF job-lifecycle V1 APIs are called via JDK `HttpClient` with signed headers
+- DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
 
