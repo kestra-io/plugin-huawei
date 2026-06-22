@@ -44,25 +44,16 @@ public abstract class AbstractDataArts extends AbstractConnection implements Dat
     @PluginProperty(group = "connection")
     protected Property<String> endpointOverride;
 
-    /**
-     * Renders all connection properties and returns a resolved endpoint URL.
-     */
     protected String resolvedEndpoint(RunContext runContext) throws Exception {
         var rOverride = runContext.render(endpointOverride).as(String.class).orElse(null);
         var rRegion = runContext.render(region).as(String.class).orElse(null);
         return DataArtsUtils.dataArtsEndpoint(rOverride, rRegion);
     }
 
-    /**
-     * Renders the workspace ID, returning null when not set.
-     */
     protected String resolvedWorkspaceId(RunContext runContext) throws Exception {
         return runContext.render(workspaceId).as(String.class).orElse(null);
     }
 
-    /**
-     * Renders the project ID; throws when not set (required for all DLF API paths).
-     */
     protected String resolvedProjectId(RunContext runContext) throws Exception {
         return runContext.render(projectId).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(

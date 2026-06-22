@@ -9,7 +9,7 @@ import lombok.Getter;
 @Builder
 @Getter
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class JobRun implements io.kestra.core.models.tasks.Output {
+public class JobRun {
 
     @Schema(title = "Job name.")
     @PluginProperty(group = "main")

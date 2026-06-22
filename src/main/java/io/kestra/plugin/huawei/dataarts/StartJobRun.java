@@ -166,13 +166,22 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
 
         runContext.logger().info("Starting DataArts Factory job '{}' in project '{}'", rJobName, rProjectId);
 
+        // Snapshot the highest known instanceId before triggering the start so resolution can
+        // skip stale prior runs that sort newer than the one we're about to create.
+        var preStartInstances = DataArtsService.listInstancesFirstPage(
+            config, rEndpoint, rProjectId, rWorkspaceId, rJobName, 10);
+        var waterMark = preStartInstances.stream()
+            .map(r -> r.getInstanceId() != null ? r.getInstanceId() : 0L)
+            .max(Long::compare)
+            .orElse(0L);
+
         DataArtsService.startJob(
             runContext, config, rEndpoint, rProjectId, rWorkspaceId,
             rJobName, rJobParams.isEmpty() ? null : rJobParams, rStartDate);
 
         // Resolve the new instance — the start API returns 204 with no body.
         var instance = resolveNewestInstance(
-            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInterval);
+            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInterval, waterMark);
 
         runContext.logger().info("Job '{}' started, instanceId={}, status={}", rJobName, instance.getInstanceId(), instance.getStatus());
 
@@ -212,25 +221,29 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     }
 
     /**
-     * Polls the instance list until the new run appears (bounded by the polling interval × 10 attempts).
-     * The start API is asynchronous, so the instance may not be immediately visible.
+     * Polls the instance list until an instance with instanceId > waterMark appears.
+     * The water mark is snapshotted before the start call to avoid picking up a recent prior run
+     * whose planTime/startTime could sort newer than the one just triggered.
      */
     private JobRun resolveNewestInstance(
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint, String projectId, String workspaceId,
-        String jobName, Duration interval
+        String jobName, Duration interval, long waterMark
     ) throws Exception {
         for (int attempt = 0; attempt < 10; attempt++) {
-            var instances = DataArtsService.listInstances(config, endpoint, projectId, workspaceId, jobName, 10);
-            if (!instances.isEmpty()) {
-                return instances.getFirst();
+            var instances = DataArtsService.listInstancesFirstPage(config, endpoint, projectId, workspaceId, jobName, 10);
+            var newInstance = instances.stream()
+                .filter(r -> r.getInstanceId() != null && r.getInstanceId() > waterMark)
+                .findFirst();
+            if (newInstance.isPresent()) {
+                return newInstance.get();
             }
-            runContext.logger().debug("Instance not yet visible for job '{}', waiting {} (attempt {}/10)", jobName, interval, attempt + 1);
+            runContext.logger().debug("New instance not yet visible for job '{}' (waterMark={}), waiting {} (attempt {}/10)", jobName, waterMark, interval, attempt + 1);
             Thread.sleep(interval.toMillis());
         }
         throw new IllegalStateException(
-            "DataArts Factory job '" + jobName + "' was started but no instance appeared within the expected time — " +
+            "DataArts Factory job '" + jobName + "' was started but no new instance appeared within the expected time — " +
             "the job may have been queued but not yet scheduled. Try increasing the polling interval.");
     }
 

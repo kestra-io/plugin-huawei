@@ -13,11 +13,14 @@ import jakarta.annotation.Nullable;
 
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -27,7 +30,7 @@ import java.util.Set;
  *
  * <p>The Huawei v3 Java SDK does not generate typed methods for the DLF job lifecycle, so requests
  * are built manually and signed via the SDK core's {@link AKSKSigner}. The JDK {@link HttpClient}
- * handles transport so we reuse the same HTTP stack already present in {@link ConnectionUtils}.
+ * handles transport.
  */
 public final class DataArtsService {
 
@@ -37,7 +40,7 @@ public final class DataArtsService {
 
     // JDK's HttpRequest.Builder rejects these header names — filter them from signed headers.
     private static final Set<String> RESTRICTED_HEADERS = Set.of(
-        "connection", "content-length", "expect", "host", "upgrade"
+        "connection", "content-length", "expect", "host", "transfer-encoding", "upgrade", "via"
     );
 
     private DataArtsService() {
@@ -84,7 +87,7 @@ public final class DataArtsService {
         @Nullable String startDate
     ) throws Exception {
         var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/start";
-        var bodyMap = new java.util.LinkedHashMap<String, Object>();
+        var bodyMap = new LinkedHashMap<String, Object>();
         if (jobParams != null && !jobParams.isEmpty()) {
             bodyMap.put("jobParams", jobParams.entrySet().stream()
                 .map(e -> Map.of("name", e.getKey(), "value", e.getValue()))
@@ -107,12 +110,25 @@ public final class DataArtsService {
     }
 
     /**
-     * Lists job run instances for {@code jobName}, newest first (by planTime/startTime desc).
+     * Fetches only the first page of job run instances (single API call), newest first.
+     * Use this when only the most-recent instance is needed to avoid O(n/limit) requests.
+     */
+    public static List<JobRun> listInstancesFirstPage(
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String jobName,
+        int limit
+    ) throws Exception {
+        return fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, 0);
+    }
+
+    /**
+     * Lists all job run instances for {@code jobName}, newest first (by planTime/startTime desc).
+     * Paginates automatically until all instances have been fetched or a page is shorter than limit.
      *
-     * <p>Paginates automatically using limit/offset until all instances have been fetched or the
-     * list is empty.
-     *
-     * @param limit      page size (1–100)
+     * @param limit page size (1–100)
      */
     public static List<JobRun> listInstances(
         AbstractConnection.HuaweiClientConfig config,
@@ -126,31 +142,9 @@ public final class DataArtsService {
         int offset = 0;
 
         while (true) {
-            var path = "/v1/" + projectId + "/jobs/instances/detail"
-                + "?jobName=" + urlEncode(jobName)
-                + "&limit=" + limit
-                + "&offset=" + offset;
-
-            var response = invoke(config, endpoint, path, "GET", workspaceId, null);
-
-            if (response.statusCode() != 200) {
-                throw new IllegalStateException(
-                    "DataArts Factory list instances for job '" + jobName + "' failed (HTTP " +
-                    response.statusCode() + ")" + parseDlfError(response.body()) +
-                    " — verify the jobName and that the credentials have dlf:jobs:query permission.");
-            }
-
-            var root = JacksonMapper.ofJson().readTree(response.body());
-            var instances = root.path("instances");
-            if (instances.isMissingNode() || !instances.isArray() || instances.isEmpty()) {
-                break;
-            }
-
-            for (var node : instances) {
-                result.add(nodeToJobRun(jobName, node));
-            }
-
-            if (instances.size() < limit) {
+            var page = fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, offset);
+            result.addAll(page);
+            if (page.size() < limit) {
                 break;
             }
             offset += limit;
@@ -163,6 +157,42 @@ public final class DataArtsService {
             return Long.compare(tb, ta);
         });
         return result;
+    }
+
+    private static List<JobRun> fetchInstancePage(
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String jobName,
+        int limit,
+        int offset
+    ) throws Exception {
+        var path = "/v1/" + projectId + "/jobs/instances/detail"
+            + "?jobName=" + urlEncode(jobName)
+            + "&limit=" + limit
+            + "&offset=" + offset;
+
+        var response = invoke(config, endpoint, path, "GET", workspaceId, null);
+
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                "DataArts Factory list instances for job '" + jobName + "' failed (HTTP " +
+                response.statusCode() + ")" + parseDlfError(response.body()) +
+                " — verify the jobName and that the credentials have dlf:jobs:query permission.");
+        }
+
+        var root = JacksonMapper.ofJson().readTree(response.body());
+        var instances = root.path("instances");
+        if (instances.isMissingNode() || !instances.isArray() || instances.isEmpty()) {
+            return List.of();
+        }
+
+        var page = new ArrayList<JobRun>(instances.size());
+        for (var node : instances) {
+            page.add(nodeToJobRun(jobName, node));
+        }
+        return page;
     }
 
     /**
@@ -205,7 +235,7 @@ public final class DataArtsService {
         long instanceId
     ) throws Exception {
         var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/instances/" + instanceId + "/stop";
-        var response = invoke(config, endpoint, path, "POST", workspaceId, null);
+        var response = invoke(config, endpoint, path, "POST", workspaceId, "{}");
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -251,7 +281,8 @@ public final class DataArtsService {
             }
         }
 
-        if (body != null && !body.equals("{}")) {
+        // Always sign the exact body bytes that will be sent on the wire so HMAC-SHA256 matches.
+        if (body != null) {
             sdkReqBuilder.withBodyAsString(body);
         }
 
@@ -267,7 +298,8 @@ public final class DataArtsService {
             jdkReqBuilder.header("workspace", workspaceId);
         }
 
-        if (config.accessKeyId() != null && !config.accessKeyId().isBlank()) {
+        if (config.accessKeyId() != null && !config.accessKeyId().isBlank()
+                && config.secretAccessKey() != null && !config.secretAccessKey().isBlank()) {
             var signingCreds = new BasicCredentials()
                 .withAk(config.accessKeyId())
                 .withSk(config.secretAccessKey());
@@ -289,7 +321,7 @@ public final class DataArtsService {
         }
 
         // POST with no body still needs a publisher; noBody() works for GET.
-        var bodyPublisher = (body != null && !body.equals("{}"))
+        var bodyPublisher = body != null
             ? BodyPublishers.ofString(body)
             : ("GET".equals(method) ? BodyPublishers.noBody() : BodyPublishers.ofString(""));
 
@@ -348,6 +380,6 @@ public final class DataArtsService {
     }
 
     private static String urlEncode(String value) {
-        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8);
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

@@ -29,7 +29,9 @@ import java.time.Duration;
         `POST /v1/{project_id}/jobs/{job_name}/instances/{instance_id}/stop` API.
 
         When `wait` is `true` (the default), the task polls until the instance status transitions to
-        `manual-stop` or another terminal state before returning.
+        `manual-stop` or another terminal state before returning. `maxDuration` bounds the polling
+        time to prevent indefinite hangs — the task fails with a timeout error if the stop is not
+        confirmed within the deadline.
         """
 )
 @Plugin(
@@ -50,6 +52,7 @@ import java.time.Duration;
                     projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
                     jobName: my_etl_job
                     instanceId: "{{ outputs.start_job.instanceId }}"
+                    maxDuration: PT10M
                 """
         )
     }
@@ -88,6 +91,18 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     private Property<Boolean> wait = Property.ofValue(true);
 
     @Schema(
+        title = "Maximum time to wait for the stop to be confirmed.",
+        description = """
+            ISO-8601 duration (e.g. `PT10M`, `PT1H`). When the deadline is reached before the
+            instance reaches a terminal state, the task fails with a timeout error. Only relevant
+            when `wait` is `true`. Defaults to 10 minutes.
+            """
+    )
+    @Builder.Default
+    @PluginProperty(group = "execution")
+    private Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(10));
+
+    @Schema(
         title = "Polling interval while waiting for the stop to complete.",
         description = "ISO-8601 duration (e.g. `PT3S`). Defaults to 3 seconds."
     )
@@ -105,6 +120,7 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
         var rEndpoint = resolvedEndpoint(runContext);
         var rWorkspaceId = resolvedWorkspaceId(runContext);
         var rWait = runContext.render(wait).as(Boolean.class).orElse(true);
+        var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofMinutes(10));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(3));
 
         var config = huaweiClientConfig(runContext);
@@ -117,9 +133,17 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
             return Output.builder().jobName(rJobName).instanceId(rInstanceId).status("stopping").build();
         }
 
-        // Poll until the instance confirms the stop.
+        // Poll until the instance confirms the stop, bounded by maxDuration.
+        var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
         var current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
         while (!DataArtsService.isTerminalState(current.getStatus())) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new IllegalStateException(
+                    "DataArts Factory job '" + rJobName + "' instance " + rInstanceId +
+                    " did not reach a terminal state within " + rMaxDuration +
+                    " — current status: " + current.getStatus() +
+                    ". Increase maxDuration or check the DataArts Studio console.");
+            }
             runContext.logger().debug("Waiting for job '{}' instance {} to stop, status={}", rJobName, rInstanceId, current.getStatus());
             Thread.sleep(rInterval.toMillis());
             current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
