@@ -10,7 +10,7 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 @SuperBuilder
-@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken"})
+@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken", "temporaryCredentials"})
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor

@@ -21,9 +21,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Static factory for Huawei Cloud SDK credentials and clients.
@@ -91,7 +94,10 @@ public final class ConnectionUtils {
         };
 
         // Both the token call and the STS call must target the same partition.
-        var client = iamClientWithToken(resolvedToken, region, iamBaseUrl);
+        var client = IamClient.newBuilder()
+            .withCredential(new IAMCredentials().withXAuthToken(resolvedToken))
+            .withEndpoint(iamBaseUrl)
+            .build();
 
         var response = client.createTemporaryAccessKeyByToken(buildStsRequest(resolvedToken, rDuration));
 
@@ -120,12 +126,15 @@ public final class ConnectionUtils {
                 "or switch to authMethod=PASSWORD to authenticate with username and password"));
     }
 
+    // This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used —
+    // there is no valid credential to supply to the client builder before the call succeeds.
+    // A shared JDK HttpClient is used instead, keeping the credential-less nature explicit.
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(10))
+        .build();
+
     /**
      * Obtains an IAM session token via {@code POST /v3/auth/tokens}.
-     *
-     * <p>This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used
-     * here — there is no valid credential to supply to the client builder before the call succeeds.
-     * We use {@code java.net.http.HttpClient} directly, which keeps the credential-less nature explicit.
      */
     private static String obtainTokenByPassword(
         RunContext runContext,
@@ -139,6 +148,10 @@ public final class ConnectionUtils {
         var rPassword = runContext.render(config.getPassword()).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(
                 "password is required when authMethod is PASSWORD"));
+        if (rPassword.isBlank()) {
+            throw new IllegalArgumentException(
+                "password must not be blank — check that the secret resolves to a non-empty value");
+        }
         var rDomainName = runContext.render(config.getDomainName()).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(
                 "domainName is required when authMethod is PASSWORD — this is the Huawei Cloud " +
@@ -146,38 +159,17 @@ public final class ConnectionUtils {
         var rScope = runContext.render(config.getScope()).as(TokenScope.class).orElse(TokenScope.PROJECT);
         var rProjectName = runContext.render(config.getProjectName()).as(String.class).orElse(null);
 
-        var scopeJson = buildScopeJson(rScope, rDomainName, rProjectName != null ? rProjectName : region);
-        var requestBody = """
-            {
-              "auth": {
-                "identity": {
-                  "methods": ["password"],
-                  "password": {
-                    "user": {
-                      "name": %s,
-                      "password": %s,
-                      "domain": { "name": %s }
-                    }
-                  }
-                },
-                "scope": %s
-              }
-            }
-            """.formatted(
-            jsonString(rUsername),
-            jsonString(rPassword),
-            jsonString(rDomainName),
-            scopeJson
-        );
+        var requestBody = buildPasswordAuthBody(rUsername, rPassword, rDomainName, rScope,
+            rProjectName != null ? rProjectName : region);
 
-        var httpClient = HttpClient.newHttpClient();
         var request = HttpRequest.newBuilder()
             .uri(URI.create(iamBaseUrl + "/v3/auth/tokens"))
             .header("Content-Type", "application/json;charset=UTF-8")
+            .timeout(Duration.ofSeconds(30))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody))
             .build();
 
-        var httpResponse = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        var httpResponse = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
 
         if (httpResponse.statusCode() != 201) {
             throw new IllegalStateException(
@@ -196,13 +188,35 @@ public final class ConnectionUtils {
         return xSubjectToken;
     }
 
+    private static String buildPasswordAuthBody(
+        String username, String password, String domainName, TokenScope scope, String projectName
+    ) throws Exception {
+        var scopeNode = switch (scope) {
+            case PROJECT -> Map.of("project", Map.of("name", projectName));
+            case DOMAIN -> Map.of("domain", Map.of("name", domainName));
+        };
+        var user = new LinkedHashMap<String, Object>();
+        user.put("name", username);
+        user.put("password", password);
+        user.put("domain", Map.of("name", domainName));
+        var body = Map.of(
+            "auth", Map.of(
+                "identity", Map.of(
+                    "methods", List.of("password"),
+                    "password", Map.of("user", user)
+                ),
+                "scope", scopeNode
+            )
+        );
+        return JacksonMapper.ofJson().writeValueAsString(body);
+    }
+
     /**
      * Parses Huawei IAM error JSON ({@code {"error":{"code":...,"message":...,"title":...}}}) and
      * returns a formatted detail string to append to exception messages.
      *
-     * <p>Only the three safe fields from the error object are included — the response body for
-     * this endpoint never echoes back submitted credentials.  Falls back to a truncated raw body
-     * when the JSON shape is absent or unparseable.
+     * <p>Only the three safe structured fields are included — the raw body is never exposed to
+     * avoid leaking any request data that the IAM endpoint might echo back.
      */
     private static String parseIamError(String body) {
         if (body == null || body.isBlank()) {
@@ -231,31 +245,13 @@ public final class ConnectionUtils {
                 return sb.length() > 2 ? sb.toString() : "";
             }
         } catch (Exception ignored) {
-            // JSON parse failure — fall back to safe raw body excerpt
+            // unparseable body — omit from message to avoid leaking content
         }
-        // Truncate to avoid oversized messages; 200 chars is enough to show the error reason
-        var excerpt = body.length() > 200 ? body.substring(0, 200) + "…" : body;
-        return ": " + excerpt;
+        return "";
     }
 
     private static String textOrNull(JsonNode node) {
         return node.isMissingNode() || node.isNull() ? null : node.asText();
-    }
-
-    private static String buildScopeJson(TokenScope scope, String domainName, String projectName) {
-        return switch (scope) {
-            case PROJECT -> """
-                { "project": { "name": %s } }
-                """.formatted(jsonString(projectName)).strip();
-            case DOMAIN -> """
-                { "domain": { "name": %s } }
-                """.formatted(jsonString(domainName)).strip();
-        };
-    }
-
-    /** Produces a JSON-safe quoted string, escaping backslash and double-quote characters. */
-    private static String jsonString(String value) {
-        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     private static CreateTemporaryAccessKeyByTokenRequest buildStsRequest(String tokenValue, int duration) {
@@ -377,15 +373,4 @@ public final class ConnectionUtils {
             .build();
     }
 
-    /**
-     * Builds a token-authenticated {@link IamClient} that sends all requests to {@code endpointOverride}.
-     *
-     * <p>Used in tests to point the client at a WireMock server. Not intended for production use.
-     */
-    public static IamClient iamClientWithToken(String token, String region, String endpointOverride) {
-        return IamClient.newBuilder()
-            .withCredential(new IAMCredentials().withXAuthToken(token))
-            .withEndpoint(endpointOverride)
-            .build();
-    }
 }

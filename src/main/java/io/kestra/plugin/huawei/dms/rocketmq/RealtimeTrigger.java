@@ -40,7 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 @SuperBuilder
-@ToString
+@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken"})
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor

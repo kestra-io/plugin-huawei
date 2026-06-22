@@ -221,7 +221,7 @@ class ConnectionUtilsExchangeTest {
     }
 
     @Test
-    void exchange_passwordAuth_403WithPlainBody_surfacesTruncatedBody() {
+    void exchange_passwordAuth_403WithPlainBody_showsStatusWithoutRawBody() {
         wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
             .willReturn(aResponse()
                 .withStatus(403)
@@ -240,8 +240,9 @@ class ConnectionUtilsExchangeTest {
             () -> ConnectionUtils.exchangeForTemporaryCredentials(
                 runContext, config, "eu-west-101", wireMockUrl()));
 
+        // Status code always present; raw body not echoed (avoids leaking any echoed request data)
         assertThat(ex.getMessage(), containsString("403"));
-        assertThat(ex.getMessage(), containsString("Access denied by policy."));
+        assertThat(ex.getMessage(), not(containsString("Access denied by policy.")));
         assertThat(ex.getMessage(), not(containsString("my-password")));
     }
 

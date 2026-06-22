@@ -21,7 +21,7 @@ import lombok.experimental.SuperBuilder;
 import java.time.Instant;
 
 @SuperBuilder
-@ToString
+@ToString(exclude = {"token", "password", "domainName"})
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
