@@ -34,8 +34,6 @@ class FunctionGraphInvokeTest {
 
     private static final String PROJECT_ID = "test-project-abc123";
     private static final String FUNCTION_URN = "urn:fss:eu-west-101:" + PROJECT_ID + ":function:default:my-fn:latest";
-    // URL-encoded colon-separated URN path segment used by the SDK
-    private static final String INVOCATIONS_PATH = "/v2/" + PROJECT_ID + "/fgs/functions/" + FUNCTION_URN + "/invocations";
     private static final String FAKE_AK = "FAKEACCESSKEY0001";
     private static final String FAKE_SK = "fakeSecretKey0001fakeSecretKey001";
 
@@ -75,6 +73,7 @@ class FunctionGraphInvokeTest {
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
+                .withHeader("X-Cff-Request-Id", "req-abc-123")
                 .withBody("""
                     {"result": "{\\"message\\":\\"hello world\\"}","status": 0,"request_id": "req-abc-123"}
                     """)));
@@ -94,6 +93,7 @@ class FunctionGraphInvokeTest {
         assertThat(output.getUri(), is(notNullValue()));
         assertThat(output.getContentLength(), is(notNullValue()));
         assertThat(output.getStatusCode(), equalTo(200));
+        assertThat(output.getRequestId(), equalTo("req-abc-123"));
     }
 
     @Test

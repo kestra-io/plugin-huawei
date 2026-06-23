@@ -1,7 +1,9 @@
 package io.kestra.plugin.huawei.functiongraph;
 
+import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.functiongraph.v2.model.InvokeFunctionRequest;
+import com.huaweicloud.sdk.functiongraph.v2.model.InvokeFunctionResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -133,7 +135,7 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
 
         var start = System.nanoTime();
 
-        com.huaweicloud.sdk.functiongraph.v2.model.InvokeFunctionResponse response;
+        InvokeFunctionResponse response;
         try {
             response = client.invokeFunction(request);
         } catch (ServiceResponseException e) {
@@ -142,15 +144,16 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
                 "': " + e.getErrorMsg() + " — verify the function URN is correct and the AK/SK has 'FunctionGraph InvokeFunction' permission.",
                 e
             );
-        } catch (com.huaweicloud.sdk.core.exception.SdkException e) {
+        } catch (SdkException e) {
             throw new FunctionGraphInvokeException(
                 "FunctionGraph SDK error invoking function '" + rUrn + "': " + e.getMessage(), e);
         }
 
         var elapsed = Duration.ofNanos(System.nanoTime() - start);
 
-        // status=1 indicates a function-level error (HTTP 200 but function threw an exception).
-        if (Integer.valueOf(1).equals(response.getStatus())) {
+        // A non-zero status indicates a function-level error (HTTP 200 but function threw an exception).
+        var status = response.getStatus();
+        if (status != null && status != 0) {
             var errorBody = response.getResult() != null ? response.getResult() : "(no output)";
             throw new FunctionGraphInvokeException(
                 "FunctionGraph function '" + rUrn + "' returned a function-level error: " +
