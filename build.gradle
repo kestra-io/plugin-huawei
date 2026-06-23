@@ -58,7 +58,7 @@ dependencies {
     }
 
     // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
-    implementation("org.apache.kafka:kafka-clients:3.9.2") {
+    implementation("org.apache.kafka:kafka-clients:4.3.0") {
         exclude group: "org.slf4j"
     }
 
@@ -142,7 +142,7 @@ dependencies {
 // Micronaut pulls in a newer logback-core constraint via micronaut-logging-bom, which causes
 // NoClassDefFoundError for JaninoEventEvaluatorBase at test startup. Force the correct version.
 configurations.testRuntimeClasspath {
-    resolutionStrategy.force "ch.qos.logback:logback-core:1.3.12"
+    resolutionStrategy.force "ch.qos.logback:logback-core:1.5.25"
 }
 
 configurations {
