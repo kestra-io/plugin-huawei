@@ -79,6 +79,12 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-iam") {
         exclude group: "org.slf4j"
     }
+    // DataArts Studio SDK — pulled in for the SDK core's AKSKSigner (AK/SK request signing).
+    // The V1 DLF job-lifecycle APIs are called directly via JDK HttpClient; this SDK provides
+    // the signing layer without requiring hand-rolled HMAC-SHA256 logic.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-dataartsstudio") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

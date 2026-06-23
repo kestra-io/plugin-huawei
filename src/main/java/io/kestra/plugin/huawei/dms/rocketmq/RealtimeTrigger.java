@@ -32,7 +32,6 @@ import org.apache.rocketmq.client.consumer.listener.ConsumeConcurrentlyStatus;
 import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.reactivestreams.Publisher;
-import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 
 import java.util.concurrent.CountDownLatch;
@@ -127,24 +126,82 @@ public class RealtimeTrigger extends AbstractTrigger
     @PluginProperty(group = "processing")
     private Property<RocketMqSerdeType> serdeType = Property.ofValue(RocketMqSerdeType.STRING);
 
+    @Schema(
+        title = "Access Key (AK) used to authenticate with Huawei Cloud.",
+        description = "Huawei Cloud access key used together with `secretAccessKey` to sign API requests. " +
+            "Required for AK/SK-based authentication; not required when " +
+            "providing a pre-obtained `securityToken`. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> accessKeyId;
 
+    @Schema(
+        title = "Secret Key (SK) used to authenticate with Huawei Cloud.",
+        description = "Huawei Cloud secret key paired with `accessKeyId`. " +
+            "Required for AK/SK-based authentication. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> secretAccessKey;
 
+    @Schema(
+        title = "Pre-obtained Huawei Cloud IAM token used as bearer credential for downstream API calls.",
+        description = "When set, downstream Huawei tasks send this value in the `X-Auth-Token` header instead of " +
+            "signing requests with AK/SK. **Sensitive.**"
+    )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> securityToken;
 
+    @Schema(
+        title = "Huawei Cloud Project ID.",
+        description = "Identifies the region-scoped project against which most regional services authenticate. " +
+            "Mutually exclusive with `domainId` for global services such as IAM."
+    )
     @PluginProperty(group = "connection")
     private Property<String> projectId;
 
+    @Schema(
+        title = "Huawei Cloud Account Domain ID.",
+        description = "Identifies the Huawei Cloud account (domain). Required when authenticating against global " +
+            "services such as IAM, or when requesting a domain-scoped IAM token."
+    )
     @PluginProperty(group = "connection")
     private Property<String> domainId;
 
+    @Schema(
+        title = "Huawei Cloud region.",
+        description = "Region identifier such as `eu-west-101`, `ap-southeast-1`, or `cn-north-4`."
+    )
     @PluginProperty(group = "connection")
     private Property<String> region;
 
+    @Schema(
+        title = "Inline IAM credential exchange.",
+        description = """
+            When set, the connection layer calls the Huawei IAM STS API once per task execution and
+            uses the returned temporary AK/SK + security token instead of the static `accessKeyId`
+            and `secretAccessKey` properties.
+
+            Configure once via `pluginDefaults` to apply transparently to every task in a namespace
+            without per-task credential wiring:
+
+            ```yaml
+            pluginDefaults:
+              - type: io.kestra.plugin.huawei.obs.tasks
+                values:
+                  region: eu-west-101
+                  temporaryCredentials:
+                    authMethod: PASSWORD
+                    username: my-iam-user
+                    password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
+                    domainName: my-account-domain
+                    durationSeconds: 3600
+            ```
+
+            **Long-running tasks:** the exchange runs once at execution start. For `RealtimeTrigger`
+            or long-running `Consume` tasks that outlive `durationSeconds`, credentials will expire
+            mid-run. Use long-lived AK/SK properties or refresh externally in that case.
+            """
+    )
     @PluginProperty(group = "connection")
     private Property<TemporaryCredentialsConfig> temporaryCredentials;
 
@@ -166,9 +223,14 @@ public class RealtimeTrigger extends AbstractTrigger
     @Getter(AccessLevel.NONE)
     private final AtomicReference<DefaultMQPushConsumer> consumerRef = new AtomicReference<>();
 
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    private final AtomicReference<org.slf4j.Logger> loggerRef = new AtomicReference<>();
+
     @Override
     public Publisher<Execution> evaluate(ConditionContext conditionContext, TriggerContext context) throws Exception {
         var runContext = conditionContext.getRunContext();
+        loggerRef.set(runContext.logger());
 
         var rTopic = runContext.render(topic).as(String.class).orElseThrow();
         var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
@@ -250,8 +312,10 @@ public class RealtimeTrigger extends AbstractTrigger
         if (!isActive.compareAndSet(true, false)) {
             return;
         }
-        LoggerFactory.getLogger(RealtimeTrigger.class)
-            .debug("Stopping DMS RocketMQ realtime trigger triggerId={} (wait={})", this.id, wait);
+        var logger = loggerRef.get();
+        if (logger != null) {
+            logger.debug("Stopping DMS RocketMQ realtime trigger triggerId={} (wait={})", this.id, wait);
+        }
         stopSignal.countDown();
         if (wait) {
             try {

@@ -35,6 +35,11 @@ import java.util.Map;
  * <p>Mirrors the role of {@code io.kestra.plugin.aws.ConnectionUtils}: a single place to translate
  * the plugin's {@link AbstractConnection.HuaweiClientConfig} into typed SDK objects so task
  * implementations stay free of credential-wiring boilerplate.
+ *
+ * <p><b>Transport exemption</b>: {@link #obtainTokenByPassword} uses {@link java.net.http.HttpClient}
+ * (JDK) instead of the Kestra internal HTTP client. The {@code POST /v3/auth/tokens} call is an
+ * unauthenticated bootstrap — no valid credential exists yet to supply to a Kestra-managed client —
+ * so a bare JDK client is the only viable transport here.
  */
 public final class ConnectionUtils {
 
