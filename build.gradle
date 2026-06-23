@@ -85,6 +85,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-dataartsstudio") {
         exclude group: "org.slf4j"
     }
+
+    // FunctionGraph SDK — synchronous function invocation via the FunctionGraph V2 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-functiongraph") {
+        exclude group: "org.slf4j"
+    }
 }
 
 
