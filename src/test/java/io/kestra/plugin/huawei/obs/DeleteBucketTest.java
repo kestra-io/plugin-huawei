@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class DeleteBucketTest extends AbstractMinioTest {
+class DeleteBucketTest extends AbstractObsTest {
 
     /**
      * Bucket deletion tests require DeleteBucket permission. When {@code OBS_TEST_BUCKET} is set
@@ -40,7 +40,7 @@ class DeleteBucketTest extends AbstractMinioTest {
         rawClient.createBucket(new CreateBucketRequest(bucketName));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteBucket.builder())
+        var task = applyObsConfig(DeleteBucket.builder())
             .bucket(Property.ofValue(bucketName))
             .build();
 
@@ -61,7 +61,7 @@ class DeleteBucketTest extends AbstractMinioTest {
         // against MinIO. Both are handled by the broadened catch condition in DeleteBucket.
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteBucket.builder())
+        var task = applyObsConfig(DeleteBucket.builder())
             .bucket(Property.ofValue(bucketName))
             .errorOnMissing(Property.ofValue(false))
             .build();
@@ -79,7 +79,7 @@ class DeleteBucketTest extends AbstractMinioTest {
         // Intentionally do not create the bucket
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteBucket.builder())
+        var task = applyObsConfig(DeleteBucket.builder())
             .bucket(Property.ofValue(bucketName))
             .errorOnMissing(Property.ofValue(true))
             .build();

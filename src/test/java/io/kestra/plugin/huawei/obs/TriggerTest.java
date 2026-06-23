@@ -20,7 +20,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class TriggerTest extends AbstractMinioTest {
+class TriggerTest extends AbstractObsTest {
 
     @Inject
     RunContextInitializer runContextInitializer;
@@ -32,7 +32,7 @@ class TriggerTest extends AbstractMinioTest {
         seedObject(prefix + "event1.json", "{}", "application/json");
         seedObject(prefix + "event2.json", "{}", "application/json");
 
-        var trigger = applyMinioConfig(Trigger.builder())
+        var trigger = applyObsConfig(Trigger.builder())
             .id(IdUtils.create())
             .type(Trigger.class.getName())
             .bucket(Property.ofValue(testBucket))
@@ -59,7 +59,7 @@ class TriggerTest extends AbstractMinioTest {
 
     @Test
     void evaluate_noMatchingObjects_returnsEmpty() throws Exception {
-        var trigger = applyMinioConfig(Trigger.builder())
+        var trigger = applyObsConfig(Trigger.builder())
             .id(IdUtils.create())
             .type(Trigger.class.getName())
             .bucket(Property.ofValue(testBucket))
@@ -84,7 +84,7 @@ class TriggerTest extends AbstractMinioTest {
         var dstPrefix = "trigger-test/" + runId + "/dst/";
         seedObject(srcPrefix + "data.csv", "col1,col2", "text/csv");
 
-        var trigger = applyMinioConfig(Trigger.builder())
+        var trigger = applyObsConfig(Trigger.builder())
             .id(IdUtils.create())
             .type(Trigger.class.getName())
             .bucket(Property.ofValue(testBucket))

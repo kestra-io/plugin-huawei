@@ -12,7 +12,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class DeleteTest extends AbstractMinioTest {
+class DeleteTest extends AbstractObsTest {
 
     @Test
     void delete_existingObject_isRemovedFromBucket() throws Exception {
@@ -22,7 +22,7 @@ class DeleteTest extends AbstractMinioTest {
         assertThat(rawClient.doesObjectExist(testBucket, key), is(true));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Delete.builder())
+        var task = applyObsConfig(Delete.builder())
             .bucket(Property.ofValue(testBucket))
             .key(Property.ofValue(key))
             .build();
@@ -41,7 +41,7 @@ class DeleteTest extends AbstractMinioTest {
         var key = "delete-test/" + IdUtils.create() + "/ghost.txt";
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Delete.builder())
+        var task = applyObsConfig(Delete.builder())
             .bucket(Property.ofValue(testBucket))
             .key(Property.ofValue(key))
             .build();

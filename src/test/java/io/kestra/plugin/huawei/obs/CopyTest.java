@@ -14,7 +14,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class CopyTest extends AbstractMinioTest {
+class CopyTest extends AbstractObsTest {
 
     @Test
     void copy_happyPath_destinationHasSameContent() throws Exception {
@@ -24,7 +24,7 @@ class CopyTest extends AbstractMinioTest {
         seedObject(srcKey, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Copy.builder())
+        var task = applyObsConfig(Copy.builder())
             .from(Copy.CopyObjectFrom.builder()
                 .bucket(Property.ofValue(testBucket))
                 .key(Property.ofValue(srcKey))
@@ -58,7 +58,7 @@ class CopyTest extends AbstractMinioTest {
         seedObject(srcKey, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Copy.builder())
+        var task = applyObsConfig(Copy.builder())
             .from(Copy.CopyObjectFrom.builder()
                 .bucket(Property.ofValue(testBucket))
                 .key(Property.ofValue(srcKey))

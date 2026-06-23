@@ -14,7 +14,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class ListTest extends AbstractMinioTest {
+class ListTest extends AbstractObsTest {
 
     private String prefix;
 
@@ -32,7 +32,7 @@ class ListTest extends AbstractMinioTest {
     @Test
     void list_noFilter_returnsAllObjects() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .build();
@@ -44,7 +44,7 @@ class ListTest extends AbstractMinioTest {
     @Test
     void list_prefixFilter_returnsSubset() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix + "a/"))
             .build();
@@ -57,7 +57,7 @@ class ListTest extends AbstractMinioTest {
     @Test
     void list_regexpFilter_returnsMatchingOnly() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .regexp(Property.ofValue(".*\\.csv"))
@@ -72,7 +72,7 @@ class ListTest extends AbstractMinioTest {
     void list_maxKeys_pagesCorrectly() throws Exception {
         // maxKeys=2 forces multiple pages; we should still get all 5 objects
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .maxKeys(Property.ofValue(2))
@@ -86,7 +86,7 @@ class ListTest extends AbstractMinioTest {
     void list_maxResultsExceeded_failsFast() {
         // 5 objects match but maxResults=3 — the task must fail fast rather than materialise them all.
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .maxResults(Property.ofValue(3))
@@ -99,7 +99,7 @@ class ListTest extends AbstractMinioTest {
     @Test
     void list_maxResultsNotExceeded_returnsAll() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .maxResults(Property.ofValue(10))
@@ -112,7 +112,7 @@ class ListTest extends AbstractMinioTest {
     @Test
     void list_objectsHaveExpectedFields() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(List.builder())
+        var task = applyObsConfig(List.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix + "a/file1.csv"))
             .build();

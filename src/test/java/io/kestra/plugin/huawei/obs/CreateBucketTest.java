@@ -13,7 +13,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class CreateBucketTest extends AbstractMinioTest {
+class CreateBucketTest extends AbstractObsTest {
 
     /**
      * Bucket creation tests require CreateBucket permission. When {@code OBS_TEST_BUCKET} is set
@@ -34,7 +34,7 @@ class CreateBucketTest extends AbstractMinioTest {
         var bucketName = "kestra-obs-cb-" + IdUtils.create().substring(0, 8).toLowerCase();
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(CreateBucket.builder())
+        var task = applyObsConfig(CreateBucket.builder())
             .bucket(Property.ofValue(bucketName))
             .build();
 
@@ -57,7 +57,7 @@ class CreateBucketTest extends AbstractMinioTest {
         rawClient.createBucket(new com.obs.services.model.CreateBucketRequest(bucketName));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(CreateBucket.builder())
+        var task = applyObsConfig(CreateBucket.builder())
             .bucket(Property.ofValue(bucketName))
             .build();
 
