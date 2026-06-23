@@ -1,6 +1,5 @@
 package io.kestra.plugin.huawei;
 
-import io.kestra.core.exceptions.IllegalVariableEvaluationException;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
@@ -56,14 +55,76 @@ public interface AbstractConnectionInterface {
     @PluginProperty(group = "connection")
     Property<String> getRegion();
 
-    default AbstractConnection.HuaweiClientConfig huaweiClientConfig(final RunContext runContext) throws IllegalVariableEvaluationException {
+    @Schema(
+        title = "Inline IAM credential exchange.",
+        description = """
+            When set, the connection layer calls the Huawei IAM STS API once per task execution and
+            uses the returned temporary AK/SK + security token instead of the static `accessKeyId`
+            and `secretAccessKey` properties.
+
+            Configure once via `pluginDefaults` to apply transparently to every task in a namespace
+            without per-task credential wiring:
+
+            ```yaml
+            pluginDefaults:
+              - type: io.kestra.plugin.huawei.obs.tasks
+                values:
+                  region: eu-west-101
+                  temporaryCredentials:
+                    authMethod: PASSWORD
+                    username: my-iam-user
+                    password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
+                    domainName: my-account-domain
+                    durationSeconds: 3600
+            ```
+
+            **Long-running tasks:** the exchange runs once at execution start. For `RealtimeTrigger`
+            or long-running `Consume` tasks that outlive `durationSeconds`, credentials will expire
+            mid-run. Use long-lived AK/SK properties or refresh externally in that case.
+            """
+    )
+    @PluginProperty(group = "connection")
+    Property<TemporaryCredentialsConfig> getTemporaryCredentials();
+
+    default AbstractConnection.HuaweiClientConfig huaweiClientConfig(final RunContext runContext) throws Exception {
+        return huaweiClientConfig(runContext, null);
+    }
+
+    /**
+     * Builds the client config, optionally overriding the IAM endpoint used for the
+     * {@code temporaryCredentials} exchange. The override is {@code null} in production and
+     * points at a WireMock server during tests.
+     */
+    default AbstractConnection.HuaweiClientConfig huaweiClientConfig(
+        final RunContext runContext,
+        final String iamEndpointOverride
+    ) throws Exception {
+        var rRegion = runContext.render(this.getRegion()).as(String.class).orElse(null);
+
+        var tempCredsProperty = this.getTemporaryCredentials();
+        if (tempCredsProperty != null) {
+            var tempCredsConfig = runContext.render(tempCredsProperty).as(TemporaryCredentialsConfig.class).orElse(null);
+            if (tempCredsConfig != null) {
+                var temp = ConnectionUtils.exchangeForTemporaryCredentials(
+                    runContext, tempCredsConfig, rRegion, iamEndpointOverride);
+                return new AbstractConnection.HuaweiClientConfig(
+                    temp.accessKeyId(),
+                    temp.secretAccessKey(),
+                    temp.securityToken(),
+                    runContext.render(this.getProjectId()).as(String.class).orElse(null),
+                    runContext.render(this.getDomainId()).as(String.class).orElse(null),
+                    rRegion
+                );
+            }
+        }
+
         return new AbstractConnection.HuaweiClientConfig(
             runContext.render(this.getAccessKeyId()).as(String.class).orElse(null),
             runContext.render(this.getSecretAccessKey()).as(String.class).orElse(null),
             runContext.render(this.getSecurityToken()).as(String.class).orElse(null),
             runContext.render(this.getProjectId()).as(String.class).orElse(null),
             runContext.render(this.getDomainId()).as(String.class).orElse(null),
-            runContext.render(this.getRegion()).as(String.class).orElse(null)
+            rRegion
         );
     }
 }

@@ -13,7 +13,11 @@ out/
 .settings
 .classpath
 .attach*
+.huawei-qa.env
 src/test/resources/application-test.yml
 .factorypath
 bin/
 src/main/resources/plugin-ui/
+
+# local manual-QA flows (not for commit)
+qa/
