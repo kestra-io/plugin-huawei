@@ -13,7 +13,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class DownloadsTest extends AbstractMinioTest {
+class DownloadsTest extends AbstractObsTest {
 
     @Test
     void downloads_actionNone_filesDownloadedAndObjectsRemain() throws Exception {
@@ -23,7 +23,7 @@ class DownloadsTest extends AbstractMinioTest {
         seedObject(prefix + "b.txt", "content-b", "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Downloads.builder())
+        var task = applyObsConfig(Downloads.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .action(Property.ofValue(Downloads.Action.NONE))
@@ -57,7 +57,7 @@ class DownloadsTest extends AbstractMinioTest {
         seedObject(prefix + "y.txt", "content-y", "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Downloads.builder())
+        var task = applyObsConfig(Downloads.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(prefix))
             .action(Property.ofValue(Downloads.Action.DELETE))
@@ -87,7 +87,7 @@ class DownloadsTest extends AbstractMinioTest {
         seedObject(srcPrefix + "file.txt", "content-move", "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Downloads.builder())
+        var task = applyObsConfig(Downloads.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(srcPrefix))
             .action(Property.ofValue(Downloads.Action.MOVE))

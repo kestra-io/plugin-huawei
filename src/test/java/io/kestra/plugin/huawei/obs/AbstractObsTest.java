@@ -47,7 +47,7 @@ import java.util.UUID;
  */
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-abstract class AbstractMinioTest {
+abstract class AbstractObsTest {
 
     static final String TEST_ENDPOINT = env("OBS_TEST_ENDPOINT", "http://localhost:9000");
     static final String TEST_AK       = env("OBS_TEST_ACCESS_KEY", "minioadmin");
@@ -122,7 +122,7 @@ abstract class AbstractMinioTest {
      * {@link AbstractObs} properties that all concrete builders accept.
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    <B> B applyMinioConfig(B builder) {
+    <B> B applyObsConfig(B builder) {
         var b = (io.kestra.plugin.huawei.obs.AbstractObs.AbstractObsBuilder) builder;
         b.accessKeyId(Property.ofValue(TEST_AK));
         b.secretAccessKey(Property.ofValue(TEST_SK));
@@ -139,7 +139,7 @@ abstract class AbstractMinioTest {
      * helper that casts to the trigger's concrete builder type.
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    io.kestra.plugin.huawei.obs.tasks.Trigger.TriggerBuilder<?, ?> applyMinioConfig(
+    io.kestra.plugin.huawei.obs.tasks.Trigger.TriggerBuilder<?, ?> applyObsConfig(
         io.kestra.plugin.huawei.obs.tasks.Trigger.TriggerBuilder<?, ?> builder
     ) {
         builder.accessKeyId(Property.ofValue(TEST_AK));

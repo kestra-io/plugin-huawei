@@ -16,7 +16,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class UploadTest extends AbstractMinioTest {
+class UploadTest extends AbstractObsTest {
 
     @Test
     void upload_happyPath_objectAppearsInBucket() throws Exception {
@@ -31,7 +31,7 @@ class UploadTest extends AbstractMinioTest {
             storageUri = runContext.storage().putFile(in, "data.txt");
         }
 
-        var task = applyMinioConfig(Upload.builder())
+        var task = applyObsConfig(Upload.builder())
             .bucket(Property.ofValue(testBucket))
             .from(Property.ofValue(storageUri.toString()))
             .key(Property.ofValue(key))
@@ -64,7 +64,7 @@ class UploadTest extends AbstractMinioTest {
             storageUri = runContext.storage().putFile(in, "noct.bin");
         }
 
-        var task = applyMinioConfig(Upload.builder())
+        var task = applyObsConfig(Upload.builder())
             .bucket(Property.ofValue(testBucket))
             .from(Property.ofValue(storageUri.toString()))
             .key(Property.ofValue(key))

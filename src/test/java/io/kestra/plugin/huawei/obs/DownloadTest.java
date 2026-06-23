@@ -13,7 +13,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class DownloadTest extends AbstractMinioTest {
+class DownloadTest extends AbstractObsTest {
 
     @Test
     void download_happyPath_contentRoundTrips() throws Exception {
@@ -22,7 +22,7 @@ class DownloadTest extends AbstractMinioTest {
         seedObject(key, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Download.builder())
+        var task = applyObsConfig(Download.builder())
             .bucket(Property.ofValue(testBucket))
             .key(Property.ofValue(key))
             .build();
@@ -47,7 +47,7 @@ class DownloadTest extends AbstractMinioTest {
         seedObject(key, content, "application/octet-stream");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(Download.builder())
+        var task = applyObsConfig(Download.builder())
             .bucket(Property.ofValue(testBucket))
             .key(Property.ofValue(key))
             .build();

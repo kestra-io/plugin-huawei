@@ -13,7 +13,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
-class DeleteListTest extends AbstractMinioTest {
+class DeleteListTest extends AbstractObsTest {
 
     @Test
     void deleteList_byPrefix_deletesOnlyMatchingObjects() throws Exception {
@@ -29,7 +29,7 @@ class DeleteListTest extends AbstractMinioTest {
         seedObject(noMatchPrefix + "y.txt", "y", "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteList.builder())
+        var task = applyObsConfig(DeleteList.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue(matchPrefix))
             .build();
@@ -52,7 +52,7 @@ class DeleteListTest extends AbstractMinioTest {
     @Test
     void deleteList_noMatch_errorOnEmptyTrue_throwsException() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteList.builder())
+        var task = applyObsConfig(DeleteList.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue("delete-list-test/" + IdUtils.create() + "/nonexistent/"))
             .errorOnEmpty(Property.ofValue(true))
@@ -64,7 +64,7 @@ class DeleteListTest extends AbstractMinioTest {
     @Test
     void deleteList_noMatch_errorOnEmptyFalse_returnsZeroCount() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
-        var task = applyMinioConfig(DeleteList.builder())
+        var task = applyObsConfig(DeleteList.builder())
             .bucket(Property.ofValue(testBucket))
             .prefix(Property.ofValue("delete-list-test/" + IdUtils.create() + "/nonexistent/"))
             .build();
