@@ -10,7 +10,7 @@ set -euo pipefail
 # the reusable plugins.yml workflow. The dedicated IAM user has "OBS OperateAccess" and the
 # pre-created bucket "kestra-unit-test" lives in region eu-west-101 (1-day object lifecycle).
 #
-# Test-time configuration is bridged to the OBS_TEST_* contract read by AbstractMinioTest and
+# Test-time configuration is bridged to the OBS_TEST_* contract read by AbstractObsTest and
 # written to $GITHUB_ENV so it persists into the subsequent "gradle check" step.
 
 if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; then
