@@ -106,15 +106,15 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Map<String, String>> jobParams;
 
     @Schema(
-        title = "Optional start date string passed to the DataArts API.",
+        title = "Optional start date passed to the DataArts API.",
         description = """
-            When set, passed as the `startDate` field in the start request body. The expected format
-            depends on the job schedule configuration in DataArts Studio. Leave blank to start the job
-            immediately without a date override.
+            When set, passed as the `start_date` field in the start request body. The DataArts Factory
+            API expects a numeric `yyyyMMdd` date — for example `20241030` for 30 October 2024. Leave
+            unset to start the job immediately without a date override.
             """
     )
     @PluginProperty(group = "advanced")
-    private Property<String> startDate;
+    private Property<Long> startDate;
 
     @Schema(
         title = "Wait for the job run to reach a terminal state.",
@@ -160,7 +160,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofHours(1));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(5));
         var rJobParams = runContext.render(jobParams).asMap(String.class, String.class);
-        var rStartDate = runContext.render(startDate).as(String.class).orElse(null);
+        var rStartDate = runContext.render(startDate).as(Long.class).orElse(null);
 
         var config = huaweiClientConfig(runContext);
 

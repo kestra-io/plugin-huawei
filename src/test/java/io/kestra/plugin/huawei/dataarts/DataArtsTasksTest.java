@@ -20,6 +20,7 @@ import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
@@ -220,6 +221,75 @@ class DataArtsTasksTest {
 
         var output = task.run(runContext);
         assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
+    }
+
+    @Test
+    void startJobRun_startDate_sentAsNumericSnakeCaseField() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = StartJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .startDate(Property.ofValue(20241030L))
+            .wait(Property.ofValue(false))
+            .interval(Property.ofValue(Duration.ofMillis(50)))
+            .build();
+
+        task.run(runContext);
+
+        // The DataArts API expects the numeric snake_case field "start_date" (e.g. 20241030);
+        // a camelCase "startDate" string would be silently ignored by the server.
+        wireMock.verify(postRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/start"))
+            .withRequestBody(WireMock.matchingJsonPath("$.start_date", WireMock.equalTo("20241030")))
+            .withRequestBody(WireMock.notMatching("(?s).*startDate.*")));
+    }
+
+    @Test
+    void startJobRun_listInstances_usesPreciseQuery() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = StartJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .wait(Property.ofValue(false))
+            .interval(Property.ofValue(Duration.ofMillis(50)))
+            .build();
+
+        task.run(runContext);
+
+        // preciseQuery=true forces exact jobName matching so a substring-named job's instances
+        // cannot be returned by mistake.
+        wireMock.verify(getRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+            .withQueryParam("preciseQuery", WireMock.equalTo("true")));
+    }
+
+    @Test
+    void terminalAndSuccessStates_matchDataArtsStatusEnum() {
+        // Finished states per the DataArts Factory instance status enum.
+        for (var s : new String[]{"success", "forceSuccess", "ignoreSuccess", "skip-by-depend",
+                                  "fail", "running-exception", "manual-stop"}) {
+            assertThat("'" + s + "' should be terminal", DataArtsService.isTerminalState(s), is(true));
+        }
+        // Transient states must not be treated as terminal (else the wait loop would exit early).
+        for (var s : new String[]{"waiting", "running", "waiting-confirm", "freeze", "pause"}) {
+            assertThat("'" + s + "' should not be terminal", DataArtsService.isTerminalState(s), is(false));
+        }
+        // null status (freshly-queued instance, status not yet populated) is not terminal.
+        assertThat(DataArtsService.isTerminalState(null), is(false));
+
+        // Successful outcomes include operator-forced and ignored-failure successes.
+        for (var s : new String[]{"success", "forceSuccess", "ignoreSuccess"}) {
+            assertThat("'" + s + "' should be success", DataArtsService.isSuccessState(s), is(true));
+        }
+        for (var s : new String[]{"fail", "running-exception", "manual-stop", "skip-by-depend"}) {
+            assertThat("'" + s + "' should not be success", DataArtsService.isSuccessState(s), is(false));
+        }
     }
 
     @Test

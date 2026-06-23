@@ -56,20 +56,31 @@ public final class DataArtsService {
      * Terminal states: the job run will not advance further once in one of these states.
      * Returns {@code false} for {@code null} status (freshly-queued instances whose status
      * field has not yet been populated by the API).
+     *
+     * <p>Per the DataArts Factory instance status enum, finished states are {@code success},
+     * {@code forceSuccess}, {@code ignoreSuccess}, {@code skip-by-depend}, {@code fail},
+     * {@code running-exception}, and {@code manual-stop}. {@code waiting}, {@code running},
+     * {@code waiting-confirm}, {@code freeze}, and {@code pause} are transient and not terminal.
      */
     public static boolean isTerminalState(String status) {
         if (status == null) return false;
         return switch (status) {
-            case "success", "fail", "running-exception", "manual-stop" -> true;
+            case "success", "forceSuccess", "ignoreSuccess", "skip-by-depend",
+                 "fail", "running-exception", "manual-stop" -> true;
             default -> false;
         };
     }
 
     /**
-     * Successful terminal state — job completed without error.
+     * Successful terminal state — job completed without error. Includes {@code forceSuccess} and
+     * {@code ignoreSuccess}, where an operator forced the instance to success or chose to ignore
+     * the failure of a non-critical node.
      */
     public static boolean isSuccessState(String status) {
-        return "success".equals(status);
+        return switch (status) {
+            case "success", "forceSuccess", "ignoreSuccess" -> true;
+            default -> false;
+        };
     }
 
     /**
@@ -93,7 +104,7 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         String jobName,
         @Nullable Map<String, String> jobParams,
-        @Nullable String startDate
+        @Nullable Long startDate
     ) throws Exception {
         var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/start";
         var bodyMap = new LinkedHashMap<String, Object>();
@@ -102,8 +113,10 @@ public final class DataArtsService {
                 .map(e -> Map.of("name", e.getKey(), "value", e.getValue()))
                 .toList());
         }
-        if (startDate != null && !startDate.isBlank()) {
-            bodyMap.put("startDate", startDate);
+        if (startDate != null) {
+            // The DataArts Factory start API expects the snake_case field "start_date" as a
+            // numeric yyyyMMdd date (e.g. 20241030); a camelCase "startDate" string is ignored.
+            bodyMap.put("start_date", startDate);
         }
         var body = bodyMap.isEmpty() ? "{}" : JacksonMapper.ofJson().writeValueAsString(bodyMap);
 
@@ -180,6 +193,9 @@ public final class DataArtsService {
     ) throws Exception {
         var path = "/v1/" + projectId + "/jobs/instances/detail"
             + "?jobName=" + urlEncode(jobName)
+            // preciseQuery=true forces an exact jobName match; without it the API does a
+            // substring match and could return instances of a differently-named job.
+            + "&preciseQuery=true"
             + "&limit=" + limit
             + "&offset=" + offset;
 
