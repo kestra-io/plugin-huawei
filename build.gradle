@@ -58,7 +58,7 @@ dependencies {
     }
 
     // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
-    implementation("org.apache.kafka:kafka-clients:3.9.0") {
+    implementation("org.apache.kafka:kafka-clients:3.9.2") {
         exclude group: "org.slf4j"
     }
 
