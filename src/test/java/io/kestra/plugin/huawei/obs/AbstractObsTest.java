@@ -3,7 +3,6 @@ package io.kestra.plugin.huawei.obs;
 import com.obs.services.ObsClient;
 import com.obs.services.ObsConfiguration;
 import com.obs.services.exception.ObsException;
-import com.obs.services.model.AuthTypeEnum;
 import com.obs.services.model.CreateBucketRequest;
 import com.obs.services.model.ObjectMetadata;
 import com.obs.services.model.PutObjectRequest;

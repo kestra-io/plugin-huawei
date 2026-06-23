@@ -263,7 +263,7 @@ plugin-huawei/
 │   │   └── tasks/
 │   │       └── GetTemporaryCredentialsTest.java
 │   └── obs/
-│       ├── AbstractMinioTest.java
+│       ├── AbstractObsTest.java
 │       ├── CopyTest.java
 │       ├── CreateBucketTest.java
 │       ├── DeleteBucketTest.java
