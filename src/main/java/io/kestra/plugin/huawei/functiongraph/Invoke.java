@@ -113,7 +113,7 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
             its `event` parameter. When omitted, an empty body is sent.
             """
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "main")
     private Property<Map<String, Object>> functionPayload;
 
     @Override
@@ -126,10 +126,8 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
 
         var request = new InvokeFunctionRequest()
             .withFunctionUrn(rUrn)
-            .withXCFFRequestVersion("v1");
-
-        // The SDK requires body to be non-null; pass an empty map when no payload is configured.
-        request.withBody(rPayload != null ? rPayload : Map.of());
+            .withXCFFRequestVersion("v1")
+            .withBody(rPayload);
 
         runContext.logger().debug("Invoking FunctionGraph function '{}'", rUrn);
 
