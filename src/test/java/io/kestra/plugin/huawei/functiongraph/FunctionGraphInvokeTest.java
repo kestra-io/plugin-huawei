@@ -75,7 +75,7 @@ class FunctionGraphInvokeTest {
                 .withHeader("Content-Type", "application/json")
                 .withHeader("X-Cff-Request-Id", "req-abc-123")
                 .withBody("""
-                    {"result": "{\\"message\\":\\"hello world\\"}","status": 0,"request_id": "req-abc-123"}
+                    {"result": "{\\"message\\":\\"hello world\\"}","status": 200,"request_id": "req-abc-123"}
                     """)));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -103,7 +103,7 @@ class FunctionGraphInvokeTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("""
-                    {"status": 0,"request_id": "req-empty-001"}
+                    {"status": 200,"request_id": "req-empty-001"}
                     """)));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -131,7 +131,7 @@ class FunctionGraphInvokeTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("""
-                    {"result": "ok","status": 0,"request_id": "req-payload-001"}
+                    {"result": "ok","status": 200,"request_id": "req-payload-001"}
                     """)));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -156,12 +156,13 @@ class FunctionGraphInvokeTest {
 
     @Test
     void invoke_functionError_throwsFunctionGraphInvokeException() {
+        // A function runtime error is reported as a non-2xx function execution status.
         wireMock.stubFor(post(urlMatching(".*/invocations"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("""
-                    {"result": "Unhandled exception in user code","status": 1,"request_id": "req-err-001"}
+                    {"result": "Unhandled exception in user code","status": 500,"request_id": "req-err-001"}
                     """)));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -178,6 +179,37 @@ class FunctionGraphInvokeTest {
         assertThat(ex.getMessage(), containsString(FUNCTION_URN));
         assertThat(ex.getMessage(), containsString("function-level error"));
         assertThat(ex.getMessage(), containsString("LTS"));
+    }
+
+    @Test
+    void invoke_apigStyle200Body_doesNotThrow() throws Exception {
+        // Regression: a successful APIG-style response (function status 200) must NOT be treated
+        // as a function-level error, even though the body echoes its own statusCode field.
+        wireMock.stubFor(post(urlMatching(".*/invocations"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withHeader("X-Cff-Request-Id", "req-apig-001")
+                .withBody("""
+                    {"result": "{\\"statusCode\\":200,\\"isBase64Encoded\\":false,\\"body\\":\\"echoed\\"}","status": 200,"request_id": "req-apig-001"}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .functionPayload(Property.ofValue(Map.of("key", "value")))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getUri(), is(notNullValue()));
+        assertThat(output.getStatusCode(), equalTo(200));
+        assertThat(output.getRequestId(), equalTo("req-apig-001"));
     }
 
     // ── HTTP 4xx error ───────────────────────────────────────────────────────────

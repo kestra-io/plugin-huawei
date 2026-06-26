@@ -42,7 +42,7 @@ import java.util.Map;
         Authentication uses AK/SK request signing. Provide `accessKeyId` and `secretAccessKey` via
         `{{ secret('NAME') }}`, or configure `temporaryCredentials` for inline IAM credential exchange.
 
-        If the function itself reports an error (HTTP 200 with a function-level error status),
+        If the function runtime reports an error (a non-2xx function execution status),
         the task throws `FunctionGraphInvokeException` with a message pointing to the LTS logs.
         HTTP-level failures (4xx/5xx) are also surfaced as `FunctionGraphInvokeException`.
         """
@@ -149,12 +149,13 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
 
         var elapsed = Duration.ofNanos(System.nanoTime() - start);
 
-        // A non-zero status indicates a function-level error (HTTP 200 but function threw an exception).
+        // `status` is the function's execution HTTP status (200 on success), NOT a 0=success flag.
+        // A non-2xx value means the function runtime reported an error (e.g. an uncaught exception).
         var status = response.getStatus();
-        if (status != null && status != 0) {
+        if (status != null && (status < 200 || status >= 300)) {
             var errorBody = response.getResult() != null ? response.getResult() : "(no output)";
             throw new FunctionGraphInvokeException(
-                "FunctionGraph function '" + rUrn + "' returned a function-level error: " +
+                "FunctionGraph function '" + rUrn + "' returned a function-level error (status " + status + "): " +
                 errorBody + ". Check the function logs in LTS."
             );
         }
