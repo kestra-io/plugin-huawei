@@ -4,11 +4,16 @@ Runs arbitrary [Huawei Cloud KooCLI](https://www.huaweicloud.com/product/cli.htm
 
 ## Authentication
 
-KooCLI tasks authenticate using AK/SK credentials, which are injected as `HUAWEICLOUD_SDK_AK` and `HUAWEICLOUD_SDK_SK` environment variables. Provide them via [Kestra secrets](https://kestra.io/docs/concepts/secret).
+KooCLI tasks authenticate using AK/SK credentials, injected as environment variables:
 
-The `temporaryCredentials` inline exchange is also supported: configure it once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) and every KooCLI task receives freshly exchanged STS credentials without per-task wiring.
+| Env var | Source property |
+|---|---|
+| `HUAWEICLOUD_SDK_AK` | `accessKeyId` |
+| `HUAWEICLOUD_SDK_SK` | `secretAccessKey` |
+| `HUAWEICLOUD_SDK_REGION` | `region` |
+| `HUAWEICLOUD_SDK_SECURITY_TOKEN` | `securityToken` (temporary credentials) |
 
-Secret properties: `accessKeyId`, `secretAccessKey`, `securityToken`.
+Provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret). The `temporaryCredentials` inline exchange is also supported: configure it once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) and every KooCLI task receives freshly exchanged STS credentials without per-task wiring.
 
 ```yaml
 pluginDefaults:
@@ -27,13 +32,22 @@ Runs one or more `hcloud` commands in a container and returns a `ScriptOutput` w
 
 Required: `commands`.
 
-Optional: `containerImage` (default `ubuntu:22.04`), `outputFormat` (`JSON`/`TABLE`/`TSV`, default `JSON`), `env`, `outputFiles`, `namespaceFiles`, `inputFiles`, `taskRunner`.
+Optional: `containerImage` (default `ubuntu:22.04`), `env`, `outputFiles`, `namespaceFiles`, `inputFiles`, `taskRunner`.
 
-**Automatic install:** if `hcloud` is not present in the container image, the task downloads and installs it automatically (~5 MB) from the official Huawei distribution bucket. The step is guarded by `command -v hcloud` and is skipped when the binary is already available — use a prebuilt image to avoid the per-run download.
+**Automatic install:** if `hcloud` is not present in the container image, two guarded bootstrap steps run first:
+1. `command -v curl || apt-get install -y curl ca-certificates tar` — the default `ubuntu:22.04` image ships without `curl`; this installs it when absent.
+2. `command -v hcloud || curl ... | bash -s -- -y` — downloads and installs the KooCLI binary (~5 MB).
+
+Both steps are skipped automatically when `curl` / `hcloud` are already present (prebuilt images).
+
+**Output format:** KooCLI does not support a global output format setting. Pass `--cli-output=json` (or `table`, `tsv`) per command:
+```sh
+hcloud OBS ListBuckets --cli-output=json
+```
 
 **Glibc requirement:** KooCLI is a dynamically linked binary. Alpine/musl-based images are not supported. Use an Ubuntu/Debian-based image.
 
-**Prebuilt image:** point `containerImage` at an image that already has `hcloud` installed to skip the install step entirely:
+**Prebuilt image:** point `containerImage` at an image that already has `hcloud` installed to skip both bootstrap steps entirely:
 
 ```dockerfile
 FROM ubuntu:22.04
@@ -43,7 +57,5 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl bash tar c
     && echo y | hcloud version >/dev/null 2>&1 \
     && rm -rf /var/lib/apt/lists/*
 ```
-
-Region and output format are pre-configured via `hcloud configure set` before user commands run, so commands do not need to repeat `--cli-region`.
 
 Use the `::{"outputs":{"key": value}}::` pattern in a command to capture values as task output variables accessible via `{{ outputs.task_id.vars.key }}`.

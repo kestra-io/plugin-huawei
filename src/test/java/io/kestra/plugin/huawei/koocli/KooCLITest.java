@@ -37,24 +37,6 @@ class KooCLITest {
     }
 
     @Test
-    void defaults_outputFormatIsJson() {
-        var task = KooCLI.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .commands(Property.ofValue(List.of("hcloud version")))
-            .build();
-
-        assertThat(task.getOutputFormat(), equalTo(KooCLI.OutputFormat.JSON));
-    }
-
-    @Test
-    void outputFormat_toString_isLowercase() {
-        assertThat(KooCLI.OutputFormat.JSON.toString(), equalTo("json"));
-        assertThat(KooCLI.OutputFormat.TABLE.toString(), equalTo("table"));
-        assertThat(KooCLI.OutputFormat.TSV.toString(), equalTo("tsv"));
-    }
-
-    @Test
     void customContainerImage_isPreserved() {
         var task = KooCLI.builder()
             .accessKeyId(Property.ofValue(FAKE_AK))
