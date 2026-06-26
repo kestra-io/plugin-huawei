@@ -59,8 +59,7 @@ public abstract class AbstractFunctionGraph extends AbstractConnection implement
         if (rOverride != null && !rOverride.isBlank()) {
             builder.withEndpoint(FunctionGraphUtils.stripTrailingSlash(rOverride.trim()));
         } else if (rRegion != null && !rRegion.isBlank()) {
-            // Try the typed region first; fall back to endpoint derivation for regions
-            // not yet in the SDK's enum (e.g. newly added sovereign-cloud regions).
+            // Fall back to endpoint derivation for regions not yet in the SDK enum (e.g. newly added sovereign-cloud regions).
             try {
                 builder.withRegion(FunctionGraphRegion.valueOf(rRegion));
             } catch (IllegalArgumentException e) {
