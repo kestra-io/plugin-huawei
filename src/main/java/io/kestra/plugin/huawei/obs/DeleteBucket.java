@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.exception.ObsException;
 import io.kestra.core.models.annotations.Example;
@@ -34,6 +34,7 @@ import lombok.experimental.SuperBuilder;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.DeleteBucket",
     examples = {
         @Example(
             full = true,
@@ -43,7 +44,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: delete_bucket
-                    type: io.kestra.plugin.huawei.obs.tasks.DeleteBucket
+                    type: io.kestra.plugin.huawei.obs.DeleteBucket
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -59,7 +60,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: delete_bucket
-                    type: io.kestra.plugin.huawei.obs.tasks.DeleteBucket
+                    type: io.kestra.plugin.huawei.obs.DeleteBucket
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

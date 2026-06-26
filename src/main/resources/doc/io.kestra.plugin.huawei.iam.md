@@ -15,7 +15,7 @@ Always provide secrets via [Kestra secrets](https://kestra.io/docs/concepts/secr
 
 ```yaml
 pluginDefaults:
-  - type: io.kestra.plugin.huawei.iam.tasks
+  - type: io.kestra.plugin.huawei.iam
     values:
       region: eu-west-101
       authMethod: PASSWORD

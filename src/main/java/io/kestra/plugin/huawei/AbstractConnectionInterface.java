@@ -67,7 +67,7 @@ public interface AbstractConnectionInterface {
 
             ```yaml
             pluginDefaults:
-              - type: io.kestra.plugin.huawei.obs.tasks
+              - type: io.kestra.plugin.huawei.obs
                 values:
                   region: eu-west-101
                   temporaryCredentials:

@@ -1,5 +1,4 @@
-group: io.kestra.plugin.huawei
-subGroup: dataarts
+group: io.kestra.plugin.huawei.dataarts
 name: "dataarts"
 title: "DataArts Studio"
 description: "Tasks for Huawei Cloud DataArts Studio (DataArts Factory / DLF): start, monitor, and stop batch job runs."

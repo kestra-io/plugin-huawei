@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.model.DeleteObjectsRequest;
 import com.obs.services.model.KeyAndVersion;
@@ -41,6 +41,7 @@ import java.util.List;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.DeleteList",
     examples = {
         @Example(
             full = true,
@@ -50,7 +51,7 @@ import java.util.List;
 
                 tasks:
                   - id: delete_prefix
-                    type: io.kestra.plugin.huawei.obs.tasks.DeleteList
+                    type: io.kestra.plugin.huawei.obs.DeleteList
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -67,7 +68,7 @@ import java.util.List;
 
                 tasks:
                   - id: delete_stale
-                    type: io.kestra.plugin.huawei.obs.tasks.DeleteList
+                    type: io.kestra.plugin.huawei.obs.DeleteList
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

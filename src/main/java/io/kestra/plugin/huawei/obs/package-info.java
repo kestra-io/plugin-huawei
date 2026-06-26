@@ -4,6 +4,6 @@
         "upload, download, list, copy, delete, batch-delete, create and delete buckets, and trigger flows on new objects.",
     categories = { PluginSubGroup.PluginCategory.CLOUD }
 )
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import io.kestra.core.models.annotations.PluginSubGroup;

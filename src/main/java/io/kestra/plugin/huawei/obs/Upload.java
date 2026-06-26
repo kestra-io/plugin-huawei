@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.model.ObjectMetadata;
 import com.obs.services.model.PutObjectRequest;
@@ -39,6 +39,7 @@ import java.util.Map;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.Upload",
     examples = {
         @Example(
             full = true,
@@ -48,7 +49,7 @@ import java.util.Map;
 
                 tasks:
                   - id: upload
-                    type: io.kestra.plugin.huawei.obs.tasks.Upload
+                    type: io.kestra.plugin.huawei.obs.Upload
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

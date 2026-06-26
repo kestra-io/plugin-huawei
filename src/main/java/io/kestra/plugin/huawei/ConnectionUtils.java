@@ -17,8 +17,8 @@ import io.kestra.core.http.client.configurations.HttpConfiguration;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
-import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.AuthMethod;
-import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
+import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.AuthMethod;
+import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.TokenScope;
 import jakarta.annotation.Nullable;
 
 import java.net.URI;
