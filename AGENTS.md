@@ -24,6 +24,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dms.rocketmq.models` — DMS RocketMQ output models (`Message`)
 - `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
+- `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -74,6 +75,13 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.dataarts.StopJobRun` — Stops a running DataArts Factory job run instance; optionally polls until `manual-stop` is confirmed
 - `io.kestra.plugin.huawei.dataarts.DataArtsService` — Static REST helpers for the DataArts Factory V1 API; uses `AKSKSigner.getInstance().sign(request, credentials)` from the SDK core for HMAC-SHA256 signing; JDK `HttpClient` for transport
 - `io.kestra.plugin.huawei.dataarts.DataArtsUtils` — Static endpoint resolution (`endpointOverride` → region-derived → throws); mirrors `ObsUtils`
+
+**FunctionGraph**
+
+- `io.kestra.plugin.huawei.functiongraph.Invoke` — Synchronously invokes a FunctionGraph function; sends optional `functionPayload` as the event body; stores response in Kestra internal storage; throws `FunctionGraphInvokeException` on function-level errors (status=1) or HTTP errors
+- `io.kestra.plugin.huawei.functiongraph.AbstractFunctionGraph` — Base class extending `AbstractConnection`; builds `FunctionGraphClient` using `FunctionGraphRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
+- `io.kestra.plugin.huawei.functiongraph.FunctionGraphUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); supports `endpointSuffix` for EU sovereign cloud (`myhuaweicloud.eu`)
+- `io.kestra.plugin.huawei.functiongraph.FunctionGraphInvokeException` — Unchecked exception for function-level and HTTP-level invocation failures
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -215,6 +223,13 @@ plugin-huawei/
 │   │   ├── package-info.java
 │   │   └── models/
 │   │       └── JobRun.java
+│   ├── functiongraph/
+│   │   ├── AbstractFunctionGraph.java
+│   │   ├── FunctionGraphConnectionInterface.java
+│   │   ├── FunctionGraphInvokeException.java
+│   │   ├── FunctionGraphUtils.java
+│   │   ├── Invoke.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -253,6 +268,9 @@ plugin-huawei/
 │   │   └── rocketmq/
 │   │       ├── AbstractDmsRocketMqTest.java
 │   │       └── PublishConsumeTest.java
+│   ├── functiongraph/
+│   │   ├── FunctionGraphInvokeTest.java
+│   │   └── FunctionGraphUtilsTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -288,6 +306,8 @@ plugin-huawei/
 - DMS Kafka integration test gate: `DMS_KAFKA_TESTS=true`; DMS RocketMQ gate: `DMS_ROCKETMQ_TESTS=true`
 - DataArts Studio SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dataartsstudio` (version managed by `huaweicloud-sdk-bom`); used for the SDK core's `AKSKSigner` only — the DLF job-lifecycle V1 APIs are called via JDK `HttpClient` with signed headers
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
+- FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
+- FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
 
