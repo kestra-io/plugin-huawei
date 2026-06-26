@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.iam.tasks;
+package io.kestra.plugin.huawei.iam;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
@@ -50,6 +50,7 @@ import java.time.Instant;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials",
     examples = {
         @Example(
             title = "Obtain temporary credentials from an IAM username and password, then upload a file to OBS.",
@@ -60,7 +61,7 @@ import java.time.Instant;
 
                 tasks:
                   - id: get_temp_creds
-                    type: io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials
+                    type: io.kestra.plugin.huawei.iam.GetTemporaryCredentials
                     region: eu-west-101
                     authMethod: PASSWORD
                     username: my-iam-user
@@ -69,7 +70,7 @@ import java.time.Instant;
                     durationSeconds: 3600
 
                   - id: upload
-                    type: io.kestra.plugin.huawei.obs.tasks.Upload
+                    type: io.kestra.plugin.huawei.obs.Upload
                     accessKeyId: "{{ outputs.get_temp_creds.accessKeyId }}"
                     secretAccessKey: "{{ outputs.get_temp_creds.secretAccessKey }}"
                     securityToken: "{{ outputs.get_temp_creds.securityToken }}"
@@ -88,14 +89,14 @@ import java.time.Instant;
 
                 tasks:
                   - id: get_temp_creds
-                    type: io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials
+                    type: io.kestra.plugin.huawei.iam.GetTemporaryCredentials
                     region: eu-west-101
                     authMethod: TOKEN
                     token: "{{ secret('HUAWEI_IAM_TOKEN') }}"
                     durationSeconds: 3600
 
                   - id: upload
-                    type: io.kestra.plugin.huawei.obs.tasks.Upload
+                    type: io.kestra.plugin.huawei.obs.Upload
                     accessKeyId: "{{ outputs.get_temp_creds.accessKeyId }}"
                     secretAccessKey: "{{ outputs.get_temp_creds.secretAccessKey }}"
                     securityToken: "{{ outputs.get_temp_creds.securityToken }}"

@@ -1,17 +1,15 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.model.DeleteObjectRequest;
 import io.kestra.core.models.annotations.Example;
+import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
-import io.kestra.core.models.conditions.ConditionContext;
-import io.kestra.core.models.executions.Execution;
+import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.PollingTriggerInterface;
-import io.kestra.core.models.triggers.TriggerContext;
-import io.kestra.core.models.triggers.TriggerOutput;
-import io.kestra.core.models.triggers.TriggerService;
-import io.kestra.plugin.huawei.obs.AbstractObsTrigger;
+import io.kestra.core.models.tasks.RunnableTask;
+import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.huawei.obs.AbstractObs;
 import io.kestra.plugin.huawei.obs.ActionInterface;
 import io.kestra.plugin.huawei.obs.ListInterface;
 import io.kestra.plugin.huawei.obs.ObsService;
@@ -26,12 +24,10 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 import java.net.URI;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @SuperBuilder
 @ToString
@@ -39,58 +35,43 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow when new objects appear in a Huawei OBS bucket.",
+    title = "Download all OBS objects matching a filter.",
     description = """
-        Polls an OBS bucket on a configurable interval and fires an execution when objects matching the
-        filter are found. After triggering, `action` controls what happens to the matched objects:
-        - `DELETE` — objects are deleted so they are not re-processed on the next poll.
-        - `MOVE` — objects are moved to a different prefix/bucket before the next poll.
-        - `NONE` — objects are left in place; combine with a narrow `marker` or `regexp` to avoid
-          infinite re-triggering.
-
-        The trigger outputs the same structure as the `Downloads` task.
+        Lists objects matching the prefix/regexp filter, downloads each one into Kestra internal storage,
+        and optionally applies a post-download action (`NONE`, `DELETE`, or `MOVE`). The task outputs both
+        the enriched object list and a map of object key to internal storage URI.
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.Downloads",
     examples = {
         @Example(
             full = true,
             code = """
-                id: obs_trigger
+                id: obs_downloads
                 namespace: company.team
 
                 tasks:
-                  - id: process
-                    type: io.kestra.plugin.core.log.Log
-                    message: "{{ trigger.objects | length }} new files arrived"
-
-                triggers:
-                  - id: watch
-                    type: io.kestra.plugin.huawei.obs.tasks.Trigger
+                  - id: downloads
+                    type: io.kestra.plugin.huawei.obs.Downloads
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
                     bucket: "my-bucket"
-                    prefix: "inbox/"
+                    prefix: "reports/2024/"
                     action: DELETE
-                    interval: PT60S
                 """
         ),
         @Example(
-            title = "Trigger and move files to an archive prefix",
+            title = "Download and move to an archive prefix",
             full = true,
             code = """
-                id: obs_trigger_move
+                id: obs_downloads_move
                 namespace: company.team
 
                 tasks:
-                  - id: process
-                    type: io.kestra.plugin.core.log.Log
-                    message: "Processing {{ trigger.objects | length }} files"
-
-                triggers:
-                  - id: watch
-                    type: io.kestra.plugin.huawei.obs.tasks.Trigger
+                  - id: downloads
+                    type: io.kestra.plugin.huawei.obs.Downloads
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -99,16 +80,16 @@ import java.util.Optional;
                     action: MOVE
                     moveTo:
                       keyPrefix: "processed/"
-                    interval: PT300S
                 """
         )
+    },
+    metrics = {
+        @Metric(name = "size", type = Counter.TYPE)
     }
 )
-public class Trigger extends AbstractObsTrigger
-    implements PollingTriggerInterface, TriggerOutput<Trigger.Output>,
-    ListInterface, ActionInterface {
+public class Downloads extends AbstractObs implements RunnableTask<Downloads.Output>, ListInterface, ActionInterface {
 
-    @Schema(title = "OBS bucket to watch.")
+    @Schema(title = "OBS bucket to list and download from.")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> bucket;
@@ -129,43 +110,24 @@ public class Trigger extends AbstractObsTrigger
     @PluginProperty(group = "processing")
     private Property<String> regexp;
 
-    @Schema(
-        title = "Action applied to matched objects after they have been downloaded.",
-        description = """
-            Use `DELETE` or `MOVE` to prevent the same objects from triggering again on the next poll.
-            `NONE` is available but requires the caller to manage re-trigger avoidance (e.g. via a
-            narrow regexp or an external marker).
-            """
-    )
     @Builder.Default
     @PluginProperty(group = "processing")
-    private Property<Action> action = Property.ofValue(Action.DELETE);
+    private Property<Action> action = Property.ofValue(Action.NONE);
 
     @PluginProperty(group = "processing")
     private MoveTo moveTo;
 
-    @Schema(
-        title = "Polling interval.",
-        description = "How often the trigger polls the bucket for new objects, as an ISO-8601 duration " +
-            "(e.g. `PT60S`, `PT5M`). Defaults to 60 seconds."
-    )
-    @Builder.Default
-    @PluginProperty(group = "advanced")
-    private Duration interval = Duration.ofSeconds(60);
-
     @Override
-    public Optional<Execution> evaluate(ConditionContext conditionContext, TriggerContext triggerContext) throws Exception {
-        var runContext = conditionContext.getRunContext();
-
+    public Output run(RunContext runContext) throws Exception {
         var rBucket = runContext.render(bucket).as(String.class).orElseThrow();
         var rPrefix = runContext.render(prefix).as(String.class).orElse(null);
         var rDelimiter = runContext.render(delimiter).as(String.class).orElse(null);
         var rMarker = runContext.render(marker).as(String.class).orElse(null);
         var rMaxKeys = runContext.render(maxKeys).as(Integer.class).orElse(1000);
         var rRegexp = runContext.render(regexp).as(String.class).orElse(null);
-        var rAction = runContext.render(action).as(Action.class).orElse(Action.DELETE);
+        var rAction = runContext.render(action).as(Action.class).orElse(Action.NONE);
 
-        runContext.logger().debug("Polling OBS bucket obs://{} prefix={}", rBucket, rPrefix);
+        runContext.logger().debug("Listing and downloading objects from obs://{} prefix={}", rBucket, rPrefix);
 
         // Resolve MOVE destination up front so we validate config before streaming and keep the lambda lean.
         final String rDestBucket;
@@ -210,19 +172,11 @@ public class Trigger extends AbstractObsTrigger
                 }
             });
 
-            if (enriched.isEmpty()) {
-                return Optional.empty();
-            }
-
-            runContext.logger().debug("Found {} new objects in obs://{}", enriched.size(), rBucket);
-
-            var output = Output.builder()
+            runContext.metric(Counter.of("size", enriched.size()));
+            return Output.builder()
                 .objects(List.copyOf(enriched))
                 .outputFiles(Map.copyOf(outputFiles))
                 .build();
-
-            var execution = TriggerService.generateExecution(this, conditionContext, triggerContext, output);
-            return Optional.of(execution);
         }
     }
 

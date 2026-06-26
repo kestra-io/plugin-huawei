@@ -5,8 +5,8 @@ import io.kestra.core.models.property.Property;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
- * Shared post-download action schema for {@link io.kestra.plugin.huawei.obs.tasks.Downloads} and
- * {@link io.kestra.plugin.huawei.obs.tasks.Trigger}.
+ * Shared post-download action schema for {@link io.kestra.plugin.huawei.obs.Downloads} and
+ * {@link io.kestra.plugin.huawei.obs.Trigger}.
  *
  * <p>After objects are downloaded, this interface controls whether the source objects are left in place
  * ({@code NONE}), deleted ({@code DELETE}), or moved to another location ({@code MOVE}).

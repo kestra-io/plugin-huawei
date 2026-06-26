@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.exception.ObsException;
 import com.obs.services.model.CreateBucketRequest;
@@ -33,6 +33,7 @@ import lombok.experimental.SuperBuilder;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.CreateBucket",
     examples = {
         @Example(
             full = true,
@@ -42,7 +43,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: create_bucket
-                    type: io.kestra.plugin.huawei.obs.tasks.CreateBucket
+                    type: io.kestra.plugin.huawei.obs.CreateBucket
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -58,7 +59,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: create_warm_bucket
-                    type: io.kestra.plugin.huawei.obs.tasks.CreateBucket
+                    type: io.kestra.plugin.huawei.obs.CreateBucket
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -37,6 +37,7 @@ import java.util.ArrayList;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.List",
     examples = {
         @Example(
             full = true,
@@ -46,7 +47,7 @@ import java.util.ArrayList;
 
                 tasks:
                   - id: list_objects
-                    type: io.kestra.plugin.huawei.obs.tasks.List
+                    type: io.kestra.plugin.huawei.obs.List
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

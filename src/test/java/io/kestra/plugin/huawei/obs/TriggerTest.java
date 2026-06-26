@@ -7,7 +7,7 @@ import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.runners.DefaultRunContext;
 import io.kestra.core.runners.RunContextInitializer;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.plugin.huawei.obs.tasks.Trigger;
+import io.kestra.plugin.huawei.obs.Trigger;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;

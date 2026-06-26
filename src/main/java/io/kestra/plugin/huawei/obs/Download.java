@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -35,6 +35,7 @@ import java.util.Map;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.Download",
     examples = {
         @Example(
             full = true,
@@ -44,7 +45,7 @@ import java.util.Map;
 
                 tasks:
                   - id: download
-                    type: io.kestra.plugin.huawei.obs.tasks.Download
+                    type: io.kestra.plugin.huawei.obs.Download
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

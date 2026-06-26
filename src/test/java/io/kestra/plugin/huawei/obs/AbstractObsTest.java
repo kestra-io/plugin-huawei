@@ -132,14 +132,14 @@ abstract class AbstractObsTest {
     }
 
     /**
-     * Applies the configured connection settings to a {@link io.kestra.plugin.huawei.obs.tasks.Trigger} builder.
+     * Applies the configured connection settings to a {@link io.kestra.plugin.huawei.obs.Trigger} builder.
      *
      * <p>Triggers extend {@code AbstractTrigger} rather than {@code AbstractObs}, so they need their own
      * helper that casts to the trigger's concrete builder type.
      */
     @SuppressWarnings({"unchecked", "rawtypes"})
-    io.kestra.plugin.huawei.obs.tasks.Trigger.TriggerBuilder<?, ?> applyObsConfig(
-        io.kestra.plugin.huawei.obs.tasks.Trigger.TriggerBuilder<?, ?> builder
+    io.kestra.plugin.huawei.obs.Trigger.TriggerBuilder<?, ?> applyObsConfig(
+        io.kestra.plugin.huawei.obs.Trigger.TriggerBuilder<?, ?> builder
     ) {
         builder.accessKeyId(Property.ofValue(TEST_AK));
         builder.secretAccessKey(Property.ofValue(TEST_SK));

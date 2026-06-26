@@ -4,7 +4,7 @@ import com.obs.services.exception.ObsException;
 import com.obs.services.model.CreateBucketRequest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.plugin.huawei.obs.tasks.DeleteBucket;
+import io.kestra.plugin.huawei.obs.DeleteBucket;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 

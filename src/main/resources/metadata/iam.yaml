@@ -1,5 +1,4 @@
-group: io.kestra.plugin.huawei
-subGroup: iam
+group: io.kestra.plugin.huawei.iam
 name: "iam"
 title: "IAM"
 description: "Huawei Cloud Identity and Access Management (IAM) authentication tasks."

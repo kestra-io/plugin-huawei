@@ -2,7 +2,7 @@ package io.kestra.plugin.huawei.obs;
 
 import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
-import io.kestra.plugin.huawei.obs.tasks.Delete;
+import io.kestra.plugin.huawei.obs.Delete;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 

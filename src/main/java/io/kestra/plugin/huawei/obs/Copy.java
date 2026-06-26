@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.ObsClient;
 import com.obs.services.exception.ObsException;
@@ -37,6 +37,7 @@ import lombok.experimental.SuperBuilder;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.Copy",
     examples = {
         @Example(
             full = true,
@@ -46,7 +47,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: copy
-                    type: io.kestra.plugin.huawei.obs.tasks.Copy
+                    type: io.kestra.plugin.huawei.obs.Copy
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"
@@ -67,7 +68,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: move
-                    type: io.kestra.plugin.huawei.obs.tasks.Copy
+                    type: io.kestra.plugin.huawei.obs.Copy
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

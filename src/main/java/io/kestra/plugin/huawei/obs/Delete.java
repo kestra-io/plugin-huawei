@@ -1,4 +1,4 @@
-package io.kestra.plugin.huawei.obs.tasks;
+package io.kestra.plugin.huawei.obs;
 
 import com.obs.services.model.DeleteObjectRequest;
 import io.kestra.core.models.annotations.Example;
@@ -32,6 +32,7 @@ import lombok.experimental.SuperBuilder;
         """
 )
 @Plugin(
+    aliases = "io.kestra.plugin.huawei.obs.tasks.Delete",
     examples = {
         @Example(
             full = true,
@@ -41,7 +42,7 @@ import lombok.experimental.SuperBuilder;
 
                 tasks:
                   - id: delete
-                    type: io.kestra.plugin.huawei.obs.tasks.Delete
+                    type: io.kestra.plugin.huawei.obs.Delete
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: "eu-west-101"

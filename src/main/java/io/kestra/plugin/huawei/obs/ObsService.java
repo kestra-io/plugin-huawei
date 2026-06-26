@@ -35,7 +35,7 @@ public final class ObsService {
     /**
      * Builds an {@link ObsClient} from rendered connection properties.
      *
-     * <p>Extracted as a static factory so that the {@link io.kestra.plugin.huawei.obs.tasks.Trigger},
+     * <p>Extracted as a static factory so that the {@link io.kestra.plugin.huawei.obs.Trigger},
      * which extends {@code AbstractTrigger} instead of {@code AbstractObs}, can share the same
      * client-creation logic without inheritance.
      *
@@ -79,7 +79,7 @@ public final class ObsService {
     }
 
     /**
-     * Download result carrying everything the {@link io.kestra.plugin.huawei.obs.tasks.Download} task
+     * Download result carrying everything the {@link io.kestra.plugin.huawei.obs.Download} task
      * needs to populate its output.
      */
     public record DownloadResult(

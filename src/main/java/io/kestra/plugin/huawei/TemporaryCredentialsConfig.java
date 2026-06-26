@@ -2,8 +2,8 @@ package io.kestra.plugin.huawei;
 
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
-import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.AuthMethod;
-import io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials.TokenScope;
+import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.AuthMethod;
+import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.TokenScope;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;

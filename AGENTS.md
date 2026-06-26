@@ -15,9 +15,8 @@ Teams using Huawei Cloud need first-class Kestra integrations for storage, authe
 Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 
 - `io.kestra.plugin.huawei` — plugin-wide abstractions (`AbstractConnection`, `AbstractConnectionInterface`, `ConnectionUtils`, `TemporaryCredentialsConfig`)
-- `io.kestra.plugin.huawei.iam.tasks` — IAM authentication tasks (`GetTemporaryCredentials`)
-- `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AbstractObsTrigger`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`)
-- `io.kestra.plugin.huawei.obs.tasks` — OBS object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
+- `io.kestra.plugin.huawei.iam` — IAM authentication tasks (`GetTemporaryCredentials`)
+- `io.kestra.plugin.huawei.obs` — OBS shared layer (`AbstractObs`, `AbstractObsObject`, `AbstractObsInterface`, `AbstractObsTrigger`, `AuthType`, `ListInterface`, `ObsUtils`, `ObsService`) and object tasks (`Upload`, `Download`, `List`, `Copy`, `Delete`, `DeleteList`, `CreateBucket`, `DeleteBucket`, `Downloads`, `Trigger`)
 - `io.kestra.plugin.huawei.obs.models` — serializable output models (`ObsObject`)
 - `io.kestra.plugin.huawei.dms.kafka` — DMS for Kafka tasks/triggers (`AbstractDmsKafka`, `DmsKafkaConnectionInterface`, `SaslMechanism`, `SerdeType`, `Produce`, `Consume`, `Trigger`, `RealtimeTrigger`)
 - `io.kestra.plugin.huawei.dms.kafka.models` — DMS Kafka output models (`Message`)
@@ -39,20 +38,20 @@ Infrastructure dependencies (Docker Compose services):
 
 - `io.kestra.plugin.huawei.ConnectionUtils` — Static factory for Huawei Cloud SDK credentials (`projectCredentials`, `globalCredentials`) and clients (`iamClient`, `iamClientWithToken`); also exposes `exchangeForTemporaryCredentials(RunContext, TemporaryCredentialsConfig, region, endpointOverride)` which drives both the inline connection-layer exchange and the `GetTemporaryCredentials` task
 - `io.kestra.plugin.huawei.TemporaryCredentialsConfig` — Nested configuration block for inline IAM credential exchange; holds `authMethod`, `iamToken` (TOKEN path), `username`/`password`/`domainName` (PASSWORD path), `scope`, `projectName`, `durationSeconds`; set as `temporaryCredentials` on any connection
-- `io.kestra.plugin.huawei.iam.tasks.GetTemporaryCredentials` — **Escape-hatch task**: obtains short-lived STS credentials and exposes them as task outputs (`accessKeyId`, `secretAccessKey`, `securityToken`, `expirationTime`) for manual wiring into downstream tasks or external systems; delegates to `ConnectionUtils.exchangeForTemporaryCredentials`
+- `io.kestra.plugin.huawei.iam.GetTemporaryCredentials` — **Escape-hatch task**: obtains short-lived STS credentials and exposes them as task outputs (`accessKeyId`, `secretAccessKey`, `securityToken`, `expirationTime`) for manual wiring into downstream tasks or external systems; delegates to `ConnectionUtils.exchangeForTemporaryCredentials`
 
 **OBS**
 
-- `io.kestra.plugin.huawei.obs.tasks.Upload` — Uploads a file from Kestra internal storage to OBS
-- `io.kestra.plugin.huawei.obs.tasks.Download` — Downloads an OBS object into Kestra internal storage
-- `io.kestra.plugin.huawei.obs.tasks.List` — Lists OBS objects with prefix/regexp filtering, full pagination
-- `io.kestra.plugin.huawei.obs.tasks.Copy` — Server-side copy of an OBS object within or between buckets; `delete=true` for move semantics
-- `io.kestra.plugin.huawei.obs.tasks.Delete` — Deletes a single OBS object by bucket/key (and optional versionId)
-- `io.kestra.plugin.huawei.obs.tasks.DeleteList` — Batch-deletes all objects matching a prefix/regexp filter in chunks of 1000
-- `io.kestra.plugin.huawei.obs.tasks.CreateBucket` — Creates an OBS bucket; idempotent if the caller already owns it
-- `io.kestra.plugin.huawei.obs.tasks.DeleteBucket` — Deletes an empty OBS bucket; idempotent by default (`errorOnMissing=false`) if the bucket is absent
-- `io.kestra.plugin.huawei.obs.tasks.Downloads` — Lists matching objects, downloads each to Kestra storage, applies NONE/DELETE/MOVE action
-- `io.kestra.plugin.huawei.obs.tasks.Trigger` — Polling trigger that fires when new objects appear in a bucket; applies action after download to avoid re-triggering
+- `io.kestra.plugin.huawei.obs.Upload` — Uploads a file from Kestra internal storage to OBS
+- `io.kestra.plugin.huawei.obs.Download` — Downloads an OBS object into Kestra internal storage
+- `io.kestra.plugin.huawei.obs.List` — Lists OBS objects with prefix/regexp filtering, full pagination
+- `io.kestra.plugin.huawei.obs.Copy` — Server-side copy of an OBS object within or between buckets; `delete=true` for move semantics
+- `io.kestra.plugin.huawei.obs.Delete` — Deletes a single OBS object by bucket/key (and optional versionId)
+- `io.kestra.plugin.huawei.obs.DeleteList` — Batch-deletes all objects matching a prefix/regexp filter in chunks of 1000
+- `io.kestra.plugin.huawei.obs.CreateBucket` — Creates an OBS bucket; idempotent if the caller already owns it
+- `io.kestra.plugin.huawei.obs.DeleteBucket` — Deletes an empty OBS bucket; idempotent by default (`errorOnMissing=false`) if the bucket is absent
+- `io.kestra.plugin.huawei.obs.Downloads` — Lists matching objects, downloads each to Kestra storage, applies NONE/DELETE/MOVE action
+- `io.kestra.plugin.huawei.obs.Trigger` — Polling trigger that fires when new objects appear in a bucket; applies action after download to avoid re-triggering
 
 **DMS for Kafka**
 
@@ -82,7 +81,7 @@ The preferred way to use short-lived credentials is the `temporaryCredentials` n
 
 ```yaml
 pluginDefaults:
-  - type: io.kestra.plugin.huawei.obs.tasks
+  - type: io.kestra.plugin.huawei.obs
     values:
       region: eu-west-101
       temporaryCredentials:
@@ -94,7 +93,7 @@ pluginDefaults:
 
 tasks:
   - id: upload
-    type: io.kestra.plugin.huawei.obs.tasks.Upload
+    type: io.kestra.plugin.huawei.obs.Upload
     bucket: my-bucket
     from: "{{ inputs.file }}"
     key: uploads/data.csv
@@ -217,9 +216,8 @@ plugin-huawei/
 │   │   └── models/
 │   │       └── JobRun.java
 │   ├── iam/
-│   │   └── tasks/
-│   │       ├── GetTemporaryCredentials.java
-│   │       └── package-info.java
+│   │   ├── GetTemporaryCredentials.java
+│   │   └── package-info.java
 │   └── obs/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
@@ -233,18 +231,16 @@ plugin-huawei/
 │       ├── package-info.java
 │       ├── models/
 │       │   └── ObsObject.java
-│       └── tasks/
-│           ├── Copy.java
-│           ├── CreateBucket.java
-│           ├── Delete.java
-│           ├── DeleteBucket.java
-│           ├── DeleteList.java
-│           ├── Download.java
-│           ├── Downloads.java
-│           ├── List.java
-│           ├── Trigger.java
-│           ├── Upload.java
-│           └── package-info.java
+│       ├── Copy.java
+│       ├── CreateBucket.java
+│       ├── Delete.java
+│       ├── DeleteBucket.java
+│       ├── DeleteList.java
+│       ├── Download.java
+│       ├── Downloads.java
+│       ├── List.java
+│       ├── Trigger.java
+│       └── Upload.java
 ├── src/test/java/io/kestra/plugin/huawei/
 │   ├── dataarts/
 │   │   ├── DataArtsTasksTest.java
@@ -260,8 +256,7 @@ plugin-huawei/
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
-│   │   └── tasks/
-│   │       └── GetTemporaryCredentialsTest.java
+│   │   └── GetTemporaryCredentialsTest.java
 │   └── obs/
 │       ├── AbstractObsTest.java
 │       ├── CopyTest.java
