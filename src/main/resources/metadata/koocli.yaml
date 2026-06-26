@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.koocli
+name: "koocli"
+title: "KooCLI"
+description: "Tasks for Huawei Cloud KooCLI (hcloud): run arbitrary hcloud commands in a container with automatic IAM credential injection."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"

@@ -25,6 +25,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
+- `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -82,6 +83,10 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.functiongraph.AbstractFunctionGraph` — Base class extending `AbstractConnection`; builds `FunctionGraphClient` using `FunctionGraphRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); supports `endpointSuffix` for EU sovereign cloud (`myhuaweicloud.eu`)
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphInvokeException` — Unchecked exception for function-level and HTTP-level invocation failures
+
+**KooCLI**
+
+- `io.kestra.plugin.huawei.koocli.KooCLI` — Runs arbitrary `hcloud` CLI commands in a container (default `ubuntu:22.04`) with automatic IAM credential injection via `HUAWEICLOUD_SDK_AK`/`HUAWEICLOUD_SDK_SK` env vars and `hcloud configure set` for region/output format/security token; prepends a guarded install step (`command -v hcloud || curl ... | bash -s -- -y`) that auto-skips when `hcloud` is already present; supports `temporaryCredentials` inline exchange; returns `ScriptOutput` with `vars`, `outputFiles`, `exitCode`
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -230,6 +235,9 @@ plugin-huawei/
 │   │   ├── FunctionGraphUtils.java
 │   │   ├── Invoke.java
 │   │   └── package-info.java
+│   ├── koocli/
+│   │   ├── KooCLI.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -271,6 +279,8 @@ plugin-huawei/
 │   ├── functiongraph/
 │   │   ├── FunctionGraphInvokeTest.java
 │   │   └── FunctionGraphUtilsTest.java
+│   ├── koocli/
+│   │   └── KooCLITest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -308,6 +318,7 @@ plugin-huawei/
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
 - FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
+- KooCLI uses `io.kestra:script` (already a compile dependency); no new SDK; default image `ubuntu:22.04` (glibc); install step downloads `hcloud` from the official Huawei distribution bucket on first run; guarded by `command -v hcloud` so prebuilt images skip it entirely; glibc required (Alpine/musl not supported); KooCLI integration test gate: `HUAWEI_CLI_TESTS=true`; unit tests run unconditionally
 
 ## References
 
