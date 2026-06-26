@@ -86,7 +86,7 @@ Infrastructure dependencies (Docker Compose services):
 
 **KooCLI**
 
-- `io.kestra.plugin.huawei.koocli.KooCLI` — Runs arbitrary `hcloud` CLI commands in a container (default `ubuntu:22.04`) with automatic IAM credential injection via `HUAWEICLOUD_SDK_AK`/`HUAWEICLOUD_SDK_SK` env vars and `hcloud configure set` for region/output format/security token; prepends a guarded install step (`command -v hcloud || curl ... | bash -s -- -y`) that auto-skips when `hcloud` is already present; supports `temporaryCredentials` inline exchange; returns `ScriptOutput` with `vars`, `outputFiles`, `exitCode`
+- `io.kestra.plugin.huawei.koocli.KooCLI` — Runs arbitrary `hcloud` CLI commands in a container (default `ubuntu:22.04`) with automatic IAM credential injection via `HUAWEICLOUD_SDK_AK`/`HUAWEICLOUD_SDK_SK` env vars and `hcloud configure set` for region/output format/security token; prepends two guarded bootstrap steps: (1) `command -v curl || apt-get install -y curl ca-certificates tar` — installs download tooling if absent (`ubuntu:22.04` ships without `curl`); (2) `command -v hcloud || curl ... | bash -s -- -y` — downloads KooCLI if absent; both steps auto-skip on prebuilt images; supports `temporaryCredentials` inline exchange; returns `ScriptOutput` with `vars`, `outputFiles`, `exitCode`
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -318,7 +318,7 @@ plugin-huawei/
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
 - FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
-- KooCLI uses `io.kestra:script` (already a compile dependency); no new SDK; default image `ubuntu:22.04` (glibc); install step downloads `hcloud` from the official Huawei distribution bucket on first run; guarded by `command -v hcloud` so prebuilt images skip it entirely; glibc required (Alpine/musl not supported); KooCLI integration test gate: `HUAWEI_CLI_TESTS=true`; unit tests run unconditionally
+- KooCLI uses `io.kestra:script` (already a compile dependency); no new SDK; default image `ubuntu:22.04` (glibc); prepends two guarded bootstrap steps: (1) `command -v curl || apt-get install -y curl ca-certificates tar` — `ubuntu:22.04` ships without `curl`, this step installs it; (2) `command -v hcloud || curl ... | bash -s -- -y` — downloads KooCLI from the official Huawei distribution bucket; both steps auto-skip on prebuilt images (no network call); glibc required (Alpine/musl not supported); KooCLI integration test gate: `HUAWEI_CLI_TESTS=true`; unit tests run unconditionally
 
 ## References
 
