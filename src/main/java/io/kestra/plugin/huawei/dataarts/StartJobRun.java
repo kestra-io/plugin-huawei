@@ -26,7 +26,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Start a DataArts Studio (DataArts Factory) job run.",
+    title = "Start a DataArts Studio (DataArts Factory) job run",
     description = """
         Starts a batch job in Huawei Cloud DataArts Factory (DLF) by calling the
         `POST /v1/{project_id}/jobs/{job_name}/start` API.
@@ -88,7 +88,7 @@ import java.util.Map;
 public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJobRun.Output> {
 
     @Schema(
-        title = "Name of the DataArts Factory job to start.",
+        title = "Name of the DataArts Factory job to start",
         description = "Must match the job name exactly as defined in the DataArts Studio console."
     )
     @NotNull
@@ -96,7 +96,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<String> jobName;
 
     @Schema(
-        title = "Job parameters to pass at runtime.",
+        title = "Job parameters to pass at runtime",
         description = """
             Optional key/value pairs passed to the job as run-time parameters. Each entry maps a
             parameter name to its value string. The job must declare matching parameter definitions.
@@ -106,7 +106,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Map<String, String>> jobParams;
 
     @Schema(
-        title = "Optional start date passed to the DataArts API.",
+        title = "Optional start date passed to the DataArts API",
         description = """
             When set, passed as the `start_date` field in the start request body. The DataArts Factory
             API expects a numeric `yyyyMMdd` date — for example `20241030` for 30 October 2024. Leave
@@ -117,7 +117,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Long> startDate;
 
     @Schema(
-        title = "Wait for the job run to reach a terminal state.",
+        title = "Wait for the job run to reach a terminal state",
         description = """
             When `true` (the default), the task polls the job run status until it reaches `success`,
             `fail`, `running-exception`, or `manual-stop`. The task fails with a descriptive message
@@ -130,7 +130,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Boolean> wait = Property.ofValue(true);
 
     @Schema(
-        title = "Maximum time to wait for the job run to complete.",
+        title = "Maximum time to wait for the job run to complete",
         description = """
             ISO-8601 duration (e.g. `PT30M`, `PT1H`). When the deadline is reached before the run
             reaches a terminal state, the task fails with a timeout error. Only relevant when
@@ -142,7 +142,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Duration> maxDuration = Property.ofValue(Duration.ofHours(1));
 
     @Schema(
-        title = "Polling interval while waiting for the job run to complete.",
+        title = "Polling interval while waiting for the job run to complete",
         description = "ISO-8601 duration (e.g. `PT5S`). Defaults to 5 seconds."
     )
     @Builder.Default
@@ -286,28 +286,28 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Job name.")
+        @Schema(title = "Job name")
         private final String jobName;
 
-        @Schema(title = "Job run instance ID.")
+        @Schema(title = "Job run instance ID")
         private final Long instanceId;
 
-        @Schema(title = "Terminal status of the job run.")
+        @Schema(title = "Terminal status of the job run")
         private final String status;
 
-        @Schema(title = "Scheduled plan time (epoch milliseconds).")
+        @Schema(title = "Scheduled plan time (epoch milliseconds)")
         private final Long planTime;
 
-        @Schema(title = "Actual start time (epoch milliseconds).")
+        @Schema(title = "Actual start time (epoch milliseconds)")
         private final Long startTime;
 
-        @Schema(title = "End time (epoch milliseconds).")
+        @Schema(title = "End time (epoch milliseconds)")
         private final Long endTime;
 
-        @Schema(title = "Last update time (epoch milliseconds).")
+        @Schema(title = "Last update time (epoch milliseconds)")
         private final Long lastUpdateTime;
 
-        @Schema(title = "Error message when the job run failed; null otherwise.")
+        @Schema(title = "Error message when the job run failed; null otherwise")
         private final String errorMessage;
     }
 }

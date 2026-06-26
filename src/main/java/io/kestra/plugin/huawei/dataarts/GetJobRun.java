@@ -22,7 +22,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Fetch the status and metadata of a DataArts Factory job run.",
+    title = "Fetch the status and metadata of a DataArts Factory job run",
     description = """
         Retrieves the current status of a DataArts Studio (DataArts Factory) job run instance.
 
@@ -76,7 +76,7 @@ import lombok.experimental.SuperBuilder;
 public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRun.Output> {
 
     @Schema(
-        title = "Name of the DataArts Factory job.",
+        title = "Name of the DataArts Factory job",
         description = "Must match the job name exactly as defined in the DataArts Studio console."
     )
     @NotNull
@@ -84,7 +84,7 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
     private Property<String> jobName;
 
     @Schema(
-        title = "Job run instance ID to fetch.",
+        title = "Job run instance ID to fetch",
         description = """
             When set, fetches the specific instance by ID. When omitted, the most recently started
             instance for `jobName` is returned. Use the `instanceId` from a previous `StartJobRun`
@@ -138,28 +138,28 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Job name.")
+        @Schema(title = "Job name")
         private final String jobName;
 
-        @Schema(title = "Job run instance ID.")
+        @Schema(title = "Job run instance ID")
         private final Long instanceId;
 
-        @Schema(title = "Current status of the job run.")
+        @Schema(title = "Current status of the job run")
         private final String status;
 
-        @Schema(title = "Scheduled plan time (epoch milliseconds).")
+        @Schema(title = "Scheduled plan time (epoch milliseconds)")
         private final Long planTime;
 
-        @Schema(title = "Actual start time (epoch milliseconds).")
+        @Schema(title = "Actual start time (epoch milliseconds)")
         private final Long startTime;
 
-        @Schema(title = "End time (epoch milliseconds); null if still running.")
+        @Schema(title = "End time (epoch milliseconds); null if still running")
         private final Long endTime;
 
-        @Schema(title = "Last update time (epoch milliseconds).")
+        @Schema(title = "Last update time (epoch milliseconds)")
         private final Long lastUpdateTime;
 
-        @Schema(title = "Error message when the job run failed; null otherwise.")
+        @Schema(title = "Error message when the job run failed; null otherwise")
         private final String errorMessage;
     }
 }

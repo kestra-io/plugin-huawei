@@ -19,23 +19,23 @@ import java.time.Instant;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ObsObject {
 
-    @Schema(title = "Object key (full path within the bucket).")
+    @Schema(title = "Object key (full path within the bucket)")
     String key;
 
-    @Schema(title = "ETag of the object, as returned by OBS.")
+    @Schema(title = "ETag of the object, as returned by OBS")
     String etag;
 
-    @Schema(title = "Object size in bytes.")
+    @Schema(title = "Object size in bytes")
     Long size;
 
-    @Schema(title = "Last-modified timestamp (UTC).")
+    @Schema(title = "Last-modified timestamp (UTC)")
     Instant lastModified;
 
-    @Schema(title = "Display name of the object owner, or null when not available.")
+    @Schema(title = "Display name of the object owner, or null when not available")
     String owner;
 
     @Schema(
-        title = "Kestra internal storage URI of the downloaded object.",
+        title = "Kestra internal storage URI of the downloaded object",
         description = "Populated only by tasks that download the object content (e.g. `Downloads`, `Trigger`). " +
             "Null when produced by listing-only operations."
     )

@@ -30,7 +30,7 @@ import lombok.experimental.SuperBuilder;
 public class TemporaryCredentialsConfig {
 
     @Schema(
-        title = "Authentication method.",
+        title = "Authentication method",
         description = """
             Controls which credentials are used to obtain the session token before exchanging for
             temporary STS credentials.
@@ -44,7 +44,7 @@ public class TemporaryCredentialsConfig {
     private Property<AuthMethod> authMethod = Property.ofValue(AuthMethod.PASSWORD);
 
     @Schema(
-        title = "IAM token to exchange (TOKEN method only).",
+        title = "IAM token to exchange (TOKEN method only)",
         description = """
             An existing Huawei Cloud `X-Auth-Token` to exchange for temporary STS credentials.
             Required when `authMethod` is `TOKEN`. **Sensitive — always provide via `{{ secret('NAME') }}`.**
@@ -54,14 +54,14 @@ public class TemporaryCredentialsConfig {
     private Property<String> iamToken;
 
     @Schema(
-        title = "IAM username (PASSWORD method only).",
+        title = "IAM username (PASSWORD method only)",
         description = "Huawei Cloud IAM username. Required when `authMethod` is `PASSWORD`."
     )
     @PluginProperty(group = "connection")
     private Property<String> username;
 
     @Schema(
-        title = "IAM password (PASSWORD method only).",
+        title = "IAM password (PASSWORD method only)",
         description = """
             Password for the IAM user identified by `username`.
             Required when `authMethod` is `PASSWORD`.
@@ -72,7 +72,7 @@ public class TemporaryCredentialsConfig {
     private Property<String> password;
 
     @Schema(
-        title = "Account domain name (PASSWORD method only).",
+        title = "Account domain name (PASSWORD method only)",
         description = """
             The Huawei Cloud account name (domain name) that owns the IAM user.
             Required when `authMethod` is `PASSWORD`. Visible in the Huawei Cloud console under
@@ -83,7 +83,7 @@ public class TemporaryCredentialsConfig {
     private Property<String> domainName;
 
     @Schema(
-        title = "Token scope (PASSWORD method only).",
+        title = "Token scope (PASSWORD method only)",
         description = """
             Scope of the session token obtained during password authentication.
 
@@ -97,7 +97,7 @@ public class TemporaryCredentialsConfig {
     private Property<TokenScope> scope = Property.ofValue(TokenScope.PROJECT);
 
     @Schema(
-        title = "Project name for project-scoped tokens (PASSWORD method only).",
+        title = "Project name for project-scoped tokens (PASSWORD method only)",
         description = """
             Overrides the project name used for `scope=PROJECT` token requests.
             Defaults to the task's `region` value when omitted, which is correct for most regions.
@@ -107,7 +107,7 @@ public class TemporaryCredentialsConfig {
     private Property<String> projectName;
 
     @Schema(
-        title = "Lifetime of the temporary credentials in seconds.",
+        title = "Lifetime of the temporary credentials in seconds",
         description = """
             How long the returned temporary AK/SK/security-token should remain valid.
             Huawei Cloud accepts values between 900 (15 minutes) and 86400 (24 hours).
@@ -119,7 +119,7 @@ public class TemporaryCredentialsConfig {
     private Property<Integer> durationSeconds = Property.ofValue(900);
 
     @Schema(
-        title = "Huawei Cloud IAM endpoint suffix.",
+        title = "Huawei Cloud IAM endpoint suffix",
         description = """
             Domain suffix used to build the IAM endpoint URL when no explicit endpoint override is set.
             Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign cloud

@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow for each message on a Huawei DMS for Kafka topic.",
+    title = "Trigger a flow for each message on a Huawei DMS for Kafka topic",
     description = """
         Maintains a persistent Kafka consumer and fires one Kestra execution per record as messages arrive.
         Offset commits happen after each record is processed to provide at-least-once semantics.
@@ -79,7 +79,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private static final Duration POLL_DURATION = Duration.ofSeconds(2);
 
     @Schema(
-        title = "Kafka bootstrap servers.",
+        title = "Kafka bootstrap servers",
         description = "Comma-separated list of `host:port` pairs that the Kafka client uses for the initial " +
             "cluster connection. For DMS for Kafka, copy this value from the instance detail page in the console."
     )
@@ -88,7 +88,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> bootstrapServers;
 
     @Schema(
-        title = "SASL mechanism used for authentication.",
+        title = "SASL mechanism used for authentication",
         description = """
             `PLAIN` — username/password (default, used by most DMS for Kafka instances).
             `SCRAM_SHA_512` — stronger challenge-response, supported on newer instances.
@@ -100,14 +100,14 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<SaslMechanism> saslMechanism = Property.ofValue(SaslMechanism.PLAIN);
 
     @Schema(
-        title = "SASL username.",
+        title = "SASL username",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`."
     )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> username;
 
     @Schema(
-        title = "SASL password.",
+        title = "SASL password",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`. " +
             "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
@@ -115,7 +115,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> password;
 
     @Schema(
-        title = "Enable TLS for the Kafka connection.",
+        title = "Enable TLS for the Kafka connection",
         description = "Set to `true` to use `SASL_SSL` instead of `SASL_PLAINTEXT`. " +
             "DMS for Kafka instances accessed over the public internet require TLS."
     )
@@ -124,7 +124,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<Boolean> sslEnabled = Property.ofValue(false);
 
     @Schema(
-        title = "Key serializer/deserializer type.",
+        title = "Key serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default
@@ -132,19 +132,19 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<SerdeType> keySerdeType = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Value serializer/deserializer type.",
+        title = "Value serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> valueSerdeType = Property.ofValue(SerdeType.STRING);
 
-    @Schema(title = "Kafka topic to consume from.")
+    @Schema(title = "Kafka topic to consume from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
-    @Schema(title = "Consumer group ID used for offset tracking.")
+    @Schema(title = "Consumer group ID used for offset tracking")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> groupId;

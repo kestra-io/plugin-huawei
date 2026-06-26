@@ -39,7 +39,7 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow when new objects appear in a Huawei OBS bucket.",
+    title = "Trigger a flow when new objects appear in a Huawei OBS bucket",
     description = """
         Polls an OBS bucket on a configurable interval and fires an execution when objects matching the
         filter are found. After triggering, `action` controls what happens to the matched objects:
@@ -109,7 +109,7 @@ public class Trigger extends AbstractObsTrigger
     implements PollingTriggerInterface, TriggerOutput<Trigger.Output>,
     ListInterface, ActionInterface {
 
-    @Schema(title = "OBS bucket to watch.")
+    @Schema(title = "OBS bucket to watch")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> bucket;
@@ -131,7 +131,7 @@ public class Trigger extends AbstractObsTrigger
     private Property<String> regexp;
 
     @Schema(
-        title = "Action applied to matched objects after they have been downloaded.",
+        title = "Action applied to matched objects after they have been downloaded",
         description = """
             Use `DELETE` or `MOVE` to prevent the same objects from triggering again on the next poll.
             `NONE` is available but requires the caller to manage re-trigger avoidance (e.g. via a
@@ -146,7 +146,7 @@ public class Trigger extends AbstractObsTrigger
     private MoveTo moveTo;
 
     @Schema(
-        title = "Polling interval.",
+        title = "Polling interval",
         description = "How often the trigger polls the bucket for new objects, as an ISO-8601 duration " +
             "(e.g. `PT60S`, `PT5M`). Defaults to 60 seconds."
     )
@@ -232,14 +232,14 @@ public class Trigger extends AbstractObsTrigger
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(
-            title = "List of downloaded objects with internal storage URIs.",
+            title = "List of downloaded objects with internal storage URIs",
             description = "Each entry includes the original OBS metadata plus the `uri` field pointing to " +
                 "the downloaded file in Kestra internal storage."
         )
         private final List<ObsObject> objects;
 
         @Schema(
-            title = "Map of object key to Kestra internal storage URI.",
+            title = "Map of object key to Kestra internal storage URI",
             description = "Convenient for downstream tasks that need to look up a file by its original OBS key."
         )
         private final Map<String, URI> outputFiles;

@@ -31,7 +31,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Upload a file from Kestra internal storage to Huawei OBS.",
+    title = "Upload a file from Kestra internal storage to Huawei OBS",
     description = """
         Reads a file from Kestra internal storage (identified by a `kestra://` URI) and uploads it to
         the specified OBS bucket. Content length is always set explicitly so the upload works against both
@@ -67,7 +67,7 @@ import java.util.Map;
 public class Upload extends AbstractObsObject implements RunnableTask<Upload.Output> {
 
     @Schema(
-        title = "Kestra internal storage URI of the file to upload.",
+        title = "Kestra internal storage URI of the file to upload",
         description = "The URI of a file stored in Kestra internal storage (e.g. from a previous task output). " +
             "Must be a `kestra://` URI."
     )
@@ -76,7 +76,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
     private Property<String> from;
 
     @Schema(
-        title = "OBS object key (path within the bucket).",
+        title = "OBS object key (path within the bucket)",
         description = "The key under which the object will be stored in the bucket, e.g. `data/2024/file.csv`."
     )
     @NotNull
@@ -84,7 +84,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
     private Property<String> key;
 
     @Schema(
-        title = "MIME content type of the uploaded object.",
+        title = "MIME content type of the uploaded object",
         description = "Set to the appropriate MIME type (e.g. `text/csv`, `application/json`). " +
             "OBS uses this value when serving the object."
     )
@@ -92,7 +92,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
     private Property<String> contentType;
 
     @Schema(
-        title = "User-defined metadata to attach to the object.",
+        title = "User-defined metadata to attach to the object",
         description = """
             Key/value pairs stored as object metadata. Keys must be bare names without any prefix —
             the OBS SDK prepends `x-obs-meta-` automatically. Values are stored as ASCII strings; any
@@ -104,7 +104,7 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
     private Property<Map<String, Object>> metadata;
 
     @Schema(
-        title = "OBS storage class for the uploaded object.",
+        title = "OBS storage class for the uploaded object",
         description = """
             Controls the storage tier:
             - `STANDARD` — frequently accessed data (default when unset).
@@ -163,17 +163,17 @@ public class Upload extends AbstractObsObject implements RunnableTask<Upload.Out
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Bucket the object was uploaded to.")
+        @Schema(title = "Bucket the object was uploaded to")
         private final String bucket;
 
-        @Schema(title = "Key of the uploaded object.")
+        @Schema(title = "Key of the uploaded object")
         private final String key;
 
-        @Schema(title = "ETag assigned by OBS after a successful upload.")
+        @Schema(title = "ETag assigned by OBS after a successful upload")
         private final String eTag;
 
         @Schema(
-            title = "Version ID of the uploaded object.",
+            title = "Version ID of the uploaded object",
             description = "Non-null only when bucket versioning is enabled."
         )
         private final String versionId;

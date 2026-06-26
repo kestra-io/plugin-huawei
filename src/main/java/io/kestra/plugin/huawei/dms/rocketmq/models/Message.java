@@ -15,21 +15,21 @@ import lombok.Getter;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Message implements Output {
 
-    @Schema(title = "Unique message ID assigned by the RocketMQ broker.")
+    @Schema(title = "Unique message ID assigned by the RocketMQ broker")
     private final String messageId;
 
-    @Schema(title = "Message body, deserialized according to serdeType.")
+    @Schema(title = "Message body, deserialized according to serdeType")
     private final Object body;
 
-    @Schema(title = "Topic the message was published to.")
+    @Schema(title = "Topic the message was published to")
     private final String topic;
 
-    @Schema(title = "Message tags used for server-side filtering.")
+    @Schema(title = "Message tags used for server-side filtering")
     private final String tags;
 
-    @Schema(title = "Message keys (space-separated on the wire).")
+    @Schema(title = "Message keys (space-separated on the wire)")
     private final String keys;
 
-    @Schema(title = "Timestamp (milliseconds since epoch) when the message was created on the producer side.")
+    @Schema(title = "Timestamp (milliseconds since epoch) when the message was created on the producer side")
     private final Long bornTimestamp;
 }

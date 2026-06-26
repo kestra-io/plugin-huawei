@@ -10,14 +10,14 @@ import lombok.Getter;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class JobRun {
 
-    @Schema(title = "Job name.")
+    @Schema(title = "Job name")
     private final String jobName;
 
-    @Schema(title = "Job run instance ID.")
+    @Schema(title = "Job run instance ID")
     private final Long instanceId;
 
     @Schema(
-        title = "Job run status.",
+        title = "Job run status",
         description = """
             Lifecycle status of the job run instance:
             - `waiting` — queued, not yet started.
@@ -31,18 +31,18 @@ public class JobRun {
     )
     private final String status;
 
-    @Schema(title = "Scheduled plan time (epoch milliseconds).")
+    @Schema(title = "Scheduled plan time (epoch milliseconds)")
     private final Long planTime;
 
-    @Schema(title = "Actual start time (epoch milliseconds).")
+    @Schema(title = "Actual start time (epoch milliseconds)")
     private final Long startTime;
 
-    @Schema(title = "End time (epoch milliseconds); null if still running.")
+    @Schema(title = "End time (epoch milliseconds); null if still running")
     private final Long endTime;
 
-    @Schema(title = "Last update time (epoch milliseconds).")
+    @Schema(title = "Last update time (epoch milliseconds)")
     private final Long lastUpdateTime;
 
-    @Schema(title = "Error message when the job run failed; null otherwise.")
+    @Schema(title = "Error message when the job run failed; null otherwise")
     private final String errorMessage;
 }

@@ -23,7 +23,7 @@ import java.time.Duration;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Stop an in-progress DataArts Factory job run.",
+    title = "Stop an in-progress DataArts Factory job run",
     description = """
         Stops a running DataArts Studio (DataArts Factory) job run instance by calling the
         `POST /v1/{project_id}/jobs/{job_name}/instances/{instance_id}/stop` API.
@@ -60,7 +60,7 @@ import java.time.Duration;
 public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJobRun.Output> {
 
     @Schema(
-        title = "Name of the DataArts Factory job.",
+        title = "Name of the DataArts Factory job",
         description = "Must match the job name exactly as defined in the DataArts Studio console."
     )
     @NotNull
@@ -68,7 +68,7 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     private Property<String> jobName;
 
     @Schema(
-        title = "Job run instance ID to stop.",
+        title = "Job run instance ID to stop",
         description = """
             The numeric instance ID of the run to stop. Obtain from the `instanceId` output of
             `StartJobRun` or `GetJobRun`.
@@ -79,7 +79,7 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     private Property<Long> instanceId;
 
     @Schema(
-        title = "Wait for the instance to reach a terminal state after stopping.",
+        title = "Wait for the instance to reach a terminal state after stopping",
         description = """
             When `true` (the default), polls the instance status until it transitions to `manual-stop`
             or another terminal state. Set to `false` to return immediately after the stop request is
@@ -91,7 +91,7 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     private Property<Boolean> wait = Property.ofValue(true);
 
     @Schema(
-        title = "Maximum time to wait for the stop to be confirmed.",
+        title = "Maximum time to wait for the stop to be confirmed",
         description = """
             ISO-8601 duration (e.g. `PT10M`, `PT1H`). When the deadline is reached before the
             instance reaches a terminal state, the task fails with a timeout error. Only relevant
@@ -103,7 +103,7 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     private Property<Duration> maxDuration = Property.ofValue(Duration.ofMinutes(10));
 
     @Schema(
-        title = "Polling interval while waiting for the stop to complete.",
+        title = "Polling interval while waiting for the stop to complete",
         description = "ISO-8601 duration (e.g. `PT3S`). Defaults to 3 seconds."
     )
     @Builder.Default
@@ -172,28 +172,28 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Job name.")
+        @Schema(title = "Job name")
         private final String jobName;
 
-        @Schema(title = "Job run instance ID.")
+        @Schema(title = "Job run instance ID")
         private final Long instanceId;
 
-        @Schema(title = "Final status of the job run after stopping.")
+        @Schema(title = "Final status of the job run after stopping")
         private final String status;
 
-        @Schema(title = "Scheduled plan time (epoch milliseconds).")
+        @Schema(title = "Scheduled plan time (epoch milliseconds)")
         private final Long planTime;
 
-        @Schema(title = "Actual start time (epoch milliseconds).")
+        @Schema(title = "Actual start time (epoch milliseconds)")
         private final Long startTime;
 
-        @Schema(title = "End time (epoch milliseconds).")
+        @Schema(title = "End time (epoch milliseconds)")
         private final Long endTime;
 
-        @Schema(title = "Last update time (epoch milliseconds).")
+        @Schema(title = "Last update time (epoch milliseconds)")
         private final Long lastUpdateTime;
 
-        @Schema(title = "Error message when the job run failed; null otherwise.")
+        @Schema(title = "Error message when the job run failed; null otherwise")
         private final String errorMessage;
     }
 }
