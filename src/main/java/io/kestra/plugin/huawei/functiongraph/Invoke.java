@@ -42,6 +42,9 @@ import java.util.Map;
         Authentication uses AK/SK request signing. Provide `accessKeyId` and `secretAccessKey` via
         `{{ secret('NAME') }}`, or configure `temporaryCredentials` for inline IAM credential exchange.
 
+        Set `fetchLogs: true` to also capture the last ~4 KB of the function's execution logs in the
+        `logs` output; for full, durable logs use LTS.
+
         If the function runtime reports an error (a non-2xx function execution status),
         the task throws `FunctionGraphInvokeException` with a message pointing to the LTS logs.
         HTTP-level failures (4xx/5xx) are also surfaced as `FunctionGraphInvokeException`.
@@ -116,11 +119,26 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
     @PluginProperty(group = "main")
     private Property<Map<String, Object>> functionPayload;
 
+    @Schema(
+        title = "Capture the function's execution logs.",
+        description = """
+            When `true`, requests the last ~4 KB of the function's execution logs (stdout/stderr)
+            via the `X-Cff-Log-Type: tail` header. The logs are emitted to the task logs at INFO
+            level and exposed in the `logs` output. For full, durable logs use LTS instead.
+
+            Defaults to `false` to keep the common invocation path lean.
+            """
+    )
+    @PluginProperty(group = "advanced")
+    @Builder.Default
+    private Property<Boolean> fetchLogs = Property.ofValue(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rUrn = runContext.render(functionUrn).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException("functionUrn is required"));
         var rPayload = runContext.render(functionPayload).asMap(String.class, Object.class);
+        var rFetchLogs = runContext.render(fetchLogs).as(Boolean.class).orElse(false);
 
         var client = client(runContext);
 
@@ -128,6 +146,9 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
             .withFunctionUrn(rUrn)
             .withXCFFRequestVersion("v1")
             .withBody(rPayload);
+        if (rFetchLogs) {
+            request.withXCffLogType("tail");
+        }
 
         runContext.logger().debug("Invoking FunctionGraph function '{}'", rUrn);
 
@@ -171,11 +192,17 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
         runContext.logger().info("FunctionGraph function '{}' invoked successfully, requestId={}, size={} bytes",
             rUrn, response.getXCffRequestId(), resultBytes.length);
 
+        var logs = rFetchLogs ? response.getLog() : null;
+        if (logs != null && !logs.isBlank()) {
+            runContext.logger().info("FunctionGraph function logs (tail):\n{}", logs);
+        }
+
         return Output.builder()
             .uri(uri)
             .contentLength((long) resultBytes.length)
             .requestId(response.getXCffRequestId())
             .statusCode(response.getHttpStatusCode())
+            .logs(logs)
             .build();
     }
 
@@ -194,5 +221,11 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
 
         @Schema(title = "HTTP status code returned by the FunctionGraph invocation API.")
         private final Integer statusCode;
+
+        @Schema(
+            title = "Tail of the function's execution logs.",
+            description = "The last ~4 KB of stdout/stderr, populated only when `fetchLogs` is `true`; otherwise null."
+        )
+        private final String logs;
     }
 }

@@ -26,6 +26,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -150,6 +151,64 @@ class FunctionGraphInvokeTest {
         wireMock.verify(postRequestedFor(urlMatching(".*/invocations"))
             .withRequestBody(WireMock.matchingJsonPath("$.env", WireMock.equalTo("test")))
             .withRequestBody(WireMock.matchingJsonPath("$.date", WireMock.equalTo("2024-01-01"))));
+    }
+
+    // ── Log capture ──────────────────────────────────────────────────────────────
+
+    @Test
+    void invoke_fetchLogs_requestsTailAndPopulatesLogsOutput() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*/invocations"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withHeader("X-Cff-Request-Id", "req-logs-001")
+                .withBody("""
+                    {"result": "ok","log": "START RequestId: abc\\nfunction ran\\nEND","status": 200,"request_id": "req-logs-001"}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .fetchLogs(Property.ofValue(true))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getLogs(), containsString("function ran"));
+        wireMock.verify(postRequestedFor(urlMatching(".*/invocations"))
+            .withHeader("X-Cff-Log-Type", WireMock.equalTo("tail")));
+    }
+
+    @Test
+    void invoke_fetchLogsDisabled_doesNotRequestTailNorPopulateLogs() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*/invocations"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"result": "ok","status": 200,"request_id": "req-nolog-001"}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getLogs(), is(nullValue()));
+        wireMock.verify(postRequestedFor(urlMatching(".*/invocations"))
+            .withoutHeader("X-Cff-Log-Type"));
     }
 
     // ── Function-level error ─────────────────────────────────────────────────────
