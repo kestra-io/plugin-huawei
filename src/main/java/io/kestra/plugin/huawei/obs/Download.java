@@ -28,7 +28,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Download an object from Huawei OBS to Kestra internal storage.",
+    title = "Download an object from Huawei OBS to Kestra internal storage",
     description = """
         Downloads an object from the specified OBS bucket and key and stores it in Kestra internal storage.
         The task outputs the internal storage URI so downstream tasks can consume the file.
@@ -61,7 +61,7 @@ import java.util.Map;
 public class Download extends AbstractObsObject implements RunnableTask<Download.Output> {
 
     @Schema(
-        title = "OBS object key to download.",
+        title = "OBS object key to download",
         description = "The full key (path) of the object within the bucket, e.g. `data/2024/report.csv`."
     )
     @NotNull
@@ -69,7 +69,7 @@ public class Download extends AbstractObsObject implements RunnableTask<Download
     private Property<String> key;
 
     @Schema(
-        title = "Version ID of the object to download.",
+        title = "Version ID of the object to download",
         description = "When set, retrieves the specific version of the object. " +
             "Only applicable when bucket versioning is enabled. Omit to download the latest version."
     )
@@ -98,17 +98,17 @@ public class Download extends AbstractObsObject implements RunnableTask<Download
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Kestra internal storage URI of the downloaded object.")
+        @Schema(title = "Kestra internal storage URI of the downloaded object")
         private final URI uri;
 
-        @Schema(title = "Size of the object in bytes.")
+        @Schema(title = "Size of the object in bytes")
         private final Long contentLength;
 
-        @Schema(title = "MIME content type of the object, as stored in OBS metadata.")
+        @Schema(title = "MIME content type of the object, as stored in OBS metadata")
         private final String contentType;
 
         @Schema(
-            title = "User-defined metadata attached to the object.",
+            title = "User-defined metadata attached to the object",
             description = "Bare key/value pairs with OBS metadata prefixes stripped."
         )
         private final Map<String, String> metadata;

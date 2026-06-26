@@ -25,7 +25,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Create a Huawei OBS bucket.",
+    title = "Create a Huawei OBS bucket",
     description = """
         Creates an OBS bucket. The operation is idempotent: if the bucket already exists and is owned by
         the authenticated account, the task succeeds and reports `created: false`. If the bucket exists
@@ -72,7 +72,7 @@ import lombok.experimental.SuperBuilder;
 public class CreateBucket extends AbstractObs implements RunnableTask<CreateBucket.Output> {
 
     @Schema(
-        title = "Name of the bucket to create.",
+        title = "Name of the bucket to create",
         description = "Bucket names must be globally unique across OBS, follow DNS naming rules (3-63 chars, " +
             "lowercase, numbers, hyphens), and must not start or end with a hyphen."
     )
@@ -81,7 +81,7 @@ public class CreateBucket extends AbstractObs implements RunnableTask<CreateBuck
     private Property<String> bucket;
 
     @Schema(
-        title = "Default storage class for objects in the bucket.",
+        title = "Default storage class for objects in the bucket",
         description = """
             Controls the default storage tier for new objects:
             - `STANDARD` — frequently accessed data (default).
@@ -129,11 +129,11 @@ public class CreateBucket extends AbstractObs implements RunnableTask<CreateBuck
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Name of the bucket.")
+        @Schema(title = "Name of the bucket")
         private final String bucket;
 
         @Schema(
-            title = "Whether the bucket was newly created.",
+            title = "Whether the bucket was newly created",
             description = "`true` if OBS created the bucket; `false` if it already existed and is owned by this account."
         )
         private final boolean created;

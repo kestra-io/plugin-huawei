@@ -29,7 +29,7 @@ import java.util.ArrayList;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "List objects in a Huawei OBS bucket.",
+    title = "List objects in a Huawei OBS bucket",
     description = """
         Lists objects in an OBS bucket, optionally filtered by prefix, delimiter, marker, and a
         client-side regular expression. All pages are iterated automatically; results are returned as a
@@ -53,7 +53,7 @@ import java.util.ArrayList;
                     region: "eu-west-101"
                     bucket: "my-bucket"
                     prefix: "data/2024/"
-                    regexp: ".*\\.csv"
+                    regexp: '.*\\.csv'
                 """
         )
     },
@@ -63,7 +63,7 @@ import java.util.ArrayList;
 )
 public class List extends AbstractObs implements RunnableTask<List.Output>, ListInterface {
 
-    @Schema(title = "OBS bucket name to list objects from.")
+    @Schema(title = "OBS bucket name to list objects from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> bucket;
@@ -85,7 +85,7 @@ public class List extends AbstractObs implements RunnableTask<List.Output>, List
     private Property<String> regexp;
 
     @Schema(
-        title = "Maximum total number of objects to return.",
+        title = "Maximum total number of objects to return",
         description = """
             Optional safety cap on the total number of objects this task accumulates in memory. Because the
             output of this task *is* the full object list, a bucket holding millions of matching keys would
@@ -134,7 +134,7 @@ public class List extends AbstractObs implements RunnableTask<List.Output>, List
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "List of objects matching the specified filters.")
+        @Schema(title = "List of objects matching the specified filters")
         private final java.util.List<ObsObject> objects;
     }
 }

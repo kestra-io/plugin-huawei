@@ -23,7 +23,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Delete an object from a Huawei OBS bucket.",
+    title = "Delete an object from a Huawei OBS bucket",
     description = """
         Deletes the specified object from an OBS bucket. When versioning is enabled, pass `versionId` to
         delete a specific version; without `versionId`, OBS inserts a delete marker (the object becomes
@@ -55,7 +55,7 @@ import lombok.experimental.SuperBuilder;
 public class Delete extends AbstractObsObject implements RunnableTask<Delete.Output> {
 
     @Schema(
-        title = "Object key to delete.",
+        title = "Object key to delete",
         description = "Full key (path) of the object within the bucket, e.g. `data/2024/report.csv`."
     )
     @NotNull
@@ -63,7 +63,7 @@ public class Delete extends AbstractObsObject implements RunnableTask<Delete.Out
     private Property<String> key;
 
     @Schema(
-        title = "Version ID of the object to delete.",
+        title = "Version ID of the object to delete",
         description = "When set, deletes the specific version. Without this, OBS places a delete marker " +
             "(versioned buckets) or permanently deletes (non-versioned buckets / MinIO)."
     )
@@ -98,14 +98,14 @@ public class Delete extends AbstractObsObject implements RunnableTask<Delete.Out
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(
-            title = "Whether OBS created a delete marker instead of permanently deleting the object.",
+            title = "Whether OBS created a delete marker instead of permanently deleting the object",
             description = "True only on versioned buckets when `versionId` was not specified. " +
                 "On non-versioned buckets and MinIO this is always false."
         )
         private final boolean deleteMarker;
 
         @Schema(
-            title = "Version ID of the delete marker or the deleted version.",
+            title = "Version ID of the delete marker or the deleted version",
             description = "Non-null only when bucket versioning is enabled."
         )
         private final String versionId;

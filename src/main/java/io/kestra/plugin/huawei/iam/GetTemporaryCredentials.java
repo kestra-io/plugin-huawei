@@ -26,7 +26,7 @@ import java.time.Instant;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Obtain short-lived Huawei Cloud credentials (temporary AK/SK + security token).",
+    title = "Obtain short-lived Huawei Cloud credentials (temporary AK/SK + security token)",
     description = """
         Produces temporary credentials valid for up to 24 hours that can be passed directly to
         downstream tasks (OBS, DMS, …) in place of long-lived AK/SK credentials.
@@ -141,7 +141,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     }
 
     @Schema(
-        title = "Authentication method.",
+        title = "Authentication method",
         description = """
             Controls which credentials are used to obtain the session token before exchanging for
             temporary STS credentials.
@@ -158,7 +158,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<AuthMethod> authMethod = Property.ofValue(AuthMethod.PASSWORD);
 
     @Schema(
-        title = "Huawei Cloud region.",
+        title = "Huawei Cloud region",
         description = "Region identifier such as `eu-west-101`, `ap-southeast-1`, or `cn-north-4`. " +
             "Used to resolve the IAM endpoint URL."
     )
@@ -167,7 +167,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<String> region;
 
     @Schema(
-        title = "Lifetime of the temporary credentials in seconds.",
+        title = "Lifetime of the temporary credentials in seconds",
         description = """
             How long the returned temporary AK/SK/security-token should remain valid.
             Huawei Cloud accepts values between 900 (15 minutes) and 86400 (24 hours).
@@ -181,7 +181,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     // ── TOKEN path ──────────────────────────────────────────────────────────────
 
     @Schema(
-        title = "IAM token to exchange (TOKEN method only).",
+        title = "IAM token to exchange (TOKEN method only)",
         description = """
             An existing Huawei Cloud `X-Auth-Token` to exchange for temporary STS credentials.
             Required when `authMethod` is `TOKEN`. **Sensitive — always provide via `{{ secret('NAME') }}`.**
@@ -193,14 +193,14 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     // ── PASSWORD path ────────────────────────────────────────────────────────────
 
     @Schema(
-        title = "IAM username (PASSWORD method only).",
+        title = "IAM username (PASSWORD method only)",
         description = "Huawei Cloud IAM username. Required when `authMethod` is `PASSWORD`."
     )
     @PluginProperty(group = "connection")
     private Property<String> username;
 
     @Schema(
-        title = "IAM password (PASSWORD method only).",
+        title = "IAM password (PASSWORD method only)",
         description = """
             Password for the IAM user identified by `username`.
             Required when `authMethod` is `PASSWORD`.
@@ -211,7 +211,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<String> password;
 
     @Schema(
-        title = "Account domain name (PASSWORD method only).",
+        title = "Account domain name (PASSWORD method only)",
         description = """
             The Huawei Cloud account name (domain name) that owns the IAM user.
             Required when `authMethod` is `PASSWORD`. This is the top-level account identifier,
@@ -223,7 +223,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<String> domainName;
 
     @Schema(
-        title = "Token scope (PASSWORD method only).",
+        title = "Token scope (PASSWORD method only)",
         description = """
             Determines the scope of the session token obtained during password authentication.
 
@@ -237,7 +237,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<TokenScope> scope = Property.ofValue(TokenScope.PROJECT);
 
     @Schema(
-        title = "Project name for project-scoped tokens (PASSWORD method only).",
+        title = "Project name for project-scoped tokens (PASSWORD method only)",
         description = """
             Overrides the project name used for `scope=PROJECT` token requests.
             Defaults to the `region` value when omitted, which is correct for most regions.
@@ -247,7 +247,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     private Property<String> projectName;
 
     @Schema(
-        title = "IAM endpoint domain suffix.",
+        title = "IAM endpoint domain suffix",
         description = """
             Domain suffix used to build the IAM endpoint URL.
             Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign cloud
@@ -297,14 +297,14 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(
-            title = "Temporary Access Key ID.",
+            title = "Temporary Access Key ID",
             description = "Short-lived Huawei Cloud access key. Pass as `accessKeyId` to downstream tasks."
         )
         @PluginProperty(group = "connection", secret = true)
         private final String accessKeyId;
 
         @Schema(
-            title = "Temporary Secret Access Key.",
+            title = "Temporary Secret Access Key",
             description = """
                 Short-lived Huawei Cloud secret key paired with `accessKeyId`.
                 **Sensitive — treat as a secret and do not log.**
@@ -314,7 +314,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
         private final String secretAccessKey;
 
         @Schema(
-            title = "Security Token (session token).",
+            title = "Security Token (session token)",
             description = """
                 Short-lived security token required alongside the temporary AK/SK.
                 Pass as `securityToken` to downstream tasks.
@@ -325,7 +325,7 @@ public class GetTemporaryCredentials extends Task implements RunnableTask<GetTem
         private final String securityToken;
 
         @Schema(
-            title = "Credential expiration time.",
+            title = "Credential expiration time",
             description = "UTC instant at which the temporary credentials expire."
         )
         @PluginProperty(group = "connection")

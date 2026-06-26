@@ -30,7 +30,7 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow when new messages arrive on a Huawei DMS for RocketMQ topic.",
+    title = "Trigger a flow when new messages arrive on a Huawei DMS for RocketMQ topic",
     description = """
         Polls the configured topic on a fixed interval and fires one execution per batch when messages are found.
         Messages are stored at `{{ trigger.uri }}` in Kestra internal storage.
@@ -67,27 +67,27 @@ import java.util.Optional;
 public class Trigger extends AbstractTrigger
     implements PollingTriggerInterface, TriggerOutput<Consume.Output>, DmsRocketMqConnectionInterface {
 
-    @Schema(title = "Polling interval.", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
+    @Schema(title = "Polling interval", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Duration interval = Duration.ofSeconds(60);
 
     @Schema(
-        title = "Huawei Cloud access key ID.",
+        title = "Huawei Cloud access key ID",
         description = "AK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> accessKeyId;
 
     @Schema(
-        title = "Huawei Cloud secret access key.",
+        title = "Huawei Cloud secret access key",
         description = "SK credential for the ACL authentication hook. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> secretAccessKey;
 
     @Schema(
-        title = "Name server address.",
+        title = "Name server address",
         description = "Address of the RocketMQ name server, e.g. `dms-host:8100`. For DMS for RocketMQ, " +
             "copy the name server address from the instance detail page in the Huawei Cloud console."
     )
@@ -96,20 +96,20 @@ public class Trigger extends AbstractTrigger
     private Property<String> nameServerAddr;
 
     @Schema(
-        title = "DMS instance ID.",
+        title = "DMS instance ID",
         description = "Huawei Cloud DMS for RocketMQ instance ID. Required when the instance uses instance isolation. " +
             "Leave empty for shared DMS instances."
     )
     @PluginProperty(group = "connection")
     private Property<String> instanceId;
 
-    @Schema(title = "Topic to publish to or consume from.")
+    @Schema(title = "Topic to publish to or consume from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
     @Schema(
-        title = "Consumer or producer group ID.",
+        title = "Consumer or producer group ID",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
     @NotNull
@@ -117,7 +117,7 @@ public class Trigger extends AbstractTrigger
     private Property<String> groupId;
 
     @Schema(
-        title = "Tag filter expression.",
+        title = "Tag filter expression",
         description = "Server-side filter applied by the broker. Use `*` (default) to receive all tags, " +
             "or a specific tag to filter messages."
     )
@@ -126,18 +126,18 @@ public class Trigger extends AbstractTrigger
     private Property<String> tags = Property.ofValue("*");
 
     @Schema(
-        title = "Message body serializer/deserializer.",
+        title = "Message body serializer/deserializer",
         description = "`STRING` (default) or `JSON`."
     )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<RocketMqSerdeType> serdeType = Property.ofValue(RocketMqSerdeType.STRING);
 
-    @Schema(title = "Stop after consuming this many messages per poll cycle.")
+    @Schema(title = "Stop after consuming this many messages per poll cycle")
     @PluginProperty(group = "execution")
     private Property<Integer> maxRecords;
 
-    @Schema(title = "Stop after this duration elapses per poll cycle.")
+    @Schema(title = "Stop after this duration elapses per poll cycle")
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 

@@ -30,7 +30,7 @@ import java.util.Optional;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow when new messages arrive on a Huawei DMS for Kafka topic.",
+    title = "Trigger a flow when new messages arrive on a Huawei DMS for Kafka topic",
     description = """
         Polls the configured topic on a fixed interval and fires one execution per batch when messages are found.
         Messages are stored at `{{ trigger.uri }}` in Kestra internal storage; `{{ trigger.messagesCount }}` gives the batch size.
@@ -68,13 +68,13 @@ import java.util.Optional;
 public class Trigger extends AbstractTrigger
     implements PollingTriggerInterface, TriggerOutput<Consume.Output>, DmsKafkaConnectionInterface {
 
-    @Schema(title = "Polling interval.", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
+    @Schema(title = "Polling interval", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Duration interval = Duration.ofSeconds(60);
 
     @Schema(
-        title = "Kafka bootstrap servers.",
+        title = "Kafka bootstrap servers",
         description = "Comma-separated list of `host:port` pairs that the Kafka client uses for the initial " +
             "cluster connection. For DMS for Kafka, copy this value from the instance detail page in the console."
     )
@@ -83,7 +83,7 @@ public class Trigger extends AbstractTrigger
     private Property<String> bootstrapServers;
 
     @Schema(
-        title = "SASL mechanism used for authentication.",
+        title = "SASL mechanism used for authentication",
         description = """
             `PLAIN` — username/password (default, used by most DMS for Kafka instances).
             `SCRAM_SHA_512` — stronger challenge-response, supported on newer instances.
@@ -95,14 +95,14 @@ public class Trigger extends AbstractTrigger
     private Property<SaslMechanism> saslMechanism = Property.ofValue(SaslMechanism.PLAIN);
 
     @Schema(
-        title = "SASL username.",
+        title = "SASL username",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`."
     )
     @PluginProperty(group = "connection", secret = true)
     private Property<String> username;
 
     @Schema(
-        title = "SASL password.",
+        title = "SASL password",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`. " +
             "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
@@ -110,7 +110,7 @@ public class Trigger extends AbstractTrigger
     private Property<String> password;
 
     @Schema(
-        title = "Enable TLS for the Kafka connection.",
+        title = "Enable TLS for the Kafka connection",
         description = "Set to `true` to use `SASL_SSL` instead of `SASL_PLAINTEXT`. " +
             "DMS for Kafka instances accessed over the public internet require TLS."
     )
@@ -119,7 +119,7 @@ public class Trigger extends AbstractTrigger
     private Property<Boolean> sslEnabled = Property.ofValue(false);
 
     @Schema(
-        title = "Key serializer/deserializer type.",
+        title = "Key serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default
@@ -127,32 +127,32 @@ public class Trigger extends AbstractTrigger
     private Property<SerdeType> keySerdeType = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Value serializer/deserializer type.",
+        title = "Value serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> valueSerdeType = Property.ofValue(SerdeType.STRING);
 
-    @Schema(title = "Kafka topic to consume from.")
+    @Schema(title = "Kafka topic to consume from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
-    @Schema(title = "Consumer group ID used for offset tracking.")
+    @Schema(title = "Consumer group ID used for offset tracking")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> groupId;
 
-    @Schema(title = "Stop after consuming this many records per poll cycle.")
+    @Schema(title = "Stop after consuming this many records per poll cycle")
     @PluginProperty(group = "execution")
     private Property<Integer> maxRecords;
 
-    @Schema(title = "Stop after this duration elapses per poll cycle.")
+    @Schema(title = "Stop after this duration elapses per poll cycle")
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 
-    @Schema(title = "Maximum time to wait for records during each poll call.")
+    @Schema(title = "Maximum time to wait for records during each poll call")
     @Builder.Default
     @PluginProperty(group = "execution")
     private Property<Duration> pollDuration = Property.ofValue(Duration.ofSeconds(5));

@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Trigger a flow for each message on a Huawei DMS for RocketMQ topic.",
+    title = "Trigger a flow for each message on a Huawei DMS for RocketMQ topic",
     description = """
         Registers a push listener on the configured topic and fires one Kestra execution per message.
         The consumer is cleanly shut down when `kill()` or `stop()` is called.
@@ -80,7 +80,7 @@ public class RealtimeTrigger extends AbstractTrigger
     implements RealtimeTriggerInterface, TriggerOutput<Message>, DmsRocketMqConnectionInterface, AbstractConnectionInterface {
 
     @Schema(
-        title = "Name server address.",
+        title = "Name server address",
         description = "Address of the RocketMQ name server, e.g. `dms-host:8100`. For DMS for RocketMQ, " +
             "copy the name server address from the instance detail page in the Huawei Cloud console."
     )
@@ -89,20 +89,20 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> nameServerAddr;
 
     @Schema(
-        title = "DMS instance ID.",
+        title = "DMS instance ID",
         description = "Huawei Cloud DMS for RocketMQ instance ID. Required when the instance uses instance isolation. " +
             "Leave empty for shared DMS instances."
     )
     @PluginProperty(group = "connection")
     private Property<String> instanceId;
 
-    @Schema(title = "Topic to publish to or consume from.")
+    @Schema(title = "Topic to publish to or consume from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
     @Schema(
-        title = "Consumer or producer group ID.",
+        title = "Consumer or producer group ID",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
     @NotNull
@@ -110,7 +110,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> groupId;
 
     @Schema(
-        title = "Tag filter expression.",
+        title = "Tag filter expression",
         description = "Server-side filter applied by the broker. Use `*` (default) to receive all tags, " +
             "or a specific tag to filter messages."
     )
@@ -119,7 +119,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> tags = Property.ofValue("*");
 
     @Schema(
-        title = "Message body serializer/deserializer.",
+        title = "Message body serializer/deserializer",
         description = "`STRING` (default) or `JSON`."
     )
     @Builder.Default
@@ -127,7 +127,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<RocketMqSerdeType> serdeType = Property.ofValue(RocketMqSerdeType.STRING);
 
     @Schema(
-        title = "Access Key (AK) used to authenticate with Huawei Cloud.",
+        title = "Access Key (AK) used to authenticate with Huawei Cloud",
         description = "Huawei Cloud access key used together with `secretAccessKey` to sign API requests. " +
             "Required for AK/SK-based authentication; not required when " +
             "providing a pre-obtained `securityToken`. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
@@ -136,7 +136,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> accessKeyId;
 
     @Schema(
-        title = "Secret Key (SK) used to authenticate with Huawei Cloud.",
+        title = "Secret Key (SK) used to authenticate with Huawei Cloud",
         description = "Huawei Cloud secret key paired with `accessKeyId`. " +
             "Required for AK/SK-based authentication. **Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
@@ -144,7 +144,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> secretAccessKey;
 
     @Schema(
-        title = "Pre-obtained Huawei Cloud IAM token used as bearer credential for downstream API calls.",
+        title = "Pre-obtained Huawei Cloud IAM token used as bearer credential for downstream API calls",
         description = "When set, downstream Huawei tasks send this value in the `X-Auth-Token` header instead of " +
             "signing requests with AK/SK. **Sensitive.**"
     )
@@ -152,7 +152,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> securityToken;
 
     @Schema(
-        title = "Huawei Cloud Project ID.",
+        title = "Huawei Cloud Project ID",
         description = "Identifies the region-scoped project against which most regional services authenticate. " +
             "Mutually exclusive with `domainId` for global services such as IAM."
     )
@@ -160,7 +160,7 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> projectId;
 
     @Schema(
-        title = "Huawei Cloud Account Domain ID.",
+        title = "Huawei Cloud Account Domain ID",
         description = "Identifies the Huawei Cloud account (domain). Required when authenticating against global " +
             "services such as IAM, or when requesting a domain-scoped IAM token."
     )
@@ -168,14 +168,14 @@ public class RealtimeTrigger extends AbstractTrigger
     private Property<String> domainId;
 
     @Schema(
-        title = "Huawei Cloud region.",
+        title = "Huawei Cloud region",
         description = "Region identifier such as `eu-west-101`, `ap-southeast-1`, or `cn-north-4`."
     )
     @PluginProperty(group = "connection")
     private Property<String> region;
 
     @Schema(
-        title = "Inline IAM credential exchange.",
+        title = "Inline IAM credential exchange",
         description = """
             When set, the connection layer calls the Huawei IAM STS API once per task execution and
             uses the returned temporary AK/SK + security token instead of the static `accessKeyId`

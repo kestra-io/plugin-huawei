@@ -33,7 +33,7 @@ import org.apache.rocketmq.client.producer.DefaultMQProducer;
 public abstract class AbstractDmsRocketMq extends AbstractConnection implements DmsRocketMqConnectionInterface {
 
     @Schema(
-        title = "Name server address.",
+        title = "Name server address",
         description = "Address of the RocketMQ name server, e.g. `dms-host:8100`. For DMS for RocketMQ, " +
             "copy the name server address from the instance detail page in the Huawei Cloud console."
     )
@@ -42,20 +42,20 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
     protected Property<String> nameServerAddr;
 
     @Schema(
-        title = "DMS instance ID.",
+        title = "DMS instance ID",
         description = "Huawei Cloud DMS for RocketMQ instance ID. Required when the instance uses instance isolation. " +
             "Leave empty for shared DMS instances."
     )
     @PluginProperty(group = "connection")
     protected Property<String> instanceId;
 
-    @Schema(title = "Topic to publish to or consume from.")
+    @Schema(title = "Topic to publish to or consume from")
     @NotNull
     @PluginProperty(group = "main")
     protected Property<String> topic;
 
     @Schema(
-        title = "Consumer or producer group ID.",
+        title = "Consumer or producer group ID",
         description = "Consumer group name for Consume/Trigger tasks; producer group name for Publish tasks."
     )
     @NotNull
@@ -63,7 +63,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
     protected Property<String> groupId;
 
     @Schema(
-        title = "Tag filter expression.",
+        title = "Tag filter expression",
         description = "Server-side filter applied by the broker. Use `*` (default) to receive all tags, " +
             "or a specific tag to filter messages."
     )
@@ -72,7 +72,7 @@ public abstract class AbstractDmsRocketMq extends AbstractConnection implements 
     protected Property<String> tags = Property.ofValue("*");
 
     @Schema(
-        title = "Message body serializer/deserializer.",
+        title = "Message body serializer/deserializer",
         description = "`STRING` (default) or `JSON`."
     )
     @Builder.Default

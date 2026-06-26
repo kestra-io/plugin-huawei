@@ -40,7 +40,7 @@ import java.util.Properties;
 public abstract class AbstractDmsKafka extends AbstractConnection implements DmsKafkaConnectionInterface {
 
     @Schema(
-        title = "Kafka bootstrap servers.",
+        title = "Kafka bootstrap servers",
         description = "Comma-separated list of `host:port` pairs that the Kafka client uses for the initial " +
             "cluster connection. For DMS for Kafka, copy this value from the instance detail page in the console."
     )
@@ -49,7 +49,7 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     protected Property<String> bootstrapServers;
 
     @Schema(
-        title = "SASL mechanism used for authentication.",
+        title = "SASL mechanism used for authentication",
         description = """
             `PLAIN` — username/password (default, used by most DMS for Kafka instances).
             `SCRAM_SHA_512` — stronger challenge-response, supported on newer instances.
@@ -61,14 +61,14 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     protected Property<SaslMechanism> saslMechanism = Property.ofValue(SaslMechanism.PLAIN);
 
     @Schema(
-        title = "SASL username.",
+        title = "SASL username",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`."
     )
     @PluginProperty(group = "connection", secret = true)
     protected Property<String> username;
 
     @Schema(
-        title = "SASL password.",
+        title = "SASL password",
         description = "Required when `saslMechanism` is `PLAIN` or `SCRAM_SHA_512`. " +
             "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
     )
@@ -76,7 +76,7 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     protected Property<String> password;
 
     @Schema(
-        title = "Enable TLS for the Kafka connection.",
+        title = "Enable TLS for the Kafka connection",
         description = "Set to `true` to use `SASL_SSL` instead of `SASL_PLAINTEXT`. " +
             "DMS for Kafka instances accessed over the public internet require TLS."
     )
@@ -85,7 +85,7 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     protected Property<Boolean> sslEnabled = Property.ofValue(false);
 
     @Schema(
-        title = "Key serializer/deserializer type.",
+        title = "Key serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default
@@ -93,7 +93,7 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     protected Property<SerdeType> keySerdeType = Property.ofValue(SerdeType.STRING);
 
     @Schema(
-        title = "Value serializer/deserializer type.",
+        title = "Value serializer/deserializer type",
         description = "`STRING` (default), `JSON`, or `BINARY`."
     )
     @Builder.Default

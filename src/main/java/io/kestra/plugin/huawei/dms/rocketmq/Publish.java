@@ -29,7 +29,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Publish messages to a Huawei DMS for RocketMQ topic.",
+    title = "Publish messages to a Huawei DMS for RocketMQ topic",
     description = """
         Reads messages from `from` and sends them to the configured topic using the Apache RocketMQ protocol.
         Supports `STRING` and `JSON` serializers for the message body. Each input map may contain
@@ -90,7 +90,7 @@ import java.util.Map;
 public class Publish extends AbstractDmsRocketMq implements RunnableTask<Publish.Output>, Data.From {
 
     @Schema(
-        title = "Messages to publish.",
+        title = "Messages to publish",
         description = """
             A single map, a list of maps, or a URI pointing to an ION file in Kestra internal storage.
             Each map may contain: `body` (required), `tags`, and `keys`.
@@ -146,7 +146,7 @@ public class Publish extends AbstractDmsRocketMq implements RunnableTask<Publish
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Number of messages successfully published to the DMS RocketMQ topic.")
+        @Schema(title = "Number of messages successfully published to the DMS RocketMQ topic")
         private final Integer messagesCount;
     }
 }

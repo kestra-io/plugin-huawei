@@ -7,7 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public interface AbstractObsInterface {
 
     @Schema(
-        title = "Override for the OBS endpoint URL.",
+        title = "Override for the OBS endpoint URL",
         description = """
             Full URL of the OBS endpoint to connect to instead of the region-derived default
             (`https://obs.<region>.myhuaweicloud.com`). Required when using S3-compatible endpoints
@@ -18,7 +18,7 @@ public interface AbstractObsInterface {
     Property<String> getEndpointOverride();
 
     @Schema(
-        title = "Use path-style access for object keys.",
+        title = "Use path-style access for object keys",
         description = """
             When `true`, the bucket name is placed in the URL path (`http://host/bucket/key`) instead of
             the virtual-hosted style (`http://bucket.host/key`). Required for MinIO and most
@@ -29,7 +29,7 @@ public interface AbstractObsInterface {
     Property<Boolean> getPathStyleAccess();
 
     @Schema(
-        title = "Request signing algorithm.",
+        title = "Request signing algorithm",
         description = """
             Controls how OBS client signs each request:
             - `OBS` — native Huawei OBS signing (default; use for real OBS endpoints).
@@ -42,7 +42,7 @@ public interface AbstractObsInterface {
     Property<AuthType> getAuthType();
 
     @Schema(
-        title = "Domain suffix for the region-derived OBS endpoint.",
+        title = "Domain suffix for the region-derived OBS endpoint",
         description = """
             Suffix appended to build `https://obs.<region>.<endpointSuffix>` when no `endpointOverride`
             is set. Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the European sovereign

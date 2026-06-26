@@ -34,7 +34,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Synchronously invoke a Huawei Cloud FunctionGraph function.",
+    title = "Synchronously invoke a Huawei Cloud FunctionGraph function",
     description = """
         Invokes a FunctionGraph function synchronously and captures its response. The function output
         is stored in Kestra internal storage and accessible via `{{ outputs.<taskId>.uri }}`.
@@ -95,7 +95,7 @@ import java.util.Map;
 public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke.Output> {
 
     @Schema(
-        title = "Full URN of the function to invoke.",
+        title = "Full URN of the function to invoke",
         description = """
             The function URN uniquely identifies the function and version to invoke. Format:
             `urn:fss:<region>:<project_id>:function:<pkg>:<name>:<qualifier>`
@@ -110,7 +110,7 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
     private Property<String> functionUrn;
 
     @Schema(
-        title = "Input payload passed to the function.",
+        title = "Input payload passed to the function",
         description = """
             JSON-serializable map sent as the event body to the function. The function receives it as
             its `event` parameter. When omitted, an empty body is sent.
@@ -120,7 +120,7 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
     private Property<Map<String, Object>> functionPayload;
 
     @Schema(
-        title = "Capture the function's execution logs.",
+        title = "Capture the function's execution logs",
         description = """
             When `true`, requests the last ~4 KB of the function's execution logs (stdout/stderr)
             via the `X-Cff-Log-Type: tail` header. The logs are emitted to the task logs at INFO
@@ -210,20 +210,20 @@ public class Invoke extends AbstractFunctionGraph implements RunnableTask<Invoke
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "URI of the function response stored in Kestra internal storage.")
+        @Schema(title = "URI of the function response stored in Kestra internal storage")
         private final URI uri;
 
-        @Schema(title = "Size of the function response in bytes.")
+        @Schema(title = "Size of the function response in bytes")
         private final Long contentLength;
 
-        @Schema(title = "FunctionGraph request ID (`X-Cff-Request-Id` header value).")
+        @Schema(title = "FunctionGraph request ID (`X-Cff-Request-Id` header value)")
         private final String requestId;
 
-        @Schema(title = "HTTP status code returned by the FunctionGraph invocation API.")
+        @Schema(title = "HTTP status code returned by the FunctionGraph invocation API")
         private final Integer statusCode;
 
         @Schema(
-            title = "Tail of the function's execution logs.",
+            title = "Tail of the function's execution logs",
             description = "The last ~4 KB of stdout/stderr, populated only when `fetchLogs` is `true`; otherwise null."
         )
         private final String logs;

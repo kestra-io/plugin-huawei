@@ -35,7 +35,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Download all OBS objects matching a filter.",
+    title = "Download all OBS objects matching a filter",
     description = """
         Lists objects matching the prefix/regexp filter, downloads each one into Kestra internal storage,
         and optionally applies a post-download action (`NONE`, `DELETE`, or `MOVE`). The task outputs both
@@ -89,7 +89,7 @@ import java.util.Map;
 )
 public class Downloads extends AbstractObs implements RunnableTask<Downloads.Output>, ListInterface, ActionInterface {
 
-    @Schema(title = "OBS bucket to list and download from.")
+    @Schema(title = "OBS bucket to list and download from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> bucket;
@@ -185,14 +185,14 @@ public class Downloads extends AbstractObs implements RunnableTask<Downloads.Out
     public static class Output implements io.kestra.core.models.tasks.Output {
 
         @Schema(
-            title = "List of downloaded objects with internal storage URIs.",
+            title = "List of downloaded objects with internal storage URIs",
             description = "Each entry includes the original OBS metadata plus the `uri` field pointing to " +
                 "the downloaded file in Kestra internal storage."
         )
         private final List<ObsObject> objects;
 
         @Schema(
-            title = "Map of object key to Kestra internal storage URI.",
+            title = "Map of object key to Kestra internal storage URI",
             description = "Convenient for downstream tasks that need to look up a file by its original OBS key."
         )
         private final Map<String, URI> outputFiles;
