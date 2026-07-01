@@ -12,7 +12,6 @@ import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.models.tasks.runners.TaskRunner;
 import io.kestra.core.runners.RunContext;
 import io.kestra.plugin.huawei.AbstractConnection;
-import io.kestra.plugin.scripts.exec.scripts.models.DockerOptions;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
 import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.kestra.plugin.scripts.runner.docker.Docker;
@@ -22,6 +21,8 @@ import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import lombok.experimental.SuperBuilder;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -149,9 +150,9 @@ import java.util.Map;
 public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOutput>, NamespaceFilesInterface, InputFilesInterface, OutputFilesInterface {
 
     // glibc-based image; does NOT ship with curl. The APT_BOOTSTRAP_COMMAND handles that.
-    private static final String DEFAULT_IMAGE = "ubuntu:22.04";
+    private static final String DEFAULT_IMAGE = "ubuntu:26.04";
 
-    // ubuntu:22.04 ships without curl; install it (plus ca-certificates for HTTPS and tar for the
+    // ubuntu:26.04 ships without curl; install it (plus ca-certificates for HTTPS and tar for the
     // KooCLI tarball) only when absent. Guarded so prebuilt images with curl skip the apt-get.
     // Output (stdout+stderr) is captured and only echoed (at ERROR) if the install fails, so a
     // successful bootstrap stays silent instead of flooding the logs with apt/debconf chatter.
@@ -222,7 +223,7 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
             step is guarded and skips itself).
             """
     )
-    @PluginProperty(group = "execution", dynamic = true)
+    @PluginProperty(group = "execution")
     protected Property<String> installScriptUrl;
 
     @Schema(
@@ -231,18 +232,14 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
             Extra variables merged into the process environment alongside the injected Huawei
             credentials (`HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION`,
             `HUAWEICLOUD_SDK_SECURITY_TOKEN`). Values may contain Pebble expressions.
+
+            **Note:** the injected credential keys above are reserved. If a key here collides with
+            one of them, the injected credential value takes precedence and a warning is logged;
+            the user-supplied value is discarded.
             """
     )
-    @PluginProperty(group = "execution", additionalProperties = String.class, dynamic = true)
-    protected Map<String, String> env;
-
-    @Schema(
-        title = "Deprecated Docker options.",
-        description = "Use `taskRunner` instead; retained for backward compatibility."
-    )
-    @PluginProperty(group = "advanced")
-    @Deprecated
-    private DockerOptions docker;
+    @PluginProperty(group = "execution", additionalProperties = String.class)
+    protected Property<Map<String, String>> env;
 
     @Schema(
         title = "Task runner.",
@@ -256,7 +253,7 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
     @Schema(
         title = "Container image.",
         description = """
-            Docker image used when the runner is container-based. Defaults to `ubuntu:22.04`.
+            Docker image used when the runner is container-based. Defaults to `ubuntu:26.04`.
 
             **Bootstrap:** the task prepends two guarded steps before your commands:
             1. `command -v curl || apt-get install -y curl ca-certificates tar`: installs download
@@ -273,11 +270,11 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
 
             A minimal `Dockerfile` to build your own prebuilt image:
             ```dockerfile
-            FROM ubuntu:22.04
-            RUN apt-get update && apt-get install -y --no-install-recommends curl bash tar ca-certificates \\
-                && curl -sSL https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh \\
-                   | bash -s -- -y \\
-                && echo y | hcloud version >/dev/null 2>&1 \\
+            FROM ubuntu:26.04
+            RUN apt-get update && apt-get install -y --no-install-recommends curl bash tar ca-certificates \
+                && curl -sSL https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh \
+                   | bash -s -- -y \
+                && echo y | hcloud version >/dev/null 2>&1 \
                 && rm -rf /var/lib/apt/lists/*
             ```
             """
@@ -300,6 +297,7 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
         var clientConfig = huaweiClientConfig(runContext);
         var rInstallScriptUrl = runContext.render(this.installScriptUrl).as(String.class).orElse(null);
         var resolvedInstallScriptUrl = resolveInstallScriptUrl(rInstallScriptUrl, clientConfig.region());
+        var rContainerImage = runContext.render(this.containerImage);
 
         var allCommands = new ArrayList<String>();
         allCommands.add(APT_BOOTSTRAP_COMMAND);
@@ -315,9 +313,8 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
 
         var wrapper = new CommandsWrapper(runContext)
             .withWarningOnStdErr(true)
-            .withDockerOptions(injectDefaults(getDocker()))
             .withTaskRunner(this.taskRunner)
-            .withContainerImage(this.containerImage)
+            .withContainerImage(rContainerImage)
             .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
             .withCommands(Property.ofValue(allCommands))
             .withEnv(buildEnv(runContext, clientConfig))
@@ -349,11 +346,17 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
             envs.put("HUAWEICLOUD_SDK_SECURITY_TOKEN", clientConfig.securityToken());
         }
 
-        if (this.env != null) {
-            // Render user-supplied env values (they may contain Pebble expressions).
-            for (var entry : this.env.entrySet()) {
-                envs.put(entry.getKey(), runContext.render(entry.getValue()));
+        var rEnv = runContext.render(this.env).asMap(String.class, String.class);
+        // Injected credential keys are authoritative: silently letting user env clobber them would
+        // be a confusing, hard-to-debug auth failure. Warn instead so the collision is visible.
+        for (var entry : rEnv.entrySet()) {
+            if (envs.containsKey(entry.getKey())) {
+                runContext.logger().warn(
+                    "env key '{}' collides with an injected Huawei credential variable; the injected value is kept",
+                    entry.getKey());
+                continue;
             }
+            envs.put(entry.getKey(), entry.getValue());
         }
 
         return envs;
@@ -372,13 +375,38 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
         return INTERNATIONAL_INSTALL_URL;
     }
 
+    // installScriptUrl is a user-rendered Property<String>, so it must be validated before it is
+    // ever embedded into a shell command: a value such as "https://x/$(cmd)" or one containing
+    // ";"/backticks/quotes would otherwise execute arbitrary shell inside the container. Enforcing
+    // this here (rather than only in buildInstallCommand) means it also protects the built-in
+    // INTERNATIONAL_INSTALL_URL/SOVEREIGN_INSTALL_URLS constants if they are ever edited.
+    private static void validateInstallScriptUrl(String url) {
+        if (url.indexOf('\'') >= 0) {
+            throw new IllegalArgumentException(
+                "installScriptUrl must not contain a single quote: " + url);
+        }
+        URI parsed;
+        try {
+            parsed = new URI(url);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("installScriptUrl is not a valid URI: " + url, e);
+        }
+        if (!"https".equals(parsed.getScheme())) {
+            throw new IllegalArgumentException(
+                "installScriptUrl must use the https scheme, got: " + url);
+        }
+    }
+
     // Official non-interactive KooCLI install script (downloads ~5 MB tarball, self-verifies SHA-256).
     // Guarded so prebuilt images with hcloud already present skip the download entirely.
     // Same pattern as the apt step: the script's internal curl prints a progress meter, so capture
     // stdout+stderr and only surface it (at ERROR) if the install actually fails.
+    // The URL is single-quoted (and pre-validated by validateInstallScriptUrl) before being embedded
+    // in the shell command to prevent injection via a malicious installScriptUrl value.
     private static String buildInstallCommand(String url) {
+        validateInstallScriptUrl(url);
         return "command -v hcloud >/dev/null 2>&1 || " +
-            "__koocli_out=$({ curl -sSL " + url + " | bash -s -- -y; } 2>&1) || " +
+            "__koocli_out=$({ curl -sSL '" + url + "' | bash -s -- -y; } 2>&1) || " +
             "{ echo \"$__koocli_out\" >&2; exit 1; }";
     }
 
@@ -403,21 +431,5 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
             parts.add("--cli-region=\"$HUAWEICLOUD_SDK_REGION\"");
         }
         return parts.size() == 1 ? null : String.join(" ", parts);
-    }
-
-    private DockerOptions injectDefaults(DockerOptions original) {
-        if (original == null) {
-            return null;
-        }
-
-        var builder = original.toBuilder();
-        if (original.getImage() == null) {
-            builder.image(DEFAULT_IMAGE);
-        }
-        if (original.getEntryPoint() == null || original.getEntryPoint().isEmpty()) {
-            builder.entryPoint(List.of(""));
-        }
-
-        return builder.build();
     }
 }

@@ -34,10 +34,10 @@ Runs one or more `hcloud` commands in a container and returns a `ScriptOutput` w
 
 Required: `commands`.
 
-Optional: `installScriptUrl` (unset by default; auto-resolved, see below), `containerImage` (default `ubuntu:22.04`), `env`, `outputFiles`, `namespaceFiles`, `inputFiles`, `taskRunner`.
+Optional: `installScriptUrl` (unset by default; auto-resolved, see below), `containerImage` (default `ubuntu:26.04`), `env`, `outputFiles`, `namespaceFiles`, `inputFiles`, `taskRunner`.
 
 **Automatic install:** if `hcloud` is not present in the container image, two guarded bootstrap steps run first:
-1. `command -v curl || apt-get install -y curl ca-certificates tar`: the default `ubuntu:22.04` image ships without `curl`; this installs it when absent.
+1. `command -v curl || apt-get install -y curl ca-certificates tar`: the default `ubuntu:26.04` image ships without `curl`; this installs it when absent.
 2. `command -v hcloud || curl ... | bash -s -- -y`: downloads and installs the KooCLI binary (~5 MB) from an automatically resolved install script (see below).
 
 Both steps are skipped automatically when `curl` / `hcloud` are already present (prebuilt images).
@@ -73,7 +73,7 @@ hcloud IAM KeystoneListProjects --cli-output=json
 **Prebuilt image:** point `containerImage` at an image that already has `hcloud` installed to skip both bootstrap steps entirely:
 
 ```dockerfile
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 RUN apt-get update && apt-get install -y --no-install-recommends curl bash tar ca-certificates \
     && curl -sSL https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh \
        | bash -s -- -y \
