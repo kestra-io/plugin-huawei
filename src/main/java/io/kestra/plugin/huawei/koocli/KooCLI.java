@@ -36,12 +36,16 @@ import java.util.Map;
     title = "Execute KooCLI (hcloud) commands in a container.",
     description = """
         Runs one or more `hcloud` CLI commands inside the configured task runner (default: Docker with
-        a glibc-based Ubuntu image). Automatically injects Huawei IAM credentials and region via
-        environment variables (`HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION`,
-        and `HUAWEICLOUD_SDK_SECURITY_TOKEN` for temporary credentials).
-
-        **Credential injection:** AK/SK, region, and security token are set as env vars — not as
-        argv secrets — so they are never visible in process listings.
+        a glibc-based Ubuntu image). Automatically injects Huawei IAM credentials, region, and security
+        token as environment variables (`HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`,
+        `HUAWEICLOUD_SDK_REGION`, `HUAWEICLOUD_SDK_SECURITY_TOKEN`), then writes a `default` KooCLI
+        profile via `hcloud configure set`, referencing those env vars by shell name
+        (`--cli-access-key="$HUAWEICLOUD_SDK_AK"`, etc.). KooCLI does not read region — or any
+        credential — from an environment variable directly; it only accepts them as command-line
+        parameters or through a saved profile. Writing the profile from the env vars means `region`
+        takes effect for every command with no need to pass `--cli-region` manually, while the actual
+        secret values are expanded by the shell inside the isolated container and never appear on
+        argv or in Kestra logs.
 
         **Output format:** KooCLI does not support a global output format setting. Pass
         `--cli-output=json` (or `table`, `tsv`) per command when needed.
@@ -51,8 +55,17 @@ import java.util.Map;
         1. `command -v curl || apt-get install -y curl ca-certificates tar` — the default
            `ubuntu:22.04` image ships without `curl`; this installs it when absent.
         2. `command -v hcloud || curl ... | bash -s -- -y` — downloads the KooCLI binary (~5 MB)
-           from the official Huawei distribution bucket.
+           from an automatically resolved install script (see **Cloud partition** below).
         Both steps are skipped automatically on prebuilt images that already have `curl` and `hcloud`.
+
+        **Cloud partition:** the installed `hcloud` binary is partition-specific — it validates
+        `--cli-region` against a region catalog baked into the binary itself, and there is no way
+        to override this at runtime. This is resolved automatically for most users: standard regions
+        (`cn-*`, `ap-*`, `la-*`, `na-*`, `af-*`, `me-*`, `ru-*`, `tr-*`, `ae-*`, `sa-*`, `eu-west-0`)
+        install the international binary, and the EU Sovereign Cloud region `eu-west-101` installs
+        its own `myhuaweicloud.eu` binary — no configuration needed either way. Set `installScriptUrl`
+        explicitly only for a private/dedicated (HCS) cloud or a future partition not yet known to
+        this plugin.
 
         **Glibc requirement:** KooCLI is a dynamically linked glibc binary. Alpine/musl images are
         not supported.
@@ -63,10 +76,10 @@ import java.util.Map;
 @Plugin(
     examples = {
         @Example(
-            title = "List OBS buckets and capture the JSON output as a task output variable.",
+            title = "List IAM projects and capture the JSON output as a task output variable.",
             full = true,
             code = """
-                id: koocli_list_obs_buckets
+                id: koocli_list_projects
                 namespace: company.team
                 tasks:
                   - id: cli
@@ -75,7 +88,7 @@ import java.util.Map;
                     secretAccessKey: "{{ secret('HUAWEI_SECRET_ACCESS_KEY') }}"
                     region: eu-west-101
                     commands:
-                      - hcloud OBS ListBuckets --cli-output=json | tr -d ' \\n' | xargs -0 -I {} echo '::{\"outputs\":{}}::'
+                      - hcloud IAM KeystoneListProjects --cli-output=json | tr -d ' \\n' | xargs -0 -I {} echo '::{\"outputs\":{}}::'
                 """
         ),
         @Example(
@@ -112,6 +125,39 @@ import java.util.Map;
                     commands:
                       - hcloud version
                 """
+        ),
+        @Example(
+            title = "EU Sovereign Cloud: the region-specific KooCLI binary is selected automatically, no installScriptUrl needed.",
+            full = true,
+            code = """
+                id: koocli_eu_sovereign_cloud
+                namespace: company.team
+                tasks:
+                  - id: cli
+                    type: io.kestra.plugin.huawei.koocli.KooCLI
+                    region: eu-west-101
+                    accessKeyId: "{{ secret('HUAWEI_ACCESS_KEY_ID') }}"
+                    secretAccessKey: "{{ secret('HUAWEI_SECRET_ACCESS_KEY') }}"
+                    commands:
+                      - hcloud IAM KeystoneListProjects --cli-output=json
+                """
+        ),
+        @Example(
+            title = "Private/dedicated (HCS) cloud: override installScriptUrl with your deployment's own install script.",
+            full = true,
+            code = """
+                id: koocli_hcs_private_cloud
+                namespace: company.team
+                tasks:
+                  - id: cli
+                    type: io.kestra.plugin.huawei.koocli.KooCLI
+                    region: hcs-region-1
+                    installScriptUrl: https://hcloudcli.my-hcs-domain.example.com/cli/latest/hcloud_install.sh
+                    accessKeyId: "{{ secret('HUAWEI_ACCESS_KEY_ID') }}"
+                    secretAccessKey: "{{ secret('HUAWEI_SECRET_ACCESS_KEY') }}"
+                    commands:
+                      - hcloud IAM KeystoneListProjects --cli-output=json
+                """
         )
     }
 )
@@ -122,16 +168,29 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
 
     // ubuntu:22.04 ships without curl; install it (plus ca-certificates for HTTPS and tar for the
     // KooCLI tarball) only when absent. Guarded so prebuilt images with curl skip the apt-get.
+    // Output (stdout+stderr) is captured and only echoed — at ERROR — if the install fails, so a
+    // successful bootstrap stays silent instead of flooding the logs with apt/debconf chatter.
+    // DEBIAN_FRONTEND=noninteractive avoids the interactive debconf path.
     private static final String APT_BOOTSTRAP_COMMAND =
         "command -v curl >/dev/null 2>&1 || " +
-        "(apt-get update -qq && apt-get install -y --no-install-recommends curl ca-certificates tar)";
+        "__koocli_out=$({ DEBIAN_FRONTEND=noninteractive apt-get update -qq && " +
+        "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends curl ca-certificates tar; } 2>&1) || " +
+        "{ echo \"$__koocli_out\" >&2; exit 1; }";
 
-    // Official non-interactive KooCLI install script (downloads ~5 MB tarball, self-verifies SHA-256).
-    // Guarded so prebuilt images with hcloud already present skip the download entirely.
-    private static final String INSTALL_COMMAND =
-        "command -v hcloud >/dev/null 2>&1 || " +
-        "(curl -sSL https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh " +
-        "| bash -s -- -y)";
+    // International cloud partition (myhuaweicloud.com) install script. This binary covers the full
+    // standard region catalog (cn-*/ap-*/la-*/na-*/af-*/me-*/ru-*/tr-*/ae-*/sa-*, plus eu-west-0), so
+    // it's the correct fallback for every region NOT listed in SOVEREIGN_INSTALL_URLS below.
+    private static final String INTERNATIONAL_INSTALL_URL =
+        "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh";
+
+    // Sovereign/regional partitions ship their own KooCLI binary with their own baked-in region
+    // catalog; the international binary rejects these regions outright. Add new sovereign regions
+    // here as Huawei publishes them. Anything not listed here falls back to the international
+    // binary above; installScriptUrl remains the escape hatch for private/dedicated (HCS) clouds
+    // or any future partition not yet known to this plugin.
+    private static final Map<String, String> SOVEREIGN_INSTALL_URLS = Map.of(
+        "eu-west-101", "https://eu-west-101-apiexplorer-cli.obs.eu-west-101.myhuaweicloud.eu/cli/latest/hcloud_install.sh"
+    );
 
     // Auto-accept the first-run privacy prompt; without this, subsequent non-interactive commands block.
     private static final String CONSENT_COMMAND = "echo y | hcloud version >/dev/null 2>&1 || true";
@@ -150,6 +209,36 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
     @PluginProperty(group = "main")
     @NotNull
     protected Property<List<String>> commands;
+
+    @Schema(
+        title = "KooCLI install script URL override.",
+        description = """
+            URL of the non-interactive KooCLI (`hcloud`) install script, used only when `hcloud` is
+            not already present in the container image. Optional — leave unset for standard and EU
+            Sovereign Cloud regions, both resolved automatically.
+
+            Each KooCLI binary is built for exactly one cloud partition and ships with that
+            partition's region catalog baked in; it validates `--cli-region` against this catalog
+            and there is no way to override it at runtime (not even via `--cli-endpoint`). This
+            plugin resolves the correct binary automatically in most cases:
+
+            1. If this property is set, it always wins (escape hatch for private/dedicated clouds,
+               a.k.a. HCS, or any future partition not yet known to this plugin).
+            2. Otherwise, if `region` is a known sovereign region (currently `eu-west-101`), the
+               matching EU Sovereign Cloud binary is selected automatically.
+            3. Otherwise, the international binary is used — it covers the full standard region
+               catalog (`cn-*`, `ap-*`, `la-*`, `na-*`, `af-*`, `me-*`, `ru-*`, `tr-*`, `ae-*`,
+               `sa-*`, and `eu-west-0`).
+
+            Set this only when your region belongs to a partition not covered by tiers 2 or 3 above,
+            e.g. a private/dedicated (HCS) deployment.
+
+            Ignored entirely when `hcloud` is already installed in the container image (the install
+            step is guarded and skips itself).
+            """
+    )
+    @PluginProperty(group = "execution", dynamic = true)
+    protected Property<String> installScriptUrl;
 
     @Schema(
         title = "Additional environment variables.",
@@ -224,11 +313,17 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
         var clientConfig = huaweiClientConfig(runContext);
+        var rInstallScriptUrl = runContext.render(this.installScriptUrl).as(String.class).orElse(null);
+        var resolvedInstallScriptUrl = resolveInstallScriptUrl(rInstallScriptUrl, clientConfig.region());
 
         var allCommands = new ArrayList<String>();
         allCommands.add(APT_BOOTSTRAP_COMMAND);
-        allCommands.add(INSTALL_COMMAND);
+        allCommands.add(buildInstallCommand(resolvedInstallScriptUrl));
         allCommands.add(CONSENT_COMMAND);
+        var configureCommand = buildConfigureCommand(clientConfig);
+        if (configureCommand != null) {
+            allCommands.add(configureCommand);
+        }
         allCommands.addAll(runContext.render(this.commands).asList(String.class));
 
         var renderedOutputFiles = runContext.render(outputFiles).asList(String.class);
@@ -254,19 +349,17 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
     ) throws Exception {
         var envs = new HashMap<String, String>();
 
-        // KooCLI reads credentials and region from these documented env vars.
+        // Not read directly by hcloud — these are consumed by buildConfigureCommand() to write a
+        // profile, and kept in the environment so process listings never show the secret values.
         if (clientConfig.accessKeyId() != null) {
             envs.put("HUAWEICLOUD_SDK_AK", clientConfig.accessKeyId());
         }
         if (clientConfig.secretAccessKey() != null) {
             envs.put("HUAWEICLOUD_SDK_SK", clientConfig.secretAccessKey());
         }
-        // Region injected via env var — hcloud configure set --cli-region requires a full profile
-        // (AK/SK on argv) which would expose secrets; env var achieves the same cleanly.
         if (clientConfig.region() != null) {
             envs.put("HUAWEICLOUD_SDK_REGION", clientConfig.region());
         }
-        // Security token for temporary credentials, injected via env var for the same reason.
         if (clientConfig.securityToken() != null) {
             envs.put("HUAWEICLOUD_SDK_SECURITY_TOKEN", clientConfig.securityToken());
         }
@@ -279,6 +372,52 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
         }
 
         return envs;
+    }
+
+    // Tier 1: explicit override always wins (HCS/dedicated clouds, future partitions).
+    // Tier 2: known sovereign region auto-selects its own binary.
+    // Tier 3: everything else falls back to the international binary (full standard catalog).
+    private static String resolveInstallScriptUrl(String renderedOverride, String region) {
+        if (renderedOverride != null && !renderedOverride.isBlank()) {
+            return renderedOverride;
+        }
+        if (region != null && SOVEREIGN_INSTALL_URLS.containsKey(region)) {
+            return SOVEREIGN_INSTALL_URLS.get(region);
+        }
+        return INTERNATIONAL_INSTALL_URL;
+    }
+
+    // Official non-interactive KooCLI install script (downloads ~5 MB tarball, self-verifies SHA-256).
+    // Guarded so prebuilt images with hcloud already present skip the download entirely.
+    // Same pattern as the apt step: the script's internal curl prints a progress meter, so capture
+    // stdout+stderr and only surface it (at ERROR) if the install actually fails.
+    private static String buildInstallCommand(String url) {
+        return "command -v hcloud >/dev/null 2>&1 || " +
+            "__koocli_out=$({ curl -sSL " + url + " | bash -s -- -y; } 2>&1) || " +
+            "{ echo \"$__koocli_out\" >&2; exit 1; }";
+    }
+
+    // KooCLI does not read region (or credentials) from environment variables — it requires
+    // --cli-region/--cli-access-key or a profile. Write a `default` profile via `configure set`,
+    // referencing the injected env vars BY SHELL NAME ("$HUAWEICLOUD_SDK_AK", ...) so the actual
+    // secret values never appear on argv or in Kestra logs. The shell expands them at runtime
+    // inside the isolated container. This makes the `region` property take effect for every command.
+    private String buildConfigureCommand(AbstractConnection.HuaweiClientConfig clientConfig) {
+        var parts = new ArrayList<String>();
+        parts.add("hcloud configure set --cli-profile=default");
+        if (clientConfig.accessKeyId() != null) {
+            parts.add("--cli-access-key=\"$HUAWEICLOUD_SDK_AK\"");
+        }
+        if (clientConfig.secretAccessKey() != null) {
+            parts.add("--cli-secret-key=\"$HUAWEICLOUD_SDK_SK\"");
+        }
+        if (clientConfig.securityToken() != null) {
+            parts.add("--cli-security-token=\"$HUAWEICLOUD_SDK_SECURITY_TOKEN\"");
+        }
+        if (clientConfig.region() != null) {
+            parts.add("--cli-region=\"$HUAWEICLOUD_SDK_REGION\"");
+        }
+        return parts.size() == 1 ? null : String.join(" ", parts);
     }
 
     private DockerOptions injectDefaults(DockerOptions original) {

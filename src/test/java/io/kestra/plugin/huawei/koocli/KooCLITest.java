@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +47,57 @@ class KooCLITest {
             .build();
 
         assertThat(task.getContainerImage(), equalTo("my-registry/hcloud-ready:1.0"));
+    }
+
+    // resolveInstallScriptUrl is private static; invoked via reflection to unit-test the 3-tier
+    // resolution logic without requiring Docker/network (real hcloud install).
+    private static String resolveInstallScriptUrl(String override, String region) throws Exception {
+        Method method = KooCLI.class.getDeclaredMethod("resolveInstallScriptUrl", String.class, String.class);
+        method.setAccessible(true);
+        return (String) method.invoke(null, override, region);
+    }
+
+    @Test
+    void resolveInstallScriptUrl_standardRegion_fallsBackToInternational() throws Exception {
+        assertThat(resolveInstallScriptUrl(null, "ap-southeast-3"), equalTo(
+            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh"));
+    }
+
+    @Test
+    void resolveInstallScriptUrl_unknownRegion_fallsBackToInternational() throws Exception {
+        assertThat(resolveInstallScriptUrl(null, null), equalTo(
+            "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh"));
+    }
+
+    @Test
+    void resolveInstallScriptUrl_euSovereignRegion_autoSelectsEuBinary() throws Exception {
+        assertThat(resolveInstallScriptUrl(null, "eu-west-101"), equalTo(
+            "https://eu-west-101-apiexplorer-cli.obs.eu-west-101.myhuaweicloud.eu/cli/latest/hcloud_install.sh"));
+    }
+
+    @Test
+    void resolveInstallScriptUrl_explicitOverride_alwaysWinsOverSovereignRegion() throws Exception {
+        var hcsUrl = "https://hcloudcli.my-hcs-domain.example.com/cli/latest/hcloud_install.sh";
+
+        assertThat(resolveInstallScriptUrl(hcsUrl, "eu-west-101"), equalTo(hcsUrl));
+    }
+
+    @Test
+    void resolveInstallScriptUrl_explicitOverride_alwaysWinsOverStandardRegion() throws Exception {
+        var hcsUrl = "https://hcloudcli.my-hcs-domain.example.com/cli/latest/hcloud_install.sh";
+
+        assertThat(resolveInstallScriptUrl(hcsUrl, "ap-southeast-3"), equalTo(hcsUrl));
+    }
+
+    @Test
+    void defaults_installScriptUrlPropertyIsUnset() {
+        var task = KooCLI.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .commands(Property.ofValue(List.of("hcloud version")))
+            .build();
+
+        assertThat(task.getInstallScriptUrl(), is(nullValue()));
     }
 
     @Test
