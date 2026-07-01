@@ -13,7 +13,7 @@ KooCLI tasks authenticate using AK/SK credentials. The connection properties are
 | `HUAWEICLOUD_SDK_REGION` | `region` |
 | `HUAWEICLOUD_SDK_SECURITY_TOKEN` | `securityToken` (temporary credentials) |
 
-KooCLI does not read region — or any credential — from an environment variable directly; it only accepts `--cli-region`/`--cli-access-key`/... on the command line or a saved profile. The task writes the profile with a command such as `hcloud configure set --cli-profile=default --cli-access-key="$HUAWEICLOUD_SDK_AK" --cli-region="$HUAWEICLOUD_SDK_REGION" ...`, referencing the env vars **by shell name** so the actual secret values are only expanded by the shell inside the isolated container and never appear on argv or in Kestra logs. This makes `region` take effect for every command with no need to pass `--cli-region` manually.
+KooCLI does not read region (or any credential) from an environment variable directly; it only accepts `--cli-region`/`--cli-access-key`/... on the command line or a saved profile. The task writes the profile with a command such as `hcloud configure set --cli-profile=default --cli-access-key="$HUAWEICLOUD_SDK_AK" --cli-region="$HUAWEICLOUD_SDK_REGION" ...`, referencing the env vars **by shell name** so the actual secret values are only expanded by the shell inside the isolated container and never appear on argv or in Kestra logs. This makes `region` take effect for every command with no need to pass `--cli-region` manually.
 
 Provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret). The `temporaryCredentials` inline exchange is also supported: configure it once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) and every KooCLI task receives freshly exchanged STS credentials without per-task wiring.
 
@@ -37,14 +37,14 @@ Required: `commands`.
 Optional: `installScriptUrl` (unset by default; auto-resolved, see below), `containerImage` (default `ubuntu:22.04`), `env`, `outputFiles`, `namespaceFiles`, `inputFiles`, `taskRunner`.
 
 **Automatic install:** if `hcloud` is not present in the container image, two guarded bootstrap steps run first:
-1. `command -v curl || apt-get install -y curl ca-certificates tar` — the default `ubuntu:22.04` image ships without `curl`; this installs it when absent.
-2. `command -v hcloud || curl ... | bash -s -- -y` — downloads and installs the KooCLI binary (~5 MB) from an automatically resolved install script (see below).
+1. `command -v curl || apt-get install -y curl ca-certificates tar`: the default `ubuntu:22.04` image ships without `curl`; this installs it when absent.
+2. `command -v hcloud || curl ... | bash -s -- -y`: downloads and installs the KooCLI binary (~5 MB) from an automatically resolved install script (see below).
 
 Both steps are skipped automatically when `curl` / `hcloud` are already present (prebuilt images).
 
-**Cloud partition / EU Sovereign Cloud:** the `hcloud` binary is partition-specific — it ships with a region catalog baked in and validates `--cli-region` against it, with no runtime override (`--cli-endpoint` does not bypass this validation). This plugin resolves the correct install script automatically for most users, in three tiers:
+**Cloud partition / EU Sovereign Cloud:** the `hcloud` binary is partition-specific. It ships with a region catalog baked in and validates `--cli-region` against it, with no runtime override (`--cli-endpoint` does not bypass this validation). This plugin resolves the correct install script automatically for most users, in three tiers:
 
-1. **`installScriptUrl` explicit override** (if set) always wins — the escape hatch for a private/dedicated (HCS) cloud or any future partition not yet known to this plugin.
+1. **`installScriptUrl` explicit override** (if set) always wins: the escape hatch for a private/dedicated (HCS) cloud or any future partition not yet known to this plugin.
 2. **Known sovereign region** (currently `eu-west-101`) auto-selects the EU Sovereign Cloud (`myhuaweicloud.eu`) binary.
 3. **Everything else** falls back to the international binary, which covers the full standard region catalog (`cn-*`, `ap-*`, `la-*`, `na-*`, `af-*`, `me-*`, `ru-*`, `tr-*`, `ae-*`, `sa-*`, and `eu-west-0`).
 
