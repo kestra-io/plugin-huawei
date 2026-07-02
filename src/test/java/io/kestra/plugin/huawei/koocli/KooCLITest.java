@@ -30,26 +30,28 @@ class KooCLITest {
     // ── Unit tests (no Docker, no network) ──────────────────────────────────────
 
     @Test
-    void defaults_containerImageIsUbuntu() {
+    void defaults_containerImageIsUbuntu() throws Exception {
         var task = KooCLI.builder()
             .accessKeyId(Property.ofValue(FAKE_AK))
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .commands(Property.ofValue(List.of("hcloud version")))
             .build();
+        var runContext = runContextFactory.of(Collections.emptyMap());
 
-        assertThat(task.getContainerImage(), equalTo("ubuntu:26.04"));
+        assertThat(runContext.render(task.getContainerImage()).as(String.class).orElseThrow(), equalTo("ubuntu:26.04"));
     }
 
     @Test
-    void customContainerImage_isPreserved() {
+    void customContainerImage_isPreserved() throws Exception {
         var task = KooCLI.builder()
             .accessKeyId(Property.ofValue(FAKE_AK))
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .commands(Property.ofValue(List.of("hcloud version")))
-            .containerImage("my-registry/hcloud-ready:1.0")
+            .containerImage(Property.ofValue("my-registry/hcloud-ready:1.0"))
             .build();
+        var runContext = runContextFactory.of(Collections.emptyMap());
 
-        assertThat(task.getContainerImage(), equalTo("my-registry/hcloud-ready:1.0"));
+        assertThat(runContext.render(task.getContainerImage()).as(String.class).orElseThrow(), equalTo("my-registry/hcloud-ready:1.0"));
     }
 
     // resolveInstallScriptUrl is private static; invoked via reflection to unit-test the 3-tier
@@ -138,6 +140,17 @@ class KooCLITest {
         assertThat(command, containsString("--cli-secret-key=\"$HUAWEICLOUD_SDK_SK\""));
         assertThat(command, containsString("--cli-security-token=\"$HUAWEICLOUD_SDK_SECURITY_TOKEN\""));
         assertThat(command, containsString("--cli-region=\"$HUAWEICLOUD_SDK_REGION\""));
+    }
+
+    @Test
+    void buildConfigureCommand_withCredentials_failsFastOnConfigureError() throws Exception {
+        var task = KooCLI.builder().build();
+        var clientConfig = new AbstractConnection.HuaweiClientConfig(
+            FAKE_AK, FAKE_SK, null, null, null, "eu-west-101");
+
+        var command = buildConfigureCommand(task, clientConfig);
+
+        assertThat(command, endsWith("|| { echo \"hcloud configure set failed\" >&2; exit 1; }"));
     }
 
     @Test

@@ -17,6 +17,8 @@ KooCLI does not read region (or any credential) from an environment variable dir
 
 Provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret). The `temporaryCredentials` inline exchange is also supported: configure it once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) and every KooCLI task receives freshly exchanged STS credentials without per-task wiring.
 
+**`projectId` / `domainId` are not used by this task.** They are inherited from the base Huawei connection but KooCLI does not expose a stable, version-independent `configure set` flag for project/domain scoping; if an operation needs one, pass it directly as a command parameter (check `hcloud <service> <operation> --help`).
+
 ```yaml
 pluginDefaults:
   - type: io.kestra.plugin.huawei.koocli
@@ -62,6 +64,8 @@ Standard regions install the international binary automatically; the EU Sovereig
 ```
 
 `installScriptUrl` is ignored when `hcloud` is already installed in the container image (the install step is guarded).
+
+**Install script trust:** the auto-install step runs Huawei's official install script via `curl | bash`. Only the downloaded tarball self-verifies its SHA-256; the install script itself is trusted over HTTPS with no independent signature check. Security-conscious users should use a prebuilt `containerImage` with `hcloud` already baked in to avoid running the script at all.
 
 **Output format:** KooCLI does not support a global output format setting. Pass `--cli-output=json` (or `table`, `tsv`) per command:
 ```sh
