@@ -163,17 +163,9 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
         "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends curl ca-certificates tar; } 2>&1) || " +
         "{ echo \"$__koocli_out\" >&2; exit 1; }";
 
-    // International cloud partition (myhuaweicloud.com) install script. This binary covers the full
-    // standard region catalog (cn-*/ap-*/la-*/na-*/af-*/me-*/ru-*/tr-*/ae-*/sa-*, plus eu-west-0), so
-    // it's the correct fallback for every region NOT listed in SOVEREIGN_INSTALL_URLS below.
     private static final String INTERNATIONAL_INSTALL_URL =
         "https://ap-southeast-3-hwcloudcli.obs.ap-southeast-3.myhuaweicloud.com/cli/latest/hcloud_install.sh";
 
-    // Sovereign/regional partitions ship their own KooCLI binary with their own baked-in region
-    // catalog; the international binary rejects these regions outright. Add new sovereign regions
-    // here as Huawei publishes them. Anything not listed here falls back to the international
-    // binary above; installScriptUrl remains the escape hatch for private/dedicated (HCS) clouds
-    // or any future partition not yet known to this plugin.
     private static final Map<String, String> SOVEREIGN_INSTALL_URLS = Map.of(
         "eu-west-101", "https://eu-west-101-apiexplorer-cli.obs.eu-west-101.myhuaweicloud.eu/cli/latest/hcloud_install.sh"
     );
