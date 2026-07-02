@@ -198,18 +198,22 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
     public static class MetricValue {
 
         @Schema(title = "Metric name", description = "E.g. `queue_depth`.")
+        @PluginProperty(group = "main")
         Property<String> metricName;
 
         @Schema(
             title = "Dimensions identifying the monitored resource",
             description = "Up to 3 name/value pairs."
         )
+        @PluginProperty(group = "main")
         Property<List<Dimension>> dimensions;
 
         @Schema(title = "Datapoint value")
+        @PluginProperty(group = "main")
         Property<Double> value;
 
         @Schema(title = "Unit of the value", description = "E.g. `%`, `Count`, `Bytes`. Optional.")
+        @PluginProperty(group = "advanced")
         Property<String> unit;
 
         @Schema(
@@ -217,18 +221,21 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
             description = "Data type reported to CES. Defaults to `float`, which covers virtually all use cases."
         )
         @Builder.Default
+        @PluginProperty(group = "advanced")
         Property<String> type = Property.ofValue("float");
 
         @Schema(
             title = "Collection time (epoch milliseconds)",
             description = "When the datapoint was collected. Defaults to the current time when omitted."
         )
+        @PluginProperty(group = "advanced")
         Property<Long> collectTime;
 
         @Schema(
             title = "Time-to-live in seconds",
             description = "How long CES retains this datapoint before it is eligible for aggregation into a lower resolution. Optional."
         )
+        @PluginProperty(group = "advanced")
         Property<Integer> ttl;
     }
 

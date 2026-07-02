@@ -33,6 +33,7 @@ Overrides the default endpoint derived from `region` and `endpointSuffix`. Use f
 - **Namespace format**: CES namespaces follow `service.item` (e.g. `SYS.ECS`). Custom namespaces used with `Push` must NOT start with `SYS.`, which is reserved for Huawei Cloud system namespaces.
 - **Dimensions are mandatory for queries**: `Query` and `Trigger` require between 1 and 3 dimensions (`name`/`value` pairs) — CES's `showMetricData` API mandates at least one dimension (`dim.0`) to identify the exact resource instance. `Push` does not have this constraint; dimensions are optional per metric.
 - **Push batch limit**: CES caps a single `createMetricData` request at 10 datapoints. `Push` chunks larger batches automatically.
+- **`Query.series` is capped**: at most 1440 of the most recent datapoints are returned, bounding memory usage when `period=RAW` is combined with a large `window`. Narrow `window` or increase `period` for finer-grained coverage over a longer range.
 
 ## Tasks
 
@@ -58,6 +59,10 @@ Outputs: `count` (number of datapoints returned), `series` (list of `timestamp`/
 
 ### Trigger
 
-Polls a CES metric on a configurable interval (`interval`, default `PT5M`) and fires an execution as soon as the query returns at least one datapoint. Accepts the same properties as `Query` plus `interval`.
+Polls a CES metric on a configurable interval (`interval`, default `PT5M`) and fires an execution when at least one **new** datapoint is found. Accepts the same properties as `Query` plus `interval`, `threshold`, and `comparisonOperator`.
 
-Outputs: same shape as `Query` (`count`, `series`).
+- `threshold` (optional): when set, the trigger only fires if a new datapoint's value satisfies `value <comparisonOperator> threshold`. When omitted, the trigger fires on any new datapoint.
+- `comparisonOperator` (optional): `GREATER_THAN` (default), `GREATER_THAN_OR_EQUAL`, `LESS_THAN`, `LESS_THAN_OR_EQUAL`, `EQUAL`. Ignored when `threshold` is not set.
+- **De-duplication**: a watermark (the timestamp of the most recent datapoint seen) is persisted in the flow's namespace [KV Store](https://kestra.io/docs/concepts/kv-store) between polls, so a `window` larger than `interval` (e.g. `window: PT10M` with `interval: PT5M`) never re-fires on the same datapoint.
+
+Outputs: same shape as `Query` (`count`, `series`), containing only the new datapoints that fired this execution.

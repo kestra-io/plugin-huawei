@@ -232,6 +232,62 @@ class QueryPushTest {
     }
 
     @Test
+    void query_missingDimensionName_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Query.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("SYS.ECS"))
+            .metricName(Property.ofValue("cpu_util"))
+            .dimensions(Property.ofValue(List.of(
+                Dimension.builder().value(Property.ofValue("abc123")).build()
+            )))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("dimensions[0].name is required")));
+    }
+
+    @Test
+    void query_seriesLargerThanCap_isTruncatedToMostRecent() throws Exception {
+        var datapoints = IntStream.range(0, Query.MAX_SERIES_SIZE + 10)
+            .mapToObj(i -> "{\"average\": " + i + ".0, \"timestamp\": " + (i * 60_000L) + ", \"unit\": \"%\"}")
+            .toList();
+        var body = "{\"metric_name\": \"cpu_util\", \"datapoints\": [" + String.join(",", datapoints) + "]}";
+
+        wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(body)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Query.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("SYS.ECS"))
+            .metricName(Property.ofValue("cpu_util"))
+            .dimensions(Property.ofValue(List.of(
+                Dimension.builder().name(Property.ofValue("instance_id")).value(Property.ofValue("abc123")).build()
+            )))
+            .period(Property.ofValue(Query.Period.RAW))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getCount(), equalTo(Query.MAX_SERIES_SIZE));
+        assertThat(output.getSeries().size(), equalTo(Query.MAX_SERIES_SIZE));
+        // The most recent points must be kept (the last generated datapoint has the highest index/value).
+        assertThat(output.getSeries().get(output.getSeries().size() - 1).getValue(), equalTo((double) (Query.MAX_SERIES_SIZE + 9)));
+    }
+
+    @Test
     void query_noDatapoints_returnsZeroCount() throws Exception {
         wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
             .willReturn(aResponse()

@@ -71,6 +71,9 @@ import java.util.List;
 )
 public class Query extends AbstractCes implements RunnableTask<Query.Output> {
 
+    // Bounds memory usage when period=RAW combined with a large window; keeps the most recent points.
+    static final int MAX_SERIES_SIZE = 1440;
+
     @Schema(
         title = "Metric namespace",
         description = """
@@ -149,8 +152,11 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
             .withTo(to);
 
         for (var i = 0; i < rDimensions.size(); i++) {
-            var rName = runContext.render(rDimensions.get(i).getName()).as(String.class).orElseThrow();
-            var rValue = runContext.render(rDimensions.get(i).getValue()).as(String.class).orElseThrow();
+            final var index = i;
+            var rName = runContext.render(rDimensions.get(i).getName()).as(String.class)
+                .orElseThrow(() -> new IllegalArgumentException("dimensions[" + index + "].name is required"));
+            var rValue = runContext.render(rDimensions.get(i).getValue()).as(String.class)
+                .orElseThrow(() -> new IllegalArgumentException("dimensions[" + index + "].value is required for dimension '" + rName + "'"));
             var dim = rName + "," + rValue;
             switch (i) {
                 case 0 -> request.withDim0(dim);
@@ -175,6 +181,13 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
                 .build())
             .sorted(Comparator.comparing(Point::getTimestamp, Comparator.nullsLast(Comparator.naturalOrder())))
             .toList();
+
+        if (series.size() > MAX_SERIES_SIZE) {
+            runContext.logger().warn(
+                "CES query for {}/{} returned {} datapoints, keeping only the {} most recent — narrow 'window' or increase 'period' for finer-grained coverage over a longer range.",
+                rNamespace, rMetricName, series.size(), MAX_SERIES_SIZE);
+            series = series.subList(series.size() - MAX_SERIES_SIZE, series.size());
+        }
 
         runContext.logger().info("CES query for {}/{} returned {} datapoints", rNamespace, rMetricName, series.size());
 
@@ -266,7 +279,11 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
         @Schema(title = "Number of datapoints returned")
         private final Integer count;
 
-        @Schema(title = "Datapoints sorted by timestamp ascending")
+        @Schema(
+            title = "Datapoints sorted by timestamp ascending",
+            description = "Capped at " + MAX_SERIES_SIZE + " datapoints (the most recent ones) to bound memory usage. " +
+                "Narrow `window` or increase `period` if you need finer-grained coverage over a longer range."
+        )
         private final List<Point> series;
     }
 }

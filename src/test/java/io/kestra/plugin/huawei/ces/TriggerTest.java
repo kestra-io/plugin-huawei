@@ -140,8 +140,138 @@ class TriggerTest {
         assertThat(result.isPresent(), is(false));
     }
 
+    @Test
+    void evaluate_thresholdMet_returnsExecution() throws Exception {
+        wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"metric_name": "cpu_util", "datapoints": [{"average": 85.0, "timestamp": 1000, "unit": "%"}]}
+                    """)));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create())
+            .type(Trigger.class.getName())
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("SYS.ECS"))
+            .metricName(Property.ofValue("cpu_util"))
+            .dimensions(Property.ofValue(List.of(
+                Dimension.builder().name(Property.ofValue("instance_id")).value(Property.ofValue("abc123")).build()
+            )))
+            .threshold(Property.ofValue(80.0))
+            .comparisonOperator(Property.ofValue(Trigger.ComparisonOperator.GREATER_THAN))
+            .build();
+
+        var flow = buildFlow();
+        var triggerContext = buildTriggerContext(trigger);
+        var runContext = triggerRunContext(flow, trigger, triggerContext);
+        var conditionContext = new ConditionContext(flow, null, runContext, Collections.emptyMap(), null);
+
+        var result = trigger.evaluate(conditionContext, triggerContext);
+
+        assertThat(result.isPresent(), is(true));
+    }
+
+    @Test
+    void evaluate_thresholdNotMet_returnsEmpty() throws Exception {
+        wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"metric_name": "cpu_util", "datapoints": [{"average": 55.0, "timestamp": 1000, "unit": "%"}]}
+                    """)));
+
+        var trigger = Trigger.builder()
+            .id(IdUtils.create())
+            .type(Trigger.class.getName())
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("SYS.ECS"))
+            .metricName(Property.ofValue("cpu_util"))
+            .dimensions(Property.ofValue(List.of(
+                Dimension.builder().name(Property.ofValue("instance_id")).value(Property.ofValue("abc123")).build()
+            )))
+            .threshold(Property.ofValue(80.0))
+            .comparisonOperator(Property.ofValue(Trigger.ComparisonOperator.GREATER_THAN))
+            .build();
+
+        var flow = buildFlow();
+        var triggerContext = buildTriggerContext(trigger);
+        var runContext = triggerRunContext(flow, trigger, triggerContext);
+        var conditionContext = new ConditionContext(flow, null, runContext, Collections.emptyMap(), null);
+
+        var result = trigger.evaluate(conditionContext, triggerContext);
+
+        assertThat(result.isPresent(), is(false));
+    }
+
+    @Test
+    void evaluate_overlappingPolls_doesNotRefireSameDatapoints() throws Exception {
+        var trigger = Trigger.builder()
+            .id(IdUtils.create())
+            .type(Trigger.class.getName())
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("SYS.ECS"))
+            .metricName(Property.ofValue("cpu_util"))
+            .dimensions(Property.ofValue(List.of(
+                Dimension.builder().name(Property.ofValue("instance_id")).value(Property.ofValue("abc123")).build()
+            )))
+            .build();
+
+        var flow = buildFlow();
+        var triggerContext = buildTriggerContext(trigger);
+        var runContext = triggerRunContext(flow, trigger, triggerContext);
+        var conditionContext = new ConditionContext(flow, null, runContext, Collections.emptyMap(), null);
+
+        // First poll: two datapoints in the window.
+        wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"metric_name": "cpu_util", "datapoints": [
+                        {"average": 50.0, "timestamp": 1000, "unit": "%"},
+                        {"average": 55.0, "timestamp": 2000, "unit": "%"}
+                    ]}
+                    """)));
+
+        var firstResult = trigger.evaluate(conditionContext, triggerContext);
+        assertThat(firstResult.isPresent(), is(true));
+        assertThat(firstResult.get().getTrigger().getVariables().get("count"), is(2));
+
+        // Second poll: overlapping window returns the same two datapoints plus one genuinely new one.
+        wireMock.resetAll();
+        wireMock.stubFor(get(urlMatching(".*/metric-data.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"metric_name": "cpu_util", "datapoints": [
+                        {"average": 50.0, "timestamp": 1000, "unit": "%"},
+                        {"average": 55.0, "timestamp": 2000, "unit": "%"},
+                        {"average": 60.0, "timestamp": 3000, "unit": "%"}
+                    ]}
+                    """)));
+
+        var secondResult = trigger.evaluate(conditionContext, triggerContext);
+
+        assertThat(secondResult.isPresent(), is(true));
+        assertThat(secondResult.get().getTrigger().getVariables().get("count"), is(1));
+    }
+
     private Flow buildFlow() {
         return Flow.builder()
+            .tenantId("main")
             .id("ces-trigger-test-flow")
             .namespace("company.team")
             .revision(1)
