@@ -155,7 +155,7 @@ dependencies {
 // Micronaut pulls in a newer logback-core constraint via micronaut-logging-bom, which causes
 // NoClassDefFoundError for JaninoEventEvaluatorBase at test startup. Force the correct version.
 configurations.testRuntimeClasspath {
-    resolutionStrategy.force "ch.qos.logback:logback-core:1.5.36"
+    resolutionStrategy.force "ch.qos.logback:logback-core:1.5.37"
 }
 
 configurations {
