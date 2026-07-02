@@ -92,6 +92,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-functiongraph") {
         exclude group: "org.slf4j"
     }
+
+    // CES (Cloud Eye Service) SDK — push and query custom/system metrics via the CES V1 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-ces") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

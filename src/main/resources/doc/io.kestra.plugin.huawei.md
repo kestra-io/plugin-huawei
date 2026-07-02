@@ -9,6 +9,7 @@ Tasks and triggers for Huawei Cloud services: Object Storage Service (OBS), Iden
 - **DMS for Kafka** (`io.kestra.plugin.huawei.dms.kafka`): produce, consume, and trigger on messages using the Apache Kafka protocol.
 - **DMS for RocketMQ** (`io.kestra.plugin.huawei.dms.rocketmq`): publish, consume, and trigger on messages using the Apache RocketMQ protocol.
 - **DataArts Studio** (`io.kestra.plugin.huawei.dataarts`): start, monitor, and stop DataArts Factory batch job runs.
+- **CES** (`io.kestra.plugin.huawei.ces`): push custom metrics, query metric statistics, and trigger flows on metric datapoints.
 
 ## Authentication
 
