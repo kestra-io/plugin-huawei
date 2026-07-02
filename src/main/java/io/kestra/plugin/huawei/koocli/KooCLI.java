@@ -41,12 +41,18 @@ import java.util.Map;
         plugin's connection properties (access key, secret key, region, and security token), so
         commands run authenticated against the configured `region` without passing `--cli-region`
         or credentials manually. Secret values are never exposed on the command line or in logs.
+        Short-lived STS credentials via `temporaryCredentials` are supported too; configure it once
+        with plugin defaults and every task obtains fresh credentials without per-task wiring.
 
         **Output format:** KooCLI has no global output setting. Pass `--cli-output=json` (or `table`,
         `tsv`) per command when needed.
 
         **Installation:** if `hcloud` is not already in the container image, it is downloaded and
-        installed automatically on first run (skipped on prebuilt images).
+        installed automatically on first run (skipped on prebuilt images). The auto-install runs
+        Huawei's official install script via `curl | bash`: only the downloaded tarball self-verifies
+        its SHA-256, while the script itself is trusted over HTTPS with no independent signature
+        check. Security-conscious deployments should use a prebuilt image with `hcloud` already baked
+        in to avoid running the script at all.
 
         **Cloud partition:** the correct `hcloud` binary is selected automatically. Standard regions
         and the EU Sovereign Cloud region `eu-west-101` both work with no extra configuration. Set
@@ -228,8 +234,10 @@ public class KooCLI extends AbstractConnection implements RunnableTask<ScriptOut
         title = "Additional environment variables.",
         description = """
             Extra variables merged into the process environment alongside the injected Huawei
-            credentials (`HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION`,
-            `HUAWEICLOUD_SDK_SECURITY_TOKEN`). Values may contain Pebble expressions.
+            credentials `HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION`, and
+            `HUAWEICLOUD_SDK_SECURITY_TOKEN` (populated from the `accessKeyId`, `secretAccessKey`,
+            `region`, and `securityToken` connection properties respectively). Values may contain
+            Pebble expressions.
 
             **Note:** the injected credential keys above are reserved. If a key here collides with
             one of them, the injected credential value takes precedence and a warning is logged;
