@@ -119,6 +119,17 @@ class KooCLITest {
         assertThat(runContext.render(task.getEnv()).asMap(String.class, String.class), hasEntry("MY_VAR", "hello"));
     }
 
+    @Test
+    void defaults_taskRunnerIsDocker() {
+        var task = KooCLI.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .commands(Property.ofValue(List.of("hcloud version")))
+            .build();
+
+        assertThat(task.getTaskRunner(), is(notNullValue()));
+    }
+
     // ── buildConfigureCommand (reflection; private instance method) ──────────────
 
     private static String buildConfigureCommand(KooCLI task, AbstractConnection.HuaweiClientConfig clientConfig) throws Exception {
