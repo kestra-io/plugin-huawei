@@ -77,7 +77,7 @@ dependencies {
 
     // Huawei Cloud Java SDK v3 — modular SDK for IAM and other Huawei Cloud services.
     // Version 3.1.152 is the earliest release that publishes a BOM artifact to Maven Central.
-    implementation enforcedPlatform("com.huaweicloud.sdk:huaweicloud-sdk-bom:3.1.202")
+    implementation enforcedPlatform("com.huaweicloud.sdk:huaweicloud-sdk-bom:3.1.203")
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-iam") {
         exclude group: "org.slf4j"
     }
