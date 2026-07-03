@@ -74,6 +74,10 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
     // Bounds memory usage when period=RAW combined with a large window; keeps the most recent points.
     static final int MAX_SERIES_SIZE = 1440;
 
+    // Bounds the queried time range so the SDK never has to deserialize an oversized response
+    // before MAX_SERIES_SIZE truncation applies.
+    public static final Duration MAX_WINDOW = Duration.ofDays(30);
+
     @Schema(
         title = "Metric namespace",
         description = """
@@ -116,7 +120,7 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
 
     @Schema(
         title = "Time window to query, ending now",
-        description = "How far back from the current time to query datapoints for, as an ISO-8601 duration. Defaults to `PT1H`."
+        description = "How far back from the current time to query datapoints for, as an ISO-8601 duration. Defaults to `PT1H`. Maximum: 30 days (`P30D`)."
     )
     @Builder.Default
     @PluginProperty(group = "main")
@@ -138,6 +142,12 @@ public class Query extends AbstractCes implements RunnableTask<Query.Output> {
         var rStatistic = runContext.render(statistic).as(Statistic.class).orElse(Statistic.AVERAGE);
         var rPeriod = runContext.render(period).as(Period.class).orElse(Period.FIVE_MINUTES);
         var rWindow = runContext.render(window).as(Duration.class).orElse(Duration.ofHours(1));
+        if (rWindow.isZero() || rWindow.isNegative()) {
+            throw new IllegalArgumentException("window must be a positive duration, but was " + rWindow + ".");
+        }
+        if (rWindow.compareTo(MAX_WINDOW) > 0) {
+            throw new IllegalArgumentException("window must not exceed " + MAX_WINDOW + " (P30D), but was " + rWindow + " — narrow the window or query CES in smaller ranges.");
+        }
 
         var now = Instant.now();
         var from = now.minus(rWindow).toEpochMilli();

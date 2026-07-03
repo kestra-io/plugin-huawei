@@ -160,7 +160,10 @@ public class Trigger extends AbstractTrigger
     @PluginProperty(group = "main")
     private Property<Query.Period> period = Property.ofValue(Query.Period.FIVE_MINUTES);
 
-    @Schema(title = "Time window to query, ending now")
+    @Schema(
+        title = "Time window to query, ending now",
+        description = "Defaults to `PT1H`. Maximum: 30 days (`P30D`)."
+    )
     @Builder.Default
     @PluginProperty(group = "main")
     private Property<Duration> window = Property.ofValue(Duration.ofHours(1));
@@ -268,7 +271,7 @@ public class Trigger extends AbstractTrigger
     }
 
     private String watermarkKey(TriggerContext triggerContext) {
-        return "ces_trigger_watermark_" + triggerContext.getFlowId() + "_" + triggerContext.getTriggerId();
+        return "ces_trigger_watermark_" + triggerContext.getFlowId().length() + "_" + triggerContext.getFlowId() + "_" + triggerContext.getTriggerId();
     }
 
     private static Instant readWatermark(KVStore kv, String key) throws Exception {

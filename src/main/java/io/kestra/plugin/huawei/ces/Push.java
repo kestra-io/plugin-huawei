@@ -198,6 +198,7 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
     public static class MetricValue {
 
         @Schema(title = "Metric name", description = "E.g. `queue_depth`.")
+        @NotNull
         @PluginProperty(group = "main")
         Property<String> metricName;
 
@@ -209,6 +210,7 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
         Property<List<Dimension>> dimensions;
 
         @Schema(title = "Datapoint value")
+        @NotNull
         @PluginProperty(group = "main")
         Property<Double> value;
 
