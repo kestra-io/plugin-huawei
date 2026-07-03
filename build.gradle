@@ -64,13 +64,11 @@ dependencies {
         exclude group: "org.slf4j"
     }
 
-    // DMS for RocketMQ — uses the Apache RocketMQ 4.x client (stable, widely supported).
+    // DMS for RocketMQ — uses the Apache RocketMQ 5.x client.
+    // The former standalone rocketmq-acl module (AclClientRPCHook, SessionCredentials) was folded
+    // into rocketmq-client from 5.4.0 onward, so no separate acl artifact is declared.
     // Exclude logging dependencies to defer to Kestra's binding.
     implementation("org.apache.rocketmq:rocketmq-client:5.5.0") {
-        exclude group: "ch.qos.logback"
-        exclude group: "org.slf4j"
-    }
-    implementation("org.apache.rocketmq:rocketmq-acl:5.5.0") {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
     }
