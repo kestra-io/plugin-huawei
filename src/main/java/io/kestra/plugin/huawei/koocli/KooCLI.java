@@ -29,7 +29,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Execute KooCLI (hcloud) commands in a container.",
+    title = "Execute KooCLI (hcloud) commands in a container",
     description = """
         Runs one or more `hcloud` CLI commands inside the configured task runner (default: Docker with
         a glibc-based Ubuntu image). The task automatically configures a KooCLI profile from this
@@ -194,7 +194,7 @@ public class KooCLI extends AbstractExecScript implements RunnableTask<ScriptOut
     protected Property<TemporaryCredentialsConfig> temporaryCredentials;
 
     @Schema(
-        title = "KooCLI (hcloud) commands to execute.",
+        title = "KooCLI (hcloud) commands to execute",
         description = """
             Shell commands executed in order via `/bin/sh -c`. Each entry is a shell fragment; use
             pipes, redirects, and standard shell constructs as needed. The `hcloud` binary is
@@ -209,7 +209,7 @@ public class KooCLI extends AbstractExecScript implements RunnableTask<ScriptOut
     protected Property<List<String>> commands;
 
     @Schema(
-        title = "KooCLI install script URL override.",
+        title = "KooCLI install script URL override",
         description = """
             URL of the non-interactive KooCLI (`hcloud`) install script, used only when `hcloud` is
             not already present in the container image. Optional; leave unset for standard and EU
@@ -239,7 +239,7 @@ public class KooCLI extends AbstractExecScript implements RunnableTask<ScriptOut
     protected Property<String> installScriptUrl;
 
     @Schema(
-        title = "Container image.",
+        title = "Container image",
         description = """
             Docker image used when the runner is container-based. Defaults to `ubuntu:26.04`.
 
