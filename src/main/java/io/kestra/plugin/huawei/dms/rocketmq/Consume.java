@@ -35,7 +35,7 @@ import java.util.Set;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from a Huawei DMS for RocketMQ topic.",
+    title = "Consume messages from a Huawei DMS for RocketMQ topic",
     description = """
         Polls the configured topic using pull-mode until `maxRecords` or `maxDuration` is reached
         (at least one is required). Messages are written to Kestra internal storage as ION at `uri`.
@@ -69,14 +69,14 @@ import java.util.Set;
 public class Consume extends AbstractDmsRocketMq implements RunnableTask<Consume.Output> {
 
     @Schema(
-        title = "Stop after consuming this many messages.",
+        title = "Stop after consuming this many messages",
         description = "At least one of `maxRecords` or `maxDuration` must be set."
     )
     @PluginProperty(group = "execution")
     private Property<Integer> maxRecords;
 
     @Schema(
-        title = "Stop after this duration has elapsed.",
+        title = "Stop after this duration has elapsed",
         description = "ISO-8601 duration, e.g. `PT30S`. At least one of `maxRecords` or `maxDuration` must be set."
     )
     @PluginProperty(group = "execution")
@@ -169,10 +169,10 @@ public class Consume extends AbstractDmsRocketMq implements RunnableTask<Consume
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Number of messages consumed from the DMS RocketMQ topic.")
+        @Schema(title = "Number of messages consumed from the DMS RocketMQ topic")
         private final Integer messagesCount;
 
-        @Schema(title = "URI of the ION file in Kestra internal storage containing the consumed messages.")
+        @Schema(title = "URI of the ION file in Kestra internal storage containing the consumed messages")
         private final URI uri;
     }
 }

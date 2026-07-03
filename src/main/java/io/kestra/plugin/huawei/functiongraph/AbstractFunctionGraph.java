@@ -22,7 +22,7 @@ import lombok.experimental.SuperBuilder;
 public abstract class AbstractFunctionGraph extends AbstractConnection implements FunctionGraphConnectionInterface {
 
     @Schema(
-        title = "FunctionGraph endpoint URL override.",
+        title = "FunctionGraph endpoint URL override",
         description = """
             Overrides the default endpoint derived from `region` and `endpointSuffix`. Use this for
             private endpoints, non-standard deployments, or tests. When set, `endpointSuffix` is
@@ -35,7 +35,7 @@ public abstract class AbstractFunctionGraph extends AbstractConnection implement
     protected Property<String> endpointOverride;
 
     @Schema(
-        title = "Huawei Cloud domain suffix.",
+        title = "Huawei Cloud domain suffix",
         description = """
             Controls the top-level domain used when deriving the FunctionGraph endpoint from `region`.
             Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the Huawei Cloud European

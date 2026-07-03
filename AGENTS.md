@@ -26,6 +26,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
 - `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
+- `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -87,6 +88,16 @@ Infrastructure dependencies (Docker Compose services):
 **KooCLI**
 
 - `io.kestra.plugin.huawei.koocli.KooCLI` — Runs arbitrary `hcloud` CLI commands in a container (default `ubuntu:26.04`); injects AK/SK, region, and security token as env vars, then writes a `default` profile via a guarded `hcloud configure set` step that references them by shell name so secrets never reach argv or logs; auto-installs `hcloud` when absent (two guarded bootstrap steps: curl, then the install script chosen by the 3-tier `resolveInstallScriptUrl(...)`); supports `temporaryCredentials` inline exchange; returns `ScriptOutput` with `vars`, `outputFiles`, `exitCode`
+
+**CES (Cloud Eye Service)**
+
+- `io.kestra.plugin.huawei.ces.Push` — Pushes custom metric datapoints via `createMetricData`; namespace must NOT use the reserved `SYS.` prefix; chunks batches over 10 datapoints (CES per-request cap)
+- `io.kestra.plugin.huawei.ces.Query` — Queries metric statistics via `showMetricData`; requires 1 to 3 dimensions (CES mandates at least one, `dim.0`, to identify the resource instance); `window` (default `PT1H`) is converted to `from`/`to` epoch-millisecond bounds ending now; returns `series` sorted by timestamp ascending, capped at `Query.MAX_SERIES_SIZE` (1440) most-recent datapoints to bound memory when `period=RAW`
+- `io.kestra.plugin.huawei.ces.Trigger` — Polling trigger delegating to `Query`; fires when at least one *new* datapoint is found (optionally matching `threshold`/`comparisonOperator`, default `GREATER_THAN`); persists a watermark (last-seen datapoint timestamp) in the flow's namespace KV Store (`runContext.namespaceKv(namespace)`, key `ces_trigger_watermark_<flowId>_<triggerId>`) so overlapping `window`/`interval` combinations never re-fire on the same datapoint
+- `io.kestra.plugin.huawei.ces.AbstractCes` — Base class extending `AbstractConnection`; builds `CesClient` using `CesRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
+- `io.kestra.plugin.huawei.ces.AbstractCesTrigger` — Connection-aware base for CES triggers extending `AbstractTrigger` and implementing `CesConnectionInterface`; holds the shared connection + endpoint properties (mirrors `AbstractObsTrigger`) so `Trigger` (and any future CES trigger) inherits them instead of re-declaring each one
+- `io.kestra.plugin.huawei.ces.CesUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `service.item` namespace format validation (`validateNamespaceFormat`, `validateCustomNamespace`)
+- `io.kestra.plugin.huawei.ces.Dimension` — Shared `name`/`value` pair used by both `Push` (per-metric dimensions) and `Query`/`Trigger` (resource-identifying dimensions), mapped to CES's `dim.0`/`dim.1`/`dim.2` query parameters as `name,value` strings
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -237,6 +248,15 @@ plugin-huawei/
 │   │   └── package-info.java
 │   ├── koocli/
 │   │   ├── KooCLI.java
+│   ├── ces/
+│   │   ├── AbstractCes.java
+│   │   ├── AbstractCesTrigger.java
+│   │   ├── CesConnectionInterface.java
+│   │   ├── CesUtils.java
+│   │   ├── Dimension.java
+│   │   ├── Push.java
+│   │   ├── Query.java
+│   │   ├── Trigger.java
 │   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
@@ -281,6 +301,10 @@ plugin-huawei/
 │   │   └── FunctionGraphUtilsTest.java
 │   ├── koocli/
 │   │   └── KooCLITest.java
+│   ├── ces/
+│   │   ├── CesUtilsTest.java
+│   │   ├── QueryPushTest.java
+│   │   └── TriggerTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -319,6 +343,11 @@ plugin-huawei/
 - FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
 - KooCLI uses `io.kestra:script` (already a compile dependency); no new SDK; default image `ubuntu:26.04` (glibc required, Alpine/musl unsupported). AK/SK, region, and security token are injected as env vars (`HUAWEICLOUD_SDK_AK`/`SK`/`REGION`/`SECURITY_TOKEN`); KooCLI reads none of them from the environment (only CLI flags or a saved profile), so a guarded `hcloud configure set --cli-profile=default` step writes a `default` profile referencing those env vars by shell name (e.g. `--cli-region="$HUAWEICLOUD_SDK_REGION"`) so secret values expand only inside the container, never on argv or in logs. No global output-format param; use `--cli-output=json|table|tsv` per command. Two guarded bootstrap steps prepend the user commands and auto-skip on prebuilt images: (1) `command -v curl || apt-get install ... curl ca-certificates tar`; (2) `command -v hcloud || curl ... | bash -s -- -y`. Each `hcloud` binary is partition-specific: it validates `--cli-region` against a baked-in catalog with no runtime override (not even `--cli-endpoint`), so the install URL is chosen by a 3-tier `resolveInstallScriptUrl(...)`: (1) explicit `installScriptUrl` (`Property<String>`, `null` by default) wins, for HCS/dedicated/future partitions; (2) a known sovereign region in `SOVEREIGN_INSTALL_URLS` (currently `eu-west-101`, its own `myhuaweicloud.eu` binary); (3) otherwise `INTERNATIONAL_INSTALL_URL` (`myhuaweicloud.com`), covering the full standard region catalog plus `eu-west-0`. Standard and EU-sovereign regions are both zero-config; `installScriptUrl` is only for HCS/dedicated/future partitions. `projectId`/`domainId` (inherited from `AbstractConnection`) are not used by KooCLI (documented as no-ops; no verified stable `configure set` flag for them). Integration test gate: `HUAWEI_CLI_TESTS=true`; unit tests run unconditionally
+- CES SDK: `com.huaweicloud.sdk:huaweicloud-sdk-ces` (version managed by `huaweicloud-sdk-bom`); uses `CesClient` (v1) from the SDK; `CesRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
+- CES `showMetricData` requires at least one dimension (`dim.0` is `NON_NULL_NON_EMPTY` at the SDK level); `Query`/`Trigger` enforce 1–3 dimensions accordingly. `createMetricData` (`Push`) does not enforce this, so dimensions stay optional per metric there
+- CES v1 APIs embed the project ID in the request path (`/V1.0/{project_id}/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`, e.g. sovereign clouds like `myhuaweicloud.eu`) bypasses that and leaves `{project_id}` unsubstituted, yielding an opaque gateway 400 (`ces.0047 "URI incorrect."` / APIGW auth errors). `AbstractCes.client()` therefore fails fast requiring `projectId` whenever a custom endpoint is set — applies to `Push`, `Query`, and `Trigger` (which runs through `Query`)
+- CES `Push` always sends `ttl` (default 172800s / 2 days) and `collect_time` (default now); CES marks both mandatory on `createMetricData`, so they are never omitted even when the flow leaves them unset
+- CES integration test gate: `CES_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
 

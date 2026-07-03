@@ -29,7 +29,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Copy an object within or between Huawei OBS buckets.",
+    title = "Copy an object within or between Huawei OBS buckets",
     description = """
         Copies an OBS object from a source bucket/key to a destination bucket/key using a server-side
         copy — no data is transferred through Kestra. Set `delete` to `true` to implement move semantics
@@ -85,18 +85,18 @@ import lombok.experimental.SuperBuilder;
 )
 public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
 
-    @Schema(title = "Source object location.")
+    @Schema(title = "Source object location")
     @NotNull
     @PluginProperty(group = "source")
     private CopyObjectFrom from;
 
-    @Schema(title = "Destination object location.")
+    @Schema(title = "Destination object location")
     @NotNull
     @PluginProperty(group = "destination")
     private CopyObjectTo to;
 
     @Schema(
-        title = "Delete the source object after a successful copy.",
+        title = "Delete the source object after a successful copy",
         description = "When `true`, the task behaves like a move: it copies the object server-side and then " +
             "issues a delete on the source key. The delete only happens if the copy succeeds."
     )
@@ -175,17 +175,17 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Destination bucket.")
+        @Schema(title = "Destination bucket")
         private final String bucket;
 
-        @Schema(title = "Destination object key.")
+        @Schema(title = "Destination object key")
         private final String key;
 
-        @Schema(title = "ETag of the destination object after the copy.")
+        @Schema(title = "ETag of the destination object after the copy")
         private final String eTag;
 
         @Schema(
-            title = "Version ID of the destination object.",
+            title = "Version ID of the destination object",
             description = "Non-null only when bucket versioning is enabled."
         )
         private final String versionId;
@@ -197,18 +197,18 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
     @AllArgsConstructor
     public static class CopyObjectFrom {
 
-        @Schema(title = "Source bucket name.")
+        @Schema(title = "Source bucket name")
         @NotNull
         @PluginProperty(group = "source")
         private Property<String> bucket;
 
-        @Schema(title = "Source object key.")
+        @Schema(title = "Source object key")
         @NotNull
         @PluginProperty(group = "source")
         private Property<String> key;
 
         @Schema(
-            title = "Version ID of the source object.",
+            title = "Version ID of the source object",
             description = "When set, copies the specified version. Only applicable when versioning is enabled."
         )
         @PluginProperty(group = "source")
@@ -221,12 +221,12 @@ public class Copy extends AbstractObs implements RunnableTask<Copy.Output> {
     @AllArgsConstructor
     public static class CopyObjectTo {
 
-        @Schema(title = "Destination bucket name.")
+        @Schema(title = "Destination bucket name")
         @NotNull
         @PluginProperty(group = "destination")
         private Property<String> bucket;
 
-        @Schema(title = "Destination object key.")
+        @Schema(title = "Destination object key")
         @NotNull
         @PluginProperty(group = "destination")
         private Property<String> key;

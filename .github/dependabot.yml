@@ -21,3 +21,12 @@ updates:
     labels:
       - "dependency-upgrade"
     open-pull-requests-limit: 50
+    ignore:
+      # logback-core is force-pinned in build.gradle to match logback-classic 1.3.12
+      # (pinned by the Kestra platform BOM). Bumping it independently breaks the test
+      # JVM (linkage failure surfacing as "AllurePostDiscoveryFilter could not be instantiated").
+      - dependency-name: "ch.qos.logback:logback-core"
+    groups:
+      kestra-gradle-plugins:
+        patterns:
+          - "io.kestra.gradle.*"

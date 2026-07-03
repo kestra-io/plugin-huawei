@@ -23,7 +23,7 @@ import lombok.experimental.SuperBuilder;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Delete a Huawei OBS bucket.",
+    title = "Delete a Huawei OBS bucket",
     description = """
         Deletes an OBS bucket. The bucket must be empty before deletion — OBS does not delete
         non-empty buckets and will return a `BucketNotEmpty` error if objects remain.
@@ -73,7 +73,7 @@ import lombok.experimental.SuperBuilder;
 public class DeleteBucket extends AbstractObs implements RunnableTask<DeleteBucket.Output> {
 
     @Schema(
-        title = "Name of the bucket to delete.",
+        title = "Name of the bucket to delete",
         description = "The bucket must be empty. OBS will refuse deletion and return `BucketNotEmpty` if any objects remain."
     )
     @NotNull
@@ -81,7 +81,7 @@ public class DeleteBucket extends AbstractObs implements RunnableTask<DeleteBuck
     private Property<String> bucket;
 
     @Schema(
-        title = "Whether to fail when the bucket does not exist.",
+        title = "Whether to fail when the bucket does not exist",
         description = """
             When `false` (default), a missing bucket is treated as an idempotent no-op and the task
             succeeds with `deleted: false`. When `true`, the task throws if the bucket is absent
@@ -126,11 +126,11 @@ public class DeleteBucket extends AbstractObs implements RunnableTask<DeleteBuck
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Name of the bucket.")
+        @Schema(title = "Name of the bucket")
         private final String bucket;
 
         @Schema(
-            title = "Whether the bucket was actually deleted.",
+            title = "Whether the bucket was actually deleted",
             description = "`true` if OBS deleted the bucket; `false` if it was already absent and `errorOnMissing` is `false`."
         )
         private final boolean deleted;

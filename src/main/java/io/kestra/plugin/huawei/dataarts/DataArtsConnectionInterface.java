@@ -8,7 +8,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 public interface DataArtsConnectionInterface extends AbstractConnectionInterface {
 
     @Schema(
-        title = "DataArts Studio workspace ID.",
+        title = "DataArts Studio workspace ID",
         description = """
             Identifies the DataArts Studio workspace to target. Required for all DataArts Factory
             operations when your account has multiple workspaces. When omitted, the default workspace
@@ -21,7 +21,7 @@ public interface DataArtsConnectionInterface extends AbstractConnectionInterface
     Property<String> getWorkspaceId();
 
     @Schema(
-        title = "DataArts Studio endpoint URL override.",
+        title = "DataArts Studio endpoint URL override",
         description = """
             Overrides the default endpoint derived from `region`. Use this when running against a
             private endpoint, a non-standard deployment, or in tests.

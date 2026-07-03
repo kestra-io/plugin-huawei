@@ -24,11 +24,11 @@ public interface ActionInterface {
      *       then deleted from the source. Requires {@code moveTo} to be configured.</li>
      * </ul>
      */
-    @Schema(title = "Action to apply to each matched source object after it has been downloaded.")
+    @Schema(title = "Action to apply to each matched source object after it has been downloaded")
     @PluginProperty(group = "processing")
     Property<Action> getAction();
 
-    @Schema(title = "Destination bucket and key-prefix when action is MOVE.")
+    @Schema(title = "Destination bucket and key-prefix when action is MOVE")
     @PluginProperty(group = "processing")
     MoveTo getMoveTo();
 
@@ -43,12 +43,12 @@ public interface ActionInterface {
     @lombok.extern.jackson.Jacksonized
     class MoveTo {
 
-        @Schema(title = "Destination bucket. Defaults to the source bucket when not set.")
+        @Schema(title = "Destination bucket. Defaults to the source bucket when not set")
         @PluginProperty(group = "destination")
         Property<String> bucket;
 
         @Schema(
-            title = "Key prefix prepended to the original object key in the destination.",
+            title = "Key prefix prepended to the original object key in the destination",
             description = """
                 The final destination key is built as `<keyPrefix><originalKey>`. For example, with
                 `keyPrefix: processed/` and a source key `data/file.csv`, the destination key becomes

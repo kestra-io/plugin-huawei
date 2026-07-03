@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Publish messages to a Huawei DMS for Kafka topic.",
+    title = "Publish messages to a Huawei DMS for Kafka topic",
     description = """
         Reads messages from `from` and sends them to the configured topic using the standard Apache Kafka protocol.
         Supports `STRING`, `JSON`, and `BINARY` serializers for both key and value. Each input map may contain
@@ -93,14 +93,14 @@ import java.util.concurrent.atomic.AtomicReference;
 public class Produce extends AbstractDmsKafka implements RunnableTask<Produce.Output>, Data.From {
 
     @Schema(
-        title = "Target Kafka topic.",
+        title = "Target Kafka topic",
         description = "The topic to produce messages to. Can be overridden per record by setting `topic` inside `from`."
     )
     @PluginProperty(group = "main")
     private Property<String> topic;
 
     @Schema(
-        title = "Messages to produce.",
+        title = "Messages to produce",
         description = """
             A single map, a list of maps, or a URI pointing to an ION file in Kestra internal storage.
             Each map may contain: `key`, `value`, `topic` (overrides the task-level topic), `partition`, and `headers`.
@@ -168,7 +168,7 @@ public class Produce extends AbstractDmsKafka implements RunnableTask<Produce.Ou
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Number of records successfully sent to the DMS Kafka topic.")
+        @Schema(title = "Number of records successfully sent to the DMS Kafka topic")
         private final Integer messagesCount;
     }
 }

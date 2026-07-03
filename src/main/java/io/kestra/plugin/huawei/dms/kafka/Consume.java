@@ -41,7 +41,7 @@ import java.util.Map;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Consume messages from a Huawei DMS for Kafka topic.",
+    title = "Consume messages from a Huawei DMS for Kafka topic",
     description = """
         Polls the configured topic until `maxRecords` or `maxDuration` is reached (at least one is required),
         or until the topic is fully drained — whichever comes first. The task stops early when all assigned
@@ -80,13 +80,13 @@ import java.util.Map;
 )
 public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Output> {
 
-    @Schema(title = "Kafka topic to consume from.")
+    @Schema(title = "Kafka topic to consume from")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> topic;
 
     @Schema(
-        title = "Consumer group ID.",
+        title = "Consumer group ID",
         description = "Identifies the consumer group used for offset tracking. Multiple tasks with the same " +
             "group ID share the topic partitions."
     )
@@ -95,7 +95,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     private Property<String> groupId;
 
     @Schema(
-        title = "Stop after consuming this many records.",
+        title = "Stop after consuming this many records",
         description = """
             Upper bound on the number of records to consume. The task may return fewer records if the topic
             is drained before this limit is reached. At least one of `maxRecords` or `maxDuration` must be set.
@@ -105,7 +105,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     private Property<Integer> maxRecords;
 
     @Schema(
-        title = "Stop after this duration has elapsed.",
+        title = "Stop after this duration has elapsed",
         description = "ISO-8601 duration, e.g. `PT30S`. At least one of `maxRecords` or `maxDuration` must be set."
     )
     @PluginProperty(group = "execution")
@@ -113,7 +113,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
 
     @Builder.Default
     @Schema(
-        title = "How long each poll waits for new records.",
+        title = "How long each poll waits for new records",
         description = "ISO-8601 duration, e.g. `PT5S` (default). Shorter values reduce latency; longer values reduce CPU load."
     )
     @PluginProperty(group = "execution")
@@ -226,10 +226,10 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Number of records consumed from the DMS Kafka topic.")
+        @Schema(title = "Number of records consumed from the DMS Kafka topic")
         private final Integer messagesCount;
 
-        @Schema(title = "URI of the ION file in Kestra internal storage containing the consumed messages.")
+        @Schema(title = "URI of the ION file in Kestra internal storage containing the consumed messages")
         private final URI uri;
     }
 }

@@ -19,26 +19,26 @@ import java.util.Map;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class Message implements Output {
 
-    @Schema(title = "Message key, deserialized according to keySerdeType.")
+    @Schema(title = "Message key, deserialized according to keySerdeType")
     private final Object key;
 
-    @Schema(title = "Message value, deserialized according to valueSerdeType.")
+    @Schema(title = "Message value, deserialized according to valueSerdeType")
     private final Object value;
 
-    @Schema(title = "Kafka topic the message was consumed from.")
+    @Schema(title = "Kafka topic the message was consumed from")
     private final String topic;
 
-    @Schema(title = "Partition the message was stored in.")
+    @Schema(title = "Partition the message was stored in")
     private final Integer partition;
 
-    @Schema(title = "Offset of this message within its partition.")
+    @Schema(title = "Offset of this message within its partition")
     private final Long offset;
 
-    @Schema(title = "Timestamp assigned by the broker when the message was stored.")
+    @Schema(title = "Timestamp assigned by the broker when the message was stored")
     private final Instant timestamp;
 
     @Schema(
-        title = "Kafka headers attached to the message.",
+        title = "Kafka headers attached to the message",
         description = "Each entry is a key/value pair; the value is a UTF-8 decoded string."
     )
     private final List<Map.Entry<String, String>> headers;

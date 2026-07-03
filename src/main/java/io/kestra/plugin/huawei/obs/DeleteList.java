@@ -30,7 +30,7 @@ import java.util.List;
 @Getter
 @NoArgsConstructor
 @Schema(
-    title = "Delete all OBS objects matching a filter.",
+    title = "Delete all OBS objects matching a filter",
     description = """
         Lists objects matching the prefix/regexp filter (reusing the same logic as the `List` task) and
         batch-deletes them in chunks of up to 1000 (the OBS multi-object delete limit). By default the
@@ -74,7 +74,7 @@ import java.util.List;
                     region: "eu-west-101"
                     bucket: "my-bucket"
                     prefix: "reports/"
-                    regexp: ".*_stale\\.csv"
+                    regexp: '.*_stale\\.csv'
                     errorOnEmpty: true
                 """
         )
@@ -104,7 +104,7 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
     private Property<String> regexp;
 
     @Schema(
-        title = "Fail the task when no objects match the filter.",
+        title = "Fail the task when no objects match the filter",
         description = "When `true`, the task throws an exception if the listing returns zero matching objects. " +
             "Useful to catch misconfigured filters in production workflows."
     )
@@ -113,7 +113,7 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
     private Property<Boolean> errorOnEmpty = Property.ofValue(false);
 
     @Schema(
-        title = "Fail the task when OBS reports any per-object delete error.",
+        title = "Fail the task when OBS reports any per-object delete error",
         description = "When `true` (the default), the task throws after attempting every batch if OBS " +
             "returned one or more error results, so a partial failure cannot be silently swallowed. " +
             "Set to `false` for best-effort deletion: failures are logged as warnings and counted in the " +
@@ -216,14 +216,14 @@ public class DeleteList extends AbstractObsObject implements RunnableTask<Delete
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Number of objects successfully deleted.")
+        @Schema(title = "Number of objects successfully deleted")
         private final long count;
 
-        @Schema(title = "Total size in bytes of all deleted objects.")
+        @Schema(title = "Total size in bytes of all deleted objects")
         private final long size;
 
         @Schema(
-            title = "Number of objects OBS reported as failed to delete.",
+            title = "Number of objects OBS reported as failed to delete",
             description = "Always `0` when `errorOnFailure=true` (the task throws instead). With " +
                 "`errorOnFailure=false` this lets the caller detect partial failures programmatically."
         )
