@@ -33,7 +33,7 @@ Infrastructure dependencies (Docker Compose services):
 - `app` (`docker-compose.yml`) — Kestra application for manual plugin testing
 - `minio` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
 - `kafka` (`docker-compose-ci.yml`) — KRaft-mode Kafka broker for DMS Kafka integration tests (port 9092, no auth)
-- `rocketmq-namesrv` / `rocketmq-broker` (`docker-compose-ci.yml`) — Apache RocketMQ 4.9.8 for DMS RocketMQ integration tests (namesrv port 9876, broker port 10911)
+- `rocketmq-namesrv` / `rocketmq-broker` (`docker-compose-ci.yml`) — Apache RocketMQ 4.9.4 for DMS RocketMQ integration tests (namesrv port 9876, broker port 10911); the 5.5.0 client is backward-compatible with the 4.x broker
 
 ### Key Plugin Classes
 
@@ -336,7 +336,7 @@ plugin-huawei/
 - IAM tests use WireMock (`org.wiremock:wiremock-jetty12`) with `withEndpoint()` override to avoid network calls; production code uses `IamRegion.valueOf(region)` for endpoint resolution
 - `TemporaryCredentialsConfig` uses field name `iamToken` (not `token`) to avoid clashing with the existing `securityToken` connection property; `GetTemporaryCredentials` keeps its public field named `token` for backward compatibility and maps it to `iamToken` when building the config
 - DMS Kafka uses `org.apache.kafka:kafka-clients:3.9.0` (standard Kafka wire protocol; no Huawei SDK)
-- DMS RocketMQ uses `org.apache.rocketmq:rocketmq-client:4.9.8` + `rocketmq-acl:4.9.8`; AK/SK passed via `AclClientRPCHook`; logback/slf4j excluded
+- DMS RocketMQ uses `org.apache.rocketmq:rocketmq-client:5.5.0`; AK/SK passed via `AclClientRPCHook`; logback/slf4j excluded. The former standalone `rocketmq-acl` module (`AclClientRPCHook`, `SessionCredentials`) was folded into `rocketmq-client` from 5.4.0 onward and is no longer published separately, so no `rocketmq-acl` dependency is declared
 - DMS Kafka integration test gate: `DMS_KAFKA_TESTS=true`; DMS RocketMQ gate: `DMS_ROCKETMQ_TESTS=true`
 - DataArts Studio SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dataartsstudio` (version managed by `huaweicloud-sdk-bom`); used for the SDK core's `AKSKSigner` only — the DLF job-lifecycle V1 APIs are called via JDK `HttpClient` with signed headers
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
