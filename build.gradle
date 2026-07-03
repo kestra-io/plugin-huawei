@@ -38,6 +38,16 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add("-parameters")
 }
 
+// RocketMQ 5.4+ ships LZ4 via the republished fork `at.yawk.lz4:lz4-java`, while Kafka still pulls the
+// original `org.lz4:lz4-java`. Both declare the same `org.lz4:lz4-java` capability, which Gradle cannot
+// auto-resolve, so it fails the build. The fork is an API-compatible republish of the same `net.jpountz`
+// code, so selecting the highest version satisfies both consumers.
+configurations.all {
+    resolutionStrategy.capabilitiesResolution.withCapability("org.lz4:lz4-java") {
+        selectHighestVersion()
+    }
+}
+
 dependencies {
     // Platform
     annotationProcessor enforcedPlatform("io.kestra:platform:$kestraVersion")
