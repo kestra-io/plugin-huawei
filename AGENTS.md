@@ -25,6 +25,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
+- `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -82,6 +83,16 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.functiongraph.AbstractFunctionGraph` — Base class extending `AbstractConnection`; builds `FunctionGraphClient` using `FunctionGraphRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); supports `endpointSuffix` for EU sovereign cloud (`myhuaweicloud.eu`)
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphInvokeException` — Unchecked exception for function-level and HTTP-level invocation failures
+
+**CES (Cloud Eye Service)**
+
+- `io.kestra.plugin.huawei.ces.Push` — Pushes custom metric datapoints via `createMetricData`; namespace must NOT use the reserved `SYS.` prefix; chunks batches over 10 datapoints (CES per-request cap)
+- `io.kestra.plugin.huawei.ces.Query` — Queries metric statistics via `showMetricData`; requires 1 to 3 dimensions (CES mandates at least one, `dim.0`, to identify the resource instance); `window` (default `PT1H`) is converted to `from`/`to` epoch-millisecond bounds ending now; returns `series` sorted by timestamp ascending, capped at `Query.MAX_SERIES_SIZE` (1440) most-recent datapoints to bound memory when `period=RAW`
+- `io.kestra.plugin.huawei.ces.Trigger` — Polling trigger delegating to `Query`; fires when at least one *new* datapoint is found (optionally matching `threshold`/`comparisonOperator`, default `GREATER_THAN`); persists a watermark (last-seen datapoint timestamp) in the flow's namespace KV Store (`runContext.namespaceKv(namespace)`, key `ces_trigger_watermark_<flowId>_<triggerId>`) so overlapping `window`/`interval` combinations never re-fire on the same datapoint
+- `io.kestra.plugin.huawei.ces.AbstractCes` — Base class extending `AbstractConnection`; builds `CesClient` using `CesRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
+- `io.kestra.plugin.huawei.ces.AbstractCesTrigger` — Connection-aware base for CES triggers extending `AbstractTrigger` and implementing `CesConnectionInterface`; holds the shared connection + endpoint properties (mirrors `AbstractObsTrigger`) so `Trigger` (and any future CES trigger) inherits them instead of re-declaring each one
+- `io.kestra.plugin.huawei.ces.CesUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `service.item` namespace format validation (`validateNamespaceFormat`, `validateCustomNamespace`)
+- `io.kestra.plugin.huawei.ces.Dimension` — Shared `name`/`value` pair used by both `Push` (per-metric dimensions) and `Query`/`Trigger` (resource-identifying dimensions), mapped to CES's `dim.0`/`dim.1`/`dim.2` query parameters as `name,value` strings
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -230,6 +241,16 @@ plugin-huawei/
 │   │   ├── FunctionGraphUtils.java
 │   │   ├── Invoke.java
 │   │   └── package-info.java
+│   ├── ces/
+│   │   ├── AbstractCes.java
+│   │   ├── AbstractCesTrigger.java
+│   │   ├── CesConnectionInterface.java
+│   │   ├── CesUtils.java
+│   │   ├── Dimension.java
+│   │   ├── Push.java
+│   │   ├── Query.java
+│   │   ├── Trigger.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -271,6 +292,10 @@ plugin-huawei/
 │   ├── functiongraph/
 │   │   ├── FunctionGraphInvokeTest.java
 │   │   └── FunctionGraphUtilsTest.java
+│   ├── ces/
+│   │   ├── CesUtilsTest.java
+│   │   ├── QueryPushTest.java
+│   │   └── TriggerTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -308,6 +333,11 @@ plugin-huawei/
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
 - FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
+- CES SDK: `com.huaweicloud.sdk:huaweicloud-sdk-ces` (version managed by `huaweicloud-sdk-bom`); uses `CesClient` (v1) from the SDK; `CesRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
+- CES `showMetricData` requires at least one dimension (`dim.0` is `NON_NULL_NON_EMPTY` at the SDK level); `Query`/`Trigger` enforce 1–3 dimensions accordingly. `createMetricData` (`Push`) does not enforce this, so dimensions stay optional per metric there
+- CES v1 APIs embed the project ID in the request path (`/V1.0/{project_id}/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`, e.g. sovereign clouds like `myhuaweicloud.eu`) bypasses that and leaves `{project_id}` unsubstituted, yielding an opaque gateway 400 (`ces.0047 "URI incorrect."` / APIGW auth errors). `AbstractCes.client()` therefore fails fast requiring `projectId` whenever a custom endpoint is set — applies to `Push`, `Query`, and `Trigger` (which runs through `Query`)
+- CES `Push` always sends `ttl` (default 172800s / 2 days) and `collect_time` (default now); CES marks both mandatory on `createMetricData`, so they are never omitted even when the flow leaves them unset
+- CES integration test gate: `CES_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
 

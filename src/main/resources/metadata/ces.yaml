@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.ces
+name: "ces"
+title: "CES"
+description: "Tasks for Huawei Cloud CES: push custom metrics, query metric statistics, and trigger flows on metric datapoints."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
