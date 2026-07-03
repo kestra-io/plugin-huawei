@@ -32,15 +32,35 @@ public abstract class AbstractCes extends AbstractConnection implements CesConne
         var creds = buildCredentials(config);
         var builder = CesClient.newBuilder().withCredential(creds);
 
+        var customEndpoint = (rOverride != null && !rOverride.isBlank()) || (rSuffix != null && !rSuffix.isBlank());
+
+        if (customEndpoint && (config.projectId() == null || config.projectId().isBlank())) {
+            // The CES v1 APIs embed the project id in the request path (`/V1.0/{project_id}/...`). When the
+            // SDK resolves the endpoint from its region enum it can auto-discover the project, but a custom
+            // endpoint (endpointOverride or endpointSuffix — e.g. sovereign clouds) bypasses that, leaving
+            // `{project_id}` unsubstituted and the gateway rejecting the call with an opaque 400
+            // (APIGW / ces.0047 "URI incorrect."). Fail fast with an actionable message instead.
+            throw new IllegalArgumentException(
+                "CES requires `projectId` when a custom endpoint (`endpointOverride` or `endpointSuffix`) is used — " +
+                "set the 'projectId' property to your Huawei Cloud project ID for the target region " +
+                "(found in the console under 'My Credentials' → 'API Credentials').");
+        }
+
         if (rOverride != null && !rOverride.isBlank()) {
             builder.withEndpoint(CesUtils.stripTrailingSlash(rOverride.trim()));
         } else if (rRegion != null && !rRegion.isBlank()) {
-            // Fall back to endpoint derivation for regions not yet in the SDK enum (e.g. newly added sovereign-cloud regions).
-            try {
-                builder.withRegion(CesRegion.valueOf(rRegion));
-            } catch (IllegalArgumentException e) {
-                var derivedEndpoint = CesUtils.cesEndpoint(null, rRegion, rSuffix);
-                builder.withEndpoint(derivedEndpoint);
+            // An explicit endpointSuffix forces suffix-derived resolution even for regions present in the SDK
+            // enum: the enum hard-codes the `.myhuaweicloud.com` domain, which is wrong for sovereign clouds
+            // (e.g. `myhuaweicloud.eu`). Without a suffix, prefer the SDK enum and fall back to derivation only
+            // for regions not yet in it (e.g. newly added regions).
+            if (rSuffix != null && !rSuffix.isBlank()) {
+                builder.withEndpoint(CesUtils.cesEndpoint(null, rRegion, rSuffix));
+            } else {
+                try {
+                    builder.withRegion(CesRegion.valueOf(rRegion));
+                } catch (IllegalArgumentException e) {
+                    builder.withEndpoint(CesUtils.cesEndpoint(null, rRegion, null));
+                }
             }
         } else {
             throw new IllegalArgumentException(

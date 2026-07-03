@@ -101,7 +101,10 @@ class QueryPushTest {
         wireMock.verify(postRequestedFor(urlMatching(".*/metric-data"))
             .withRequestBody(WireMock.matchingJsonPath("$[0].metric.namespace", WireMock.equalTo("MyApp.Custom")))
             .withRequestBody(WireMock.matchingJsonPath("$[0].metric.metric_name", WireMock.equalTo("queue_depth")))
-            .withRequestBody(WireMock.matchingJsonPath("$[0].metric.dimensions[0].name", WireMock.equalTo("queue_name"))));
+            .withRequestBody(WireMock.matchingJsonPath("$[0].metric.dimensions[0].name", WireMock.equalTo("queue_name")))
+            // CES marks ttl and collect_time as mandatory; they must be sent even when the flow omits them.
+            .withRequestBody(WireMock.matchingJsonPath("$[0].ttl"))
+            .withRequestBody(WireMock.matchingJsonPath("$[0].collect_time")));
     }
 
     @Test
@@ -124,6 +127,28 @@ class QueryPushTest {
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), is(containsString("SYS.")));
+    }
+
+    @Test
+    void customEndpointWithoutProjectId_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Push.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            // no projectId — a custom endpoint bypasses the SDK's automatic project discovery
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .namespace(Property.ofValue("MyApp.Custom"))
+            .metrics(Property.ofValue(List.of(
+                Push.MetricValue.builder()
+                    .metricName(Property.ofValue("queue_depth"))
+                    .value(Property.ofValue(42.0))
+                    .build()
+            )))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("projectId")));
     }
 
     @Test

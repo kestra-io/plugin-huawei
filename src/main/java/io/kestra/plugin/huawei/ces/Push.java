@@ -84,6 +84,9 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
     // CES caps a single createMetricData request at 10 datapoints.
     private static final int MAX_BATCH_SIZE = 10;
 
+    // CES marks `ttl` (data validity period, 1–604800s) as mandatory; default to 2 days when unset.
+    private static final int DEFAULT_TTL_SECONDS = 172800;
+
     @Schema(
         title = "Metric namespace",
         description = """
@@ -142,8 +145,10 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
                 .orElseThrow(() -> new IllegalArgumentException("metrics[].value is required for metric '" + rMetricName + "'"));
             var rUnit = runContext.render(metric.getUnit()).as(String.class).orElse(null);
             var rType = runContext.render(metric.getType()).as(String.class).orElse("float");
-            var rCollectTime = runContext.render(metric.getCollectTime()).as(Long.class).orElse(null);
-            var rTtl = runContext.render(metric.getTtl()).as(Integer.class).orElse(null);
+            // CES requires both collect_time and ttl on every datapoint. Default collect_time to now
+            // (which sits inside CES's accepted [now-3d, now+10min] window) and ttl to DEFAULT_TTL_SECONDS.
+            var rCollectTime = runContext.render(metric.getCollectTime()).as(Long.class).orElse(System.currentTimeMillis());
+            var rTtl = runContext.render(metric.getTtl()).as(Integer.class).orElse(DEFAULT_TTL_SECONDS);
 
             var sdkDimensions = new ArrayList<MetricsDimension>(rDimensions.size());
             for (var d : rDimensions) {
@@ -161,13 +166,9 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
                 .withMetric(metricInfo)
                 .withValue(rValue)
                 .withUnit(rUnit)
-                .withType(rType);
-            if (rCollectTime != null) {
-                body.withCollectTime(rCollectTime);
-            }
-            if (rTtl != null) {
-                body.withTtl(rTtl);
-            }
+                .withType(rType)
+                .withCollectTime(rCollectTime)
+                .withTtl(rTtl);
             return body;
         } catch (Exception e) {
             throw new IllegalArgumentException("Invalid metric in 'metrics': " + e.getMessage(), e);
@@ -228,14 +229,14 @@ public class Push extends AbstractCes implements RunnableTask<Push.Output> {
 
         @Schema(
             title = "Collection time (epoch milliseconds)",
-            description = "When the datapoint was collected. Defaults to the current time when omitted."
+            description = "When the datapoint was collected. CES requires this field and accepts values within roughly [now - 3 days, now + 10 minutes]; defaults to the current time when omitted."
         )
         @PluginProperty(group = "advanced")
         Property<Long> collectTime;
 
         @Schema(
-            title = "Time-to-live in seconds",
-            description = "How long CES retains this datapoint before it is eligible for aggregation into a lower resolution. Optional."
+            title = "Time-to-live (data validity period) in seconds",
+            description = "How long CES treats this datapoint as valid, 1–604800s. CES requires this field; defaults to 172800 (2 days) when omitted."
         )
         @PluginProperty(group = "advanced")
         Property<Integer> ttl;

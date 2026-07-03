@@ -50,6 +50,11 @@ import java.util.Optional;
 
         The trigger outputs the same structure as the `Query` task, containing only the new datapoints
         that fired this execution.
+
+        On sovereign clouds (e.g. the EU `myhuaweicloud.eu` domain) set `endpointOverride` (or
+        `endpointSuffix`) to reach the correct endpoint, and additionally set `projectId` — the CES v1
+        API embeds the project ID in the request path, and a custom endpoint bypasses the SDK's
+        automatic project discovery.
         """
 )
 @Plugin(

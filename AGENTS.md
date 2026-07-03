@@ -333,6 +333,8 @@ plugin-huawei/
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
 - CES SDK: `com.huaweicloud.sdk:huaweicloud-sdk-ces` (version managed by `huaweicloud-sdk-bom`); uses `CesClient` (v1) from the SDK; `CesRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - CES `showMetricData` requires at least one dimension (`dim.0` is `NON_NULL_NON_EMPTY` at the SDK level); `Query`/`Trigger` enforce 1–3 dimensions accordingly. `createMetricData` (`Push`) does not enforce this, so dimensions stay optional per metric there
+- CES v1 APIs embed the project ID in the request path (`/V1.0/{project_id}/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`, e.g. sovereign clouds like `myhuaweicloud.eu`) bypasses that and leaves `{project_id}` unsubstituted, yielding an opaque gateway 400 (`ces.0047 "URI incorrect."` / APIGW auth errors). `AbstractCes.client()` therefore fails fast requiring `projectId` whenever a custom endpoint is set — applies to `Push`, `Query`, and `Trigger` (which runs through `Query`)
+- CES `Push` always sends `ttl` (default 172800s / 2 days) and `collect_time` (default now); CES marks both mandatory on `createMetricData`, so they are never omitted even when the flow leaves them unset
 - CES integration test gate: `CES_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
