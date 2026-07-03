@@ -25,6 +25,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
+- `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 - `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 
 Infrastructure dependencies (Docker Compose services):
@@ -83,6 +84,10 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.functiongraph.AbstractFunctionGraph` — Base class extending `AbstractConnection`; builds `FunctionGraphClient` using `FunctionGraphRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); supports `endpointSuffix` for EU sovereign cloud (`myhuaweicloud.eu`)
 - `io.kestra.plugin.huawei.functiongraph.FunctionGraphInvokeException` — Unchecked exception for function-level and HTTP-level invocation failures
+
+**KooCLI**
+
+- `io.kestra.plugin.huawei.koocli.KooCLI` — Runs arbitrary `hcloud` CLI commands in a container (default `ubuntu:26.04`); injects AK/SK, region, and security token as env vars, then writes a `default` profile via a guarded `hcloud configure set` step that references them by shell name so secrets never reach argv or logs; auto-installs `hcloud` when absent (two guarded bootstrap steps: curl, then the install script chosen by the 3-tier `resolveInstallScriptUrl(...)`); supports `temporaryCredentials` inline exchange; returns `ScriptOutput` with `vars`, `outputFiles`, `exitCode`
 
 **CES (Cloud Eye Service)**
 
@@ -241,6 +246,8 @@ plugin-huawei/
 │   │   ├── FunctionGraphUtils.java
 │   │   ├── Invoke.java
 │   │   └── package-info.java
+│   ├── koocli/
+│   │   ├── KooCLI.java
 │   ├── ces/
 │   │   ├── AbstractCes.java
 │   │   ├── AbstractCesTrigger.java
@@ -292,6 +299,8 @@ plugin-huawei/
 │   ├── functiongraph/
 │   │   ├── FunctionGraphInvokeTest.java
 │   │   └── FunctionGraphUtilsTest.java
+│   ├── koocli/
+│   │   └── KooCLITest.java
 │   ├── ces/
 │   │   ├── CesUtilsTest.java
 │   │   ├── QueryPushTest.java
@@ -333,6 +342,7 @@ plugin-huawei/
 - DataArts Studio integration test gate: `DATAARTS_TESTS=true`; WireMock-based unit tests run unconditionally
 - FunctionGraph SDK: `com.huaweicloud.sdk:huaweicloud-sdk-functiongraph` (version managed by `huaweicloud-sdk-bom`); uses `FunctionGraphClient` from the SDK; `FunctionGraphRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - FunctionGraph integration test gate: `FUNCTIONGRAPH_TESTS=true`; WireMock-based unit tests run unconditionally
+- KooCLI uses `io.kestra:script` (already a compile dependency); no new SDK; default image `ubuntu:26.04` (glibc required, Alpine/musl unsupported). AK/SK, region, and security token are injected as env vars (`HUAWEICLOUD_SDK_AK`/`SK`/`REGION`/`SECURITY_TOKEN`); KooCLI reads none of them from the environment (only CLI flags or a saved profile), so a guarded `hcloud configure set --cli-profile=default` step writes a `default` profile referencing those env vars by shell name (e.g. `--cli-region="$HUAWEICLOUD_SDK_REGION"`) so secret values expand only inside the container, never on argv or in logs. No global output-format param; use `--cli-output=json|table|tsv` per command. Two guarded bootstrap steps prepend the user commands and auto-skip on prebuilt images: (1) `command -v curl || apt-get install ... curl ca-certificates tar`; (2) `command -v hcloud || curl ... | bash -s -- -y`. Each `hcloud` binary is partition-specific: it validates `--cli-region` against a baked-in catalog with no runtime override (not even `--cli-endpoint`), so the install URL is chosen by a 3-tier `resolveInstallScriptUrl(...)`: (1) explicit `installScriptUrl` (`Property<String>`, `null` by default) wins, for HCS/dedicated/future partitions; (2) a known sovereign region in `SOVEREIGN_INSTALL_URLS` (currently `eu-west-101`, its own `myhuaweicloud.eu` binary); (3) otherwise `INTERNATIONAL_INSTALL_URL` (`myhuaweicloud.com`), covering the full standard region catalog plus `eu-west-0`. Standard and EU-sovereign regions are both zero-config; `installScriptUrl` is only for HCS/dedicated/future partitions. `projectId`/`domainId` (inherited from `AbstractConnection`) are not used by KooCLI (documented as no-ops; no verified stable `configure set` flag for them). Integration test gate: `HUAWEI_CLI_TESTS=true`; unit tests run unconditionally
 - CES SDK: `com.huaweicloud.sdk:huaweicloud-sdk-ces` (version managed by `huaweicloud-sdk-bom`); uses `CesClient` (v1) from the SDK; `CesRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones
 - CES `showMetricData` requires at least one dimension (`dim.0` is `NON_NULL_NON_EMPTY` at the SDK level); `Query`/`Trigger` enforce 1–3 dimensions accordingly. `createMetricData` (`Push`) does not enforce this, so dimensions stay optional per metric there
 - CES v1 APIs embed the project ID in the request path (`/V1.0/{project_id}/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`, e.g. sovereign clouds like `myhuaweicloud.eu`) bypasses that and leaves `{project_id}` unsubstituted, yielding an opaque gateway 400 (`ces.0047 "URI incorrect."` / APIGW auth errors). `AbstractCes.client()` therefore fails fast requiring `projectId` whenever a custom endpoint is set — applies to `Push`, `Query`, and `Trigger` (which runs through `Query`)
