@@ -25,7 +25,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dataarts` — DataArts Studio tasks (`AbstractDataArts`, `DataArtsConnectionInterface`, `DataArtsUtils`, `DataArtsService`, `StartJobRun`, `GetJobRun`, `StopJobRun`)
 - `io.kestra.plugin.huawei.dataarts.models` — DataArts output models (`JobRun`)
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
-- `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
+- `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -90,6 +90,7 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.ces.Query` — Queries metric statistics via `showMetricData`; requires 1 to 3 dimensions (CES mandates at least one, `dim.0`, to identify the resource instance); `window` (default `PT1H`) is converted to `from`/`to` epoch-millisecond bounds ending now; returns `series` sorted by timestamp ascending, capped at `Query.MAX_SERIES_SIZE` (1440) most-recent datapoints to bound memory when `period=RAW`
 - `io.kestra.plugin.huawei.ces.Trigger` — Polling trigger delegating to `Query`; fires when at least one *new* datapoint is found (optionally matching `threshold`/`comparisonOperator`, default `GREATER_THAN`); persists a watermark (last-seen datapoint timestamp) in the flow's namespace KV Store (`runContext.namespaceKv(namespace)`, key `ces_trigger_watermark_<flowId>_<triggerId>`) so overlapping `window`/`interval` combinations never re-fire on the same datapoint
 - `io.kestra.plugin.huawei.ces.AbstractCes` — Base class extending `AbstractConnection`; builds `CesClient` using `CesRegion.valueOf(region)` (with fallback to `withEndpoint` for unknown regions) or direct `endpointOverride`; validates AK/SK completeness
+- `io.kestra.plugin.huawei.ces.AbstractCesTrigger` — Connection-aware base for CES triggers extending `AbstractTrigger` and implementing `CesConnectionInterface`; holds the shared connection + endpoint properties (mirrors `AbstractObsTrigger`) so `Trigger` (and any future CES trigger) inherits them instead of re-declaring each one
 - `io.kestra.plugin.huawei.ces.CesUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `service.item` namespace format validation (`validateNamespaceFormat`, `validateCustomNamespace`)
 - `io.kestra.plugin.huawei.ces.Dimension` — Shared `name`/`value` pair used by both `Push` (per-metric dimensions) and `Query`/`Trigger` (resource-identifying dimensions), mapped to CES's `dim.0`/`dim.1`/`dim.2` query parameters as `name,value` strings
 
@@ -242,6 +243,7 @@ plugin-huawei/
 │   │   └── package-info.java
 │   ├── ces/
 │   │   ├── AbstractCes.java
+│   │   ├── AbstractCesTrigger.java
 │   │   ├── CesConnectionInterface.java
 │   │   ├── CesUtils.java
 │   │   ├── Dimension.java

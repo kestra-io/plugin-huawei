@@ -6,7 +6,6 @@ import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.conditions.ConditionContext;
 import io.kestra.core.models.executions.Execution;
 import io.kestra.core.models.property.Property;
-import io.kestra.core.models.triggers.AbstractTrigger;
 import io.kestra.core.models.triggers.PollingTriggerInterface;
 import io.kestra.core.models.triggers.TriggerContext;
 import io.kestra.core.models.triggers.TriggerOutput;
@@ -15,7 +14,6 @@ import io.kestra.core.storages.kv.KVMetadata;
 import io.kestra.core.storages.kv.KVStore;
 import io.kestra.core.storages.kv.KVValue;
 import io.kestra.core.storages.kv.KVValueAndMetadata;
-import io.kestra.plugin.huawei.TemporaryCredentialsConfig;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -33,7 +31,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 @SuperBuilder
-@ToString(exclude = {"accessKeyId", "secretAccessKey", "securityToken", "temporaryCredentials"})
+@ToString
 @EqualsAndHashCode
 @Getter
 @NoArgsConstructor
@@ -121,21 +119,11 @@ import java.util.Optional;
         )
     }
 )
-public class Trigger extends AbstractTrigger
-    implements PollingTriggerInterface, TriggerOutput<Query.Output>, CesConnectionInterface {
+public class Trigger extends AbstractCesTrigger
+    implements PollingTriggerInterface, TriggerOutput<Query.Output> {
 
     private static final String WATERMARK_DESCRIPTION =
         "CES Trigger watermark — timestamp (epoch milliseconds) of the most recent datapoint already fired, used to avoid re-firing on overlapping poll windows.";
-
-    private Property<String> accessKeyId;
-    private Property<String> secretAccessKey;
-    private Property<String> securityToken;
-    private Property<String> projectId;
-    private Property<String> domainId;
-    private Property<String> region;
-    private Property<TemporaryCredentialsConfig> temporaryCredentials;
-    private Property<String> endpointOverride;
-    private Property<String> endpointSuffix;
 
     @Schema(title = "Metric namespace")
     @NotNull
