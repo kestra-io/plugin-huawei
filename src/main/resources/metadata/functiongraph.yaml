@@ -1,6 +1,6 @@
 group: io.kestra.plugin.huawei.functiongraph
 name: "functiongraph"
-title: "FunctionGraph"
+title: "Huawei FunctionGraph"
 description: "Tasks for Huawei Cloud FunctionGraph: synchronously invoke serverless functions and capture their responses."
 body: ""
 videos: []

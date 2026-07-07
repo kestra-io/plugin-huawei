@@ -1,6 +1,6 @@
 group: io.kestra.plugin.huawei.obs
 name: "obs"
-title: "OBS"
+title: "Huawei OBS"
 description: "Object- and bucket-level tasks for Huawei Cloud Object Storage Service (OBS): upload, download, list, copy, delete, batch-delete, create and delete buckets, and trigger flows on new objects."
 body: ""
 videos: []
