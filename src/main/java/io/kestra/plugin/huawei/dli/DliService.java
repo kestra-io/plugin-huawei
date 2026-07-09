@@ -1,5 +1,6 @@
 package io.kestra.plugin.huawei.dli;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.dli.v1.DliClient;
@@ -184,6 +185,10 @@ final class DliService {
      * Downloads every object exported under {@code bucket}/{@code prefix} (the export job may split
      * the result into multiple part files), parses each line as a JSON row, and re-serializes all rows
      * as ION into Kestra internal storage. Returns the row count written.
+     *
+     * <p>{@code prefix} must already be scoped to the export job that produced it (see
+     * {@link #scopedExportPath}) — listing an unscoped, reused prefix would risk mixing or
+     * clobbering another run's result data.
      */
     static long readExportedRowsToIon(
         ObsClient obs,
@@ -203,13 +208,36 @@ final class DliService {
                     if (line.isBlank()) {
                         continue;
                     }
-                    var row = JacksonMapper.ofJson().readValue(line, Map.class);
+                    Map<?, ?> row;
+                    try {
+                        row = JacksonMapper.ofJson().readValue(line, Map.class);
+                    } catch (JsonProcessingException e) {
+                        throw new IllegalStateException(
+                            "Failed to parse exported DLI result row as JSON from obs://" + bucket + "/" +
+                            obj.getKey() + " — the export may be incomplete or corrupted: " + e.getMessage(), e);
+                    }
                     FileSerde.write(ionOutput, row);
                     count[0]++;
                 }
             }
         });
         return count[0];
+    }
+
+    /**
+     * Scopes the user-declared {@code outputLocation} to a run-unique subpath (the DLI query job
+     * ID, unique per submission) so concurrent or repeated runs against the same
+     * {@code outputLocation} never mix or clobber each other's exported result data, even with
+     * {@code export_mode=Overwrite}.
+     *
+     * <p>The flow's declared {@code outputLocation} is still honored as the parent path; only the
+     * scoped subpath is actually written to and read back from.
+     */
+    static String scopedExportPath(String outputLocation, String jobId) {
+        var trimmed = outputLocation.endsWith("/")
+            ? outputLocation.substring(0, outputLocation.length() - 1)
+            : outputLocation;
+        return trimmed + "/" + jobId + "/";
     }
 
     /** Splits an {@code obs://bucket/key/prefix} URI into its bucket and key-prefix parts. */

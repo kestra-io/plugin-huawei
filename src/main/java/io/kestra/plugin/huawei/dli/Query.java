@@ -235,13 +235,19 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
     private Property<AuthType> obsAuthType = Property.ofValue(AuthType.OBS);
 
     // Guards against a duplicate/racing kill signal; cancels the remote DLI job so it stops consuming
-    // queue resources after the Kestra execution is killed.
+    // queue resources after the Kestra execution is killed. Excluded from equals/hashCode/toString:
+    // AtomicReference/AtomicBoolean use identity equality, so two otherwise-identical task instances
+    // would never be equal, and their content is a runtime implementation detail, not task config.
     @Builder.Default
     @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private final AtomicReference<Runnable> killable = new AtomicReference<>();
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private final AtomicBoolean isKilled = new AtomicBoolean(false);
 
     @Override
@@ -276,7 +282,9 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         logger.info("DLI job '{}' finished with status={}", jobId, status.getStatus());
         recordDurationMetric(runContext, status);
 
-        var jobType = status.getJobType() != null ? status.getJobType().getValue() : null;
+        // Derived from `submitted` (not `status`) so the output value and the QUERY decision below
+        // always agree — the two responses use distinct JobTypeEnum classes for the same concept.
+        var jobType = submitted.getJobType() != null ? submitted.getJobType().getValue() : null;
         var isQuery = submitted.getJobType() == CreateSqlJobResponse.JobTypeEnum.QUERY;
 
         if (rFetchType == FetchType.NONE || !isQuery) {
@@ -307,7 +315,7 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         String jobType, ShowSqlJobStatusResponse status, CreateSqlJobResponse submitted
     ) {
         var rows = resolveRows(runContext, client, jobId, queue, submitted);
-        var row = rows.isEmpty() ? null : rows.get(0);
+        var row = rows.isEmpty() ? null : rows.getFirst();
         runContext.metric(Counter.of("dli.query.rows", row != null ? 1 : 0));
         return Output.builder().jobId(jobId).jobType(jobType).status(status.getStatus().getValue())
             .row(row).size(row != null ? 1L : 0L).build();
@@ -335,15 +343,18 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         String outputLocationUri, String jobType, ShowSqlJobStatusResponse status,
         Duration remainingDuration, Duration pollInterval
     ) throws Exception {
-        var parsedOutput = DliService.parseObsUri(outputLocationUri);
+        // Scoped to the query jobId (unique per submission) so concurrent or repeated runs against
+        // the same outputLocation never mix or clobber each other's exported result data.
+        var scopedOutputLocation = DliService.scopedExportPath(outputLocationUri, jobId);
+        var parsedOutput = DliService.parseObsUri(scopedOutputLocation);
         var bucket = parsedOutput[0];
         var prefix = parsedOutput[1];
 
-        var exportResponse = DliService.submitExport(client, jobId, outputLocationUri, queue);
+        var exportResponse = DliService.submitExport(client, jobId, scopedOutputLocation, queue);
         var exportJobId = exportResponse.getJobId();
         killable.set(() -> DliService.cancelQuietly(client, exportJobId, runContext.logger()));
 
-        runContext.logger().info("Submitted DLI export job '{}' for query job '{}' to {}", exportJobId, jobId, outputLocationUri);
+        runContext.logger().info("Submitted DLI export job '{}' for query job '{}' to {}", exportJobId, jobId, scopedOutputLocation);
         DliService.pollUntilTerminal(client, exportJobId, pollInterval, remainingDuration, runContext.logger());
 
         var config = huaweiClientConfig(runContext);

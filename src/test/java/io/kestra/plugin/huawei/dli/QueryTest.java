@@ -7,6 +7,8 @@ import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.common.FetchType;
 import io.kestra.core.runners.RunContextFactory;
+import io.kestra.core.serializers.FileSerde;
+import io.kestra.plugin.huawei.obs.AuthType;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -15,14 +17,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.delete;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
@@ -157,6 +165,97 @@ class QueryTest {
         assertThat(output.getRow().get("name"), equalTo("a"));
         assertThat(output.getRows(), is(nullValue()));
         assertThat(output.getSize(), equalTo(1L));
+    }
+
+    // ── STORE ────────────────────────────────────────────────────────────────────
+
+    @Test
+    void query_store_happyPath_downloadsExportedRowsAsIon() throws Exception {
+        var exportJobId = "export-job-001";
+        var bucket = "dli-test-bucket";
+        // Query.store() scopes the export under the query jobId, so concurrent/repeated runs
+        // against the same outputLocation never mix or clobber each other's result data.
+        var scopedPrefix = "dli-results/" + JOB_ID + "/";
+        var objectKey = scopedPrefix + "part-00000.json";
+
+        stubSubmit("QUERY", "async");
+        stubStatus("QUERY", "FINISHED");
+
+        wireMock.stubFor(post(urlMatching(".*/jobs/" + JOB_ID + "/export-result"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"is_success": true, "job_id": "%s", "job_mode": "async"}
+                    """.formatted(exportJobId))));
+
+        wireMock.stubFor(get(urlMatching(".*/jobs/" + exportJobId + "/status"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"job_id": "%s", "job_type": "EXPORT", "status": "FINISHED", "is_success": true}
+                    """.formatted(exportJobId))));
+
+        // OBS list-objects (path-style): GET /{bucket}?prefix=... — urlPathEqualTo ignores the query string.
+        wireMock.stubFor(get(urlPathEqualTo("/" + bucket))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/xml")
+                .withBody("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <ListBucketResult>
+                      <Name>%s</Name>
+                      <Prefix>%s</Prefix>
+                      <Marker></Marker>
+                      <MaxKeys>1000</MaxKeys>
+                      <IsTruncated>false</IsTruncated>
+                      <Contents>
+                        <Key>%s</Key>
+                        <LastModified>2024-01-01T00:00:00.000Z</LastModified>
+                        <ETag>"d41d8cd98f00b204e9800998ecf8427e"</ETag>
+                        <Size>42</Size>
+                        <StorageClass>STANDARD</StorageClass>
+                      </Contents>
+                    </ListBucketResult>
+                    """.formatted(bucket, scopedPrefix, objectKey))));
+
+        // OBS get-object: the exported ND-JSON part file. The SDK URL-encodes the object key's
+        // internal slashes on the request line, so match loosely rather than on the literal path.
+        wireMock.stubFor(get(urlPathMatching("/" + bucket + "/.*part-00000\\.json"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"id": 1, "name": "a"}
+                    {"id": 2, "name": "b"}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .fetchType(Property.ofValue(FetchType.STORE))
+            .outputLocation(Property.ofValue("obs://" + bucket + "/dli-results/"))
+            .obsEndpointOverride(Property.ofValue(wireMockUrl()))
+            .obsPathStyleAccess(Property.ofValue(true))
+            .obsAuthType(Property.ofValue(AuthType.V2))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getJobId(), equalTo(JOB_ID));
+        assertThat(output.getJobType(), equalTo("QUERY"));
+        assertThat(output.getStatus(), equalTo("FINISHED"));
+        assertThat(output.getUri(), is(notNullValue()));
+        assertThat(output.getSize(), equalTo(2L));
+
+        List<Map> rows;
+        try (var reader = new InputStreamReader(runContext.storage().getFile(output.getUri()), StandardCharsets.UTF_8)) {
+            rows = FileSerde.readAll(reader, Map.class).collectList().block();
+        }
+        assertThat(rows.size(), equalTo(2));
+        assertThat(rows.get(0).get("id"), equalTo(1));
+        assertThat(rows.get(0).get("name"), equalTo("a"));
+        assertThat(rows.get(1).get("id"), equalTo(2));
     }
 
     // ── NONE ─────────────────────────────────────────────────────────────────────
