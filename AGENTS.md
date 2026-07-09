@@ -28,6 +28,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 - `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
+- `io.kestra.plugin.huawei.dli` — DLI (Data Lake Insight) task (`AbstractDli`, `DliConnectionInterface`, `DliUtils`, `DliService`, `Query`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -105,6 +106,13 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.smn.Publish` — Publishes exactly one message to an SMN topic via `publishMessage`, the Huawei Cloud equivalent of `io.kestra.plugin.aws.sns.Publish`; requires exactly one of `message` (plain text), `messageStructure` (per-protocol `Property<Map<String, Object>>`, serialized to the JSON string SMN expects), or `messageTemplateName` (+ `tags` to fill its placeholders); `subject` applies only to `email` subscriptions; optional `messageAttributes` (name/type/value, only `STRING` type currently supported) and `timeToLive` (`Property<Integer>` seconds, validated to SMN's 1–86400 range, sent to the SDK as a String); wraps `ServiceResponseException`/`SdkException` with actionable messages (`remediationHint` maps `SMN.0076`/`0027`/`0021` to console-specific next steps) and returns `Output(messageId, requestId)`
 - `io.kestra.plugin.huawei.smn.AbstractSmn` — Base class extending `AbstractConnection`; builds `SmnClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SmnRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (SMN v2 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.smn.SmnUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+
+**DLI (Data Lake Insight)**
+
+- `io.kestra.plugin.huawei.dli.Query` — Huawei Cloud equivalent of `io.kestra.plugin.aws.athena.Query`; submits a SQL statement via `createSqlJob`, polls `showSqlJobStatus` until terminal (`FINISHED`/`FAILED`/`CANCELLED`), then handles the result per `fetchType`: `STORE` (default) submits an `export-result` job to OBS and reads the exported newline-delimited JSON back into ION in Kestra internal storage; `FETCH`/`FETCH_ONE` read directly from `previewSqlJobResult` (hard-capped at 1000 rows); `NONE` returns immediately after the job completes. Non-`QUERY` job types (`DDL`/`INSERT`/`DCL`/…) never fetch a result set regardless of `fetchType`. Overrides `kill()` to cancel the in-flight DLI job (query or export) via `cancelSqlJob`
+- `io.kestra.plugin.huawei.dli.AbstractDli` — Base class extending `AbstractConnection`; builds `DliClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `DliRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (DLI v1 APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.dli.DliUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.dli.DliService` — Static SQL-job helpers: submit, poll-until-terminal, preview, export-result submission, best-effort `cancelQuietly`, and the OBS read-back that parses exported ND-JSON into ION
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -271,6 +279,13 @@ plugin-huawei/
 │   │   ├── SmnUtils.java
 │   │   ├── Publish.java
 │   │   └── package-info.java
+│   ├── dli/
+│   │   ├── AbstractDli.java
+│   │   ├── DliConnectionInterface.java
+│   │   ├── DliService.java
+│   │   ├── DliUtils.java
+│   │   ├── Query.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -321,6 +336,9 @@ plugin-huawei/
 │   ├── smn/
 │   │   ├── SmnUtilsTest.java
 │   │   └── PublishTest.java
+│   ├── dli/
+│   │   ├── DliUtilsTest.java
+│   │   └── QueryTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -370,6 +388,12 @@ plugin-huawei/
 - `Publish` requires exactly one of `message`, `messageStructure`, or `messageTemplateName` — fails fast naming all three when zero or more than one is set. `tags` is only valid together with `messageTemplateName`
 - SMN's `MessageAttribute.TypeEnum` also defines `STRING_ARRAY` and `PROTOCOL`, but `Publish.MessageAttributeType` only exposes `STRING` — the common case; extending to array/protocol semantics is deferred until a concrete need arises
 - SMN integration test gate: `SMN_TESTS=true` (real SMN topic; requires `SMN_TOPIC_URN` and `SMN_REGION` env vars); WireMock-based unit tests run unconditionally
+- DLI SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dli` (version managed by `huaweicloud-sdk-bom`); the SQL-job API lives in `com.huaweicloud.sdk.dli.v1` (not `v3`, despite DLI's own API docs calling it a "v3-generation" client); `DliRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering (not FunctionGraph's enum-first ordering) so an explicit `endpointSuffix` always wins for sovereign clouds
+- DLI v1 APIs embed the project ID in the request path (`/v1.0/{project_id}/...`), same failure mode as CES: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractDli.client()` fails fast requiring `projectId` whenever a custom endpoint is set
+- DLI `Query`'s `STORE` fetch type opens a second SDK client (`ObsClient`, via `ObsService.buildClient(...)`) against a different host than the DLI endpoint; it inherits AK/SK/region/`endpointSuffix` from the same connection config but never reuses the DLI `endpointOverride` — dedicated `obsEndpointOverride`/`obsPathStyleAccess`/`obsAuthType` properties target the OBS read-back explicitly
+- DLI's `previewSqlJobResult` (used by `fetchType=FETCH`/`FETCH_ONE`) is hard-capped at 1000 rows and does not paginate; `STORE` (export-result job to OBS, then read back) is the only way to retrieve a full result set
+- DLI `Query` overrides `kill()` to call `cancelSqlJob` on whichever job (query or export) is currently in flight, so a killed execution doesn't leave a DLI queue job running/billing in the background
+- DLI integration test gate: `DLI_TESTS=true` (real DLI + OBS, or MinIO for the OBS read-back leg via `obsEndpointOverride`/`obsPathStyleAccess=true`/`obsAuthType=V2`); WireMock-based unit tests run unconditionally
 
 ## References
 

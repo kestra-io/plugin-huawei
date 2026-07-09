@@ -110,6 +110,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-smn") {
         exclude group: "org.slf4j"
     }
+
+    // DLI (Data Lake Insight) SDK — submit and monitor SQL jobs via the DLI v1 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-dli") {
+        exclude group: "org.slf4j"
+    }
 }
 
 
