@@ -59,7 +59,8 @@ import java.util.concurrent.atomic.AtomicReference;
           downloaded and re-serialized as ION into Kestra internal storage. Use this for result sets
           that may exceed 1000 rows.
         - `FETCH` / `FETCH_ONE`: results are read directly from DLI's result preview API, which is
-          capped at 1000 rows.
+          capped at 1000 rows. Not supported on DLI's shared `default` queue — a dedicated DLI SQL
+          queue is required for these fetch types.
         - `NONE`: the task returns as soon as the job reaches a terminal state, without fetching rows.
           Use this for DDL/DML statements that don't return a result set.
 
@@ -169,7 +170,16 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
     @PluginProperty(group = "main")
     private Property<String> database;
 
-    @Schema(title = "DLI queue to run the job on", description = "Maps to DLI's `queue_name`. When omitted, the account's default queue is used.")
+    @Schema(
+        title = "DLI queue to run the job on",
+        description = """
+            Maps to DLI's `queue_name`. When omitted, the account's shared `default` queue is used.
+            The `default` queue does not support fetching results via the preview API: `fetchType`
+            `FETCH`/`FETCH_ONE` on the `default` queue (or with `queue` omitted) fails fast. Use
+            `fetchType` `STORE` or `NONE` on the `default` queue, or run the query on a dedicated
+            DLI SQL queue to use `FETCH`/`FETCH_ONE`.
+            """
+    )
     @PluginProperty(group = "main")
     private Property<String> queue;
 
@@ -177,8 +187,9 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         title = "How to handle the query result set",
         description = """
             `STORE` (default) exports the full result to `outputLocation` on OBS and downloads it as
-            ION. `FETCH` and `FETCH_ONE` read directly from DLI's preview API (capped at 1000 rows).
-            `NONE` returns as soon as the job completes, without fetching a result set.
+            ION. `FETCH` and `FETCH_ONE` read directly from DLI's preview API (capped at 1000 rows) and
+            are not supported on the shared `default` queue (see `queue`). `NONE` returns as soon as
+            the job completes, without fetching a result set.
             """
     )
     @Builder.Default
@@ -265,6 +276,17 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
 
         if (rFetchType == FetchType.STORE && (rOutputLocation == null || rOutputLocation.isBlank())) {
             throw new IllegalArgumentException("'outputLocation' is required when fetchType is STORE");
+        }
+
+        // DLI's shared 'default' queue rejects previewSqlJobResult outright ("Do not support use
+        // default queue to getJobResult") — a permanent Huawei DLI limitation, not a transient error.
+        // Fail fast before submitting the job rather than surfacing that raw gateway error ~26s later.
+        if ((rFetchType == FetchType.FETCH || rFetchType == FetchType.FETCH_ONE) && isDefaultQueue(rQueue)) {
+            throw new IllegalArgumentException(
+                "DLI's shared 'default' queue does not support fetching query results via the preview API " +
+                    "(fetchType FETCH/FETCH_ONE). Use fetchType STORE with an outputLocation to export the full " +
+                    "result set to OBS (which the default queue supports), use fetchType NONE if you don't need " +
+                    "the result set, or run the query on a dedicated DLI SQL queue by setting the 'queue' property.");
         }
 
         var client = client(runContext);
@@ -383,6 +405,10 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
             .uri(runContext.storage().putFile(tempFile))
             .size(rowCount)
             .build();
+    }
+
+    private static boolean isDefaultQueue(String queue) {
+        return queue == null || queue.isBlank() || queue.trim().equalsIgnoreCase("default");
     }
 
     private static Duration remainingDuration(long deadlineEpochMillis) {

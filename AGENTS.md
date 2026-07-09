@@ -394,6 +394,7 @@ plugin-huawei/
 - DLI's `previewSqlJobResult` (used by `fetchType=FETCH`/`FETCH_ONE`) is hard-capped at 1000 rows and does not paginate; `STORE` (export-result job to OBS, then read back) is the only way to retrieve a full result set
 - DLI `Query` overrides `kill()` to call `cancelSqlJob` on whichever job (query or export) is currently in flight, so a killed execution doesn't leave a DLI queue job running/billing in the background
 - DLI integration test gate: `DLI_TESTS=true` (real DLI + OBS, or MinIO for the OBS read-back leg via `obsEndpointOverride`/`obsPathStyleAccess=true`/`obsAuthType=V2`); WireMock-based unit tests run unconditionally
+- DLI's shared `default` queue rejects `previewSqlJobResult` outright (`Do not support use default queue to getJobResult`) — a permanent Huawei DLI limitation, confirmed against a live account. `Query` therefore fails fast with `IllegalArgumentException` before submitting the job when `fetchType` is `FETCH`/`FETCH_ONE` and the resolved queue is the `default` queue (an omitted `queue` also resolves to `default`). `STORE` (export-result to OBS) and `NONE` both work on the `default` queue and are unaffected
 
 ## References
 

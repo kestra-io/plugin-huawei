@@ -358,6 +358,49 @@ class QueryTest {
     }
 
     @Test
+    void query_fetchOnDefaultQueue_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .queue(Property.ofValue("default"))
+            .fetchType(Property.ofValue(FetchType.FETCH_ONE))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("default")));
+        assertThat(ex.getMessage(), is(containsString("STORE")));
+    }
+
+    @Test
+    void query_fetchAllOnDefaultQueue_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .queue(Property.ofValue("Default"))
+            .fetchType(Property.ofValue(FetchType.FETCH))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("default")));
+    }
+
+    @Test
+    void query_fetchWithQueueOmitted_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = Query.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .sql(Property.ofValue("SELECT * FROM my_table"))
+            .database(Property.ofValue("my_database"))
+            // queue omitted — DLI resolves this to the account's default queue
+            .fetchType(Property.ofValue(FetchType.FETCH_ONE))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("default")));
+    }
+
+    @Test
     void query_customEndpointWithoutProjectId_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = Query.builder()
