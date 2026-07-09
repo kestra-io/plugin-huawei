@@ -19,6 +19,7 @@ import io.kestra.plugin.huawei.obs.AuthType;
 import io.kestra.plugin.huawei.obs.ObsService;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -235,7 +236,12 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
 
     // Guards against a duplicate/racing kill signal; cancels the remote DLI job so it stops consuming
     // queue resources after the Kestra execution is killed.
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
     private final AtomicReference<Runnable> killable = new AtomicReference<>();
+
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
     private final AtomicBoolean isKilled = new AtomicBoolean(false);
 
     @Override
