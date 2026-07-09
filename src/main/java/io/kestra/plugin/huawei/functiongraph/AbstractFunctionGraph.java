@@ -59,12 +59,18 @@ public abstract class AbstractFunctionGraph extends AbstractConnection implement
         if (rOverride != null && !rOverride.isBlank()) {
             builder.withEndpoint(FunctionGraphUtils.stripTrailingSlash(rOverride.trim()));
         } else if (rRegion != null && !rRegion.isBlank()) {
-            // Fall back to endpoint derivation for regions not yet in the SDK enum (e.g. newly added sovereign-cloud regions).
-            try {
-                builder.withRegion(FunctionGraphRegion.valueOf(rRegion));
-            } catch (IllegalArgumentException e) {
-                var derivedEndpoint = FunctionGraphUtils.functionGraphEndpoint(null, rRegion, rSuffix);
-                builder.withEndpoint(derivedEndpoint);
+            // An explicit endpointSuffix forces suffix-derived resolution even for regions present in the SDK
+            // enum: the enum hard-codes the `.myhuaweicloud.com` domain, which is wrong for sovereign clouds
+            // (e.g. `myhuaweicloud.eu`). Without a suffix, prefer the SDK enum and fall back to derivation only
+            // for regions not yet in it (e.g. newly added regions).
+            if (rSuffix != null && !rSuffix.isBlank()) {
+                builder.withEndpoint(FunctionGraphUtils.functionGraphEndpoint(null, rRegion, rSuffix));
+            } else {
+                try {
+                    builder.withRegion(FunctionGraphRegion.valueOf(rRegion));
+                } catch (IllegalArgumentException e) {
+                    builder.withEndpoint(FunctionGraphUtils.functionGraphEndpoint(null, rRegion, null));
+                }
             }
         } else {
             throw new IllegalArgumentException(

@@ -3,6 +3,8 @@ package io.kestra.plugin.huawei.functiongraph;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.huaweicloud.sdk.core.HcClient;
+import com.huaweicloud.sdk.functiongraph.v2.FunctionGraphClient;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
@@ -14,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
+import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -347,6 +351,89 @@ class FunctionGraphInvokeTest {
             .build();
 
         assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+    }
+
+    @Test
+    void client_knownRegionWithEuSuffix_resolvesEuEndpointNotCom() throws Exception {
+        // Regression: eu-west-101 is present in the SDK's baked-in region map, whose hard-coded endpoint
+        // is the .com TLD. An explicit endpointSuffix must still win instead of being silently ignored.
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .region(Property.ofValue("eu-west-101"))
+            .endpointSuffix(Property.ofValue("myhuaweicloud.eu"))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .build();
+
+        var client = task.client(runContext);
+
+        assertThat(resolvedEndpoints(client), equalTo(List.of("https://functiongraph.eu-west-101.myhuaweicloud.eu")));
+    }
+
+    @Test
+    void client_knownRegionNoSuffix_usesSdkRegionEndpoint() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .region(Property.ofValue("eu-west-101"))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .build();
+
+        var client = task.client(runContext);
+
+        assertThat(resolvedEndpoints(client), equalTo(List.of("https://functiongraph.eu-west-101.myhuaweicloud.com")));
+    }
+
+    @Test
+    void client_unknownRegionNoSuffix_derivesComEndpoint() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .region(Property.ofValue("not-a-known-region-1"))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .build();
+
+        var client = task.client(runContext);
+
+        assertThat(resolvedEndpoints(client), equalTo(List.of("https://functiongraph.not-a-known-region-1.myhuaweicloud.com")));
+    }
+
+    @Test
+    void client_endpointOverride_winsOverRegionAndSuffix() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Invoke.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .region(Property.ofValue("eu-west-101"))
+            .endpointSuffix(Property.ofValue("myhuaweicloud.eu"))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .functionUrn(Property.ofValue(FUNCTION_URN))
+            .build();
+
+        var client = task.client(runContext);
+
+        assertThat(resolvedEndpoints(client), equalTo(List.of(wireMockUrl())));
+    }
+
+    // Reads the resolved endpoints off the real built client via the SDK's HcClient — no public
+    // getter is exposed on FunctionGraphClient, so reflection is the only way to inspect it without
+    // duplicating the resolution logic under test.
+    private static List<String> resolvedEndpoints(FunctionGraphClient client) throws Exception {
+        Field field = FunctionGraphClient.class.getDeclaredField("hcClient");
+        field.setAccessible(true);
+        var hcClient = (HcClient) field.get(client);
+        return hcClient.getEndpoints();
     }
 
     // ── Integration tests (guarded) ──────────────────────────────────────────────
