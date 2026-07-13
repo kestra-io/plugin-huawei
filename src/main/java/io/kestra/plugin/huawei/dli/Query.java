@@ -221,7 +221,7 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
 
     @Schema(title = "Polling interval while waiting for the job to complete", description = "ISO-8601 duration (e.g. `PT5S`). Defaults to 5 seconds.")
     @Builder.Default
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "execution")
     private Property<Duration> interval = Property.ofValue(Duration.ofSeconds(5));
 
     @Schema(
@@ -295,6 +295,12 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         var submitted = DliService.submitJob(client, rSql, rDatabase, rQueue, rConf, rTags);
         var jobId = submitted.getJobId();
         killable.set(() -> DliService.cancelQuietly(client, jobId, logger));
+        // Closes the submit->set race: if kill() ran (and found killable still null) between the
+        // job going live on DLI and this line, re-invoke it now against the freshly-set killable.
+        // cancelQuietly is idempotent, so this is safe even if kill() never actually raced.
+        if (isKilled.get()) {
+            killable.get().run();
+        }
 
         logger.info("Submitted DLI job '{}' (type={}, mode={})", jobId, submitted.getJobType(), submitted.getJobMode());
 
@@ -357,7 +363,7 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
                 "DLI job '{}' returned {} rows, but the preview API caps results at {} — use fetchType=STORE for full results.",
                 jobId, preview.getRowCount(), PREVIEW_ROW_CAP);
         }
-        return zipRows(schemaOf(preview), preview.getRows());
+        return zipRows(schemaOf(preview, jobId), preview.getRows());
     }
 
     private Output store(
@@ -375,6 +381,12 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         var exportResponse = DliService.submitExport(client, jobId, scopedOutputLocation, queue);
         var exportJobId = exportResponse.getJobId();
         killable.set(() -> DliService.cancelQuietly(client, exportJobId, runContext.logger()));
+        // Closes the submit->set race: without this, a kill() landing between the export job going
+        // live and this line would still invoke the stale (query-job) killable, cancelling an
+        // already-terminal job and leaving the freshly submitted export job running and billing.
+        if (isKilled.get()) {
+            killable.get().run();
+        }
 
         runContext.logger().info("Submitted DLI export job '{}' for query job '{}' to {}", exportJobId, jobId, scopedOutputLocation);
         DliService.pollUntilTerminal(client, exportJobId, pollInterval, remainingDuration, runContext.logger());
@@ -428,20 +440,33 @@ public class Query extends AbstractDli implements RunnableTask<Query.Output> {
         if (submitted.getSchema() == null || submitted.getRows() == null) {
             return null;
         }
-        var schema = submitted.getSchema().stream()
-            .map(o -> (Map<String, Object>) o)
-            .toList();
+        List<Map<String, Object>> schema;
+        try {
+            schema = submitted.getSchema().stream()
+                .map(o -> (Map<String, Object>) o)
+                .toList();
+        } catch (ClassCastException e) {
+            throw new IllegalStateException(
+                "DLI job '" + submitted.getJobId() + "' returned an unexpected inline schema shape " +
+                "(expected a list of column maps) — this may indicate an incompatible DLI API response format.", e);
+        }
         return zipRows(schema, submitted.getRows());
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Map<String, Object>> schemaOf(PreviewSqlJobResultResponse preview) {
+    private static List<Map<String, Object>> schemaOf(PreviewSqlJobResultResponse preview, String jobId) {
         if (preview.getSchema() == null) {
             return List.of();
         }
-        return preview.getSchema().stream()
-            .map(m -> (Map<String, Object>) (Map<String, ?>) m)
-            .toList();
+        try {
+            return preview.getSchema().stream()
+                .map(m -> (Map<String, Object>) (Map<String, ?>) m)
+                .toList();
+        } catch (ClassCastException e) {
+            throw new IllegalStateException(
+                "DLI job '" + jobId + "' returned an unexpected preview schema shape " +
+                "(expected a list of column maps) — this may indicate an incompatible DLI API response format.", e);
+        }
     }
 
     /**

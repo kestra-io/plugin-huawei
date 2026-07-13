@@ -469,6 +469,87 @@ class QueryTest {
         wireMock.verify(WireMock.deleteRequestedFor(urlMatching(".*/jobs/" + JOB_ID)));
     }
 
+    // killable is reassigned from the query job's canceller to the export job's canceller partway
+    // through store() (see Finding 1/2 fix); this covers that kill() ends up cancelling the export
+    // job — the resource actually still live and billing after a STORE run — and not the already
+    // terminal query job.
+    @Test
+    void kill_afterStoreExportSubmit_cancelsExportJobNotQueryJob() throws Exception {
+        var exportJobId = "export-job-race-002";
+        var bucket = "dli-test-bucket-kill";
+        var scopedPrefix = "dli-results/" + JOB_ID + "/";
+        var objectKey = scopedPrefix + "part-00000.json";
+
+        stubSubmit("QUERY", "async");
+        stubStatus("QUERY", "FINISHED");
+
+        wireMock.stubFor(post(urlMatching(".*/jobs/" + JOB_ID + "/export-result"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"is_success": true, "job_id": "%s", "job_mode": "async"}
+                    """.formatted(exportJobId))));
+
+        wireMock.stubFor(get(urlMatching(".*/jobs/" + exportJobId + "/status"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"job_id": "%s", "job_type": "EXPORT", "status": "FINISHED", "is_success": true}
+                    """.formatted(exportJobId))));
+
+        wireMock.stubFor(get(urlPathEqualTo("/" + bucket))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/xml")
+                .withBody("""
+                    <?xml version="1.0" encoding="UTF-8"?>
+                    <ListBucketResult>
+                      <Name>%s</Name>
+                      <Prefix>%s</Prefix>
+                      <Marker></Marker>
+                      <MaxKeys>1000</MaxKeys>
+                      <IsTruncated>false</IsTruncated>
+                      <Contents>
+                        <Key>%s</Key>
+                        <LastModified>2024-01-01T00:00:00.000Z</LastModified>
+                        <ETag>"d41d8cd98f00b204e9800998ecf8427e"</ETag>
+                        <Size>42</Size>
+                        <StorageClass>STANDARD</StorageClass>
+                      </Contents>
+                    </ListBucketResult>
+                    """.formatted(bucket, scopedPrefix, objectKey))));
+
+        wireMock.stubFor(get(urlPathMatching("/" + bucket + "/.*part-00000\\.json"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"id": 1, "name": "a"}
+                    """)));
+
+        wireMock.stubFor(delete(urlMatching(".*/jobs/" + JOB_ID))
+            .willReturn(aResponse().withStatus(200).withBody("{\"is_success\": true}")));
+        wireMock.stubFor(delete(urlMatching(".*/jobs/" + exportJobId))
+            .willReturn(aResponse().withStatus(200).withBody("{\"is_success\": true}")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .fetchType(Property.ofValue(FetchType.STORE))
+            .outputLocation(Property.ofValue("obs://" + bucket + "/dli-results/"))
+            .obsEndpointOverride(Property.ofValue(wireMockUrl()))
+            .obsPathStyleAccess(Property.ofValue(true))
+            .obsAuthType(Property.ofValue(AuthType.V2))
+            .build();
+
+        task.run(runContext);
+        task.kill();
+
+        wireMock.verify(WireMock.deleteRequestedFor(urlMatching(".*/jobs/" + exportJobId)));
+        wireMock.verify(0, WireMock.deleteRequestedFor(urlMatching(".*/jobs/" + JOB_ID)));
+    }
+
     // ── Integration test (guarded) ────────────────────────────────────────────────
 
     @Test
