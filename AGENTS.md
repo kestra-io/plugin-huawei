@@ -28,6 +28,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 - `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
+- `io.kestra.plugin.huawei.eventgrid` — EventGrid (EG) task (`AbstractEventGrid`, `EventGridConnectionInterface`, `EventGridUtils`, `PutEvents`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -105,6 +106,12 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.smn.Publish` — Publishes exactly one message to an SMN topic via `publishMessage`, the Huawei Cloud equivalent of `io.kestra.plugin.aws.sns.Publish`; requires exactly one of `message` (plain text), `messageStructure` (per-protocol `Property<Map<String, Object>>`, serialized to the JSON string SMN expects), or `messageTemplateName` (+ `tags` to fill its placeholders); `subject` applies only to `email` subscriptions; optional `messageAttributes` (name/type/value, only `STRING` type currently supported) and `timeToLive` (`Property<Integer>` seconds, validated to SMN's 1–86400 range, sent to the SDK as a String); wraps `ServiceResponseException`/`SdkException` with actionable messages (`remediationHint` maps `SMN.0076`/`0027`/`0021` to console-specific next steps) and returns `Output(messageId, requestId)`
 - `io.kestra.plugin.huawei.smn.AbstractSmn` — Base class extending `AbstractConnection`; builds `SmnClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SmnRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (SMN v2 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.smn.SmnUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+
+**EventGrid (EG)**
+
+- `io.kestra.plugin.huawei.eventgrid.PutEvents` — Huawei Cloud equivalent of `io.kestra.plugin.aws.eventbridge.PutEvents`; publishes one or more CloudEvents-1.0 events to an EventGrid custom channel via `putEvents`; `events` accepts either an inline list or a `kestra://` internal storage URI of ION-serialized events; auto-generates `id` (random UUID) and defaults `specversion` to `1.0` when omitted; writes per-event `index`/`eventId`/`errorCode`/`errorMsg` results to internal storage as ION; throws when `failOnUnsuccessfulEvents` (default `true`) and at least one event is rejected, otherwise reports `WARNING` on partial failure; always sends the whole `events` list in a single request (EG's per-request batch cap is undocumented, so no chunking is attempted)
+- `io.kestra.plugin.huawei.eventgrid.AbstractEventGrid` — Base class extending `AbstractConnection`; builds `EgClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `EgRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (EG v1 APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.eventgrid.EventGridUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -271,6 +278,12 @@ plugin-huawei/
 │   │   ├── SmnUtils.java
 │   │   ├── Publish.java
 │   │   └── package-info.java
+│   ├── eventgrid/
+│   │   ├── AbstractEventGrid.java
+│   │   ├── EventGridConnectionInterface.java
+│   │   ├── EventGridUtils.java
+│   │   ├── PutEvents.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -321,6 +334,9 @@ plugin-huawei/
 │   ├── smn/
 │   │   ├── SmnUtilsTest.java
 │   │   └── PublishTest.java
+│   ├── eventgrid/
+│   │   ├── EventGridUtilsTest.java
+│   │   └── PutEventsTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -370,6 +386,11 @@ plugin-huawei/
 - `Publish` requires exactly one of `message`, `messageStructure`, or `messageTemplateName` — fails fast naming all three when zero or more than one is set. `tags` is only valid together with `messageTemplateName`
 - SMN's `MessageAttribute.TypeEnum` also defines `STRING_ARRAY` and `PROTOCOL`, but `Publish.MessageAttributeType` only exposes `STRING` — the common case; extending to array/protocol semantics is deferred until a concrete need arises
 - SMN integration test gate: `SMN_TESTS=true` (real SMN topic; requires `SMN_TOPIC_URN` and `SMN_REGION` env vars); WireMock-based unit tests run unconditionally
+- EventGrid SDK: `com.huaweicloud.sdk:huaweicloud-sdk-eg` (version managed by `huaweicloud-sdk-bom`); the `putEvents` API lives in `com.huaweicloud.sdk.eg.v1` (`EgClient`, `com.huaweicloud.sdk.eg.v1.model`); `EgRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- EventGrid v1 APIs embed the project ID in the request path (`/v1/{project_id}/...`), same failure mode as CES: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractEventGrid.client()` fails fast requiring `projectId` whenever a custom endpoint is set
+- ⚠️ EventGrid's EU/sovereign host is unverified: the SDK's `EgRegion` enum has no EU entry (so an unknown region always falls back to suffix-derivation, `eg.<region>.myhuaweicloud.com`), while Huawei's own EU documentation shows a different host (`events.eu-west-101.myhuaweicloud.eu`). Use `endpointOverride`/`endpointSuffix` as the escape hatch until this is verified against a live EU-sovereign account
+- `PutEvents` has no per-request batch cap enforced client-side — EventGrid's documented limit (if any) is unknown, so the task always sends the full `events` list in a single `putEvents` call and surfaces any size-related API error verbatim rather than guessing a safe chunk size
+- EventGrid integration test gate: `EVENTGRID_TESTS=true`; WireMock-based unit tests run unconditionally
 
 ## References
 
