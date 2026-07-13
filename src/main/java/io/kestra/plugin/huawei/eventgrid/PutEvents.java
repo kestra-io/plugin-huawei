@@ -1,7 +1,5 @@
 package io.kestra.plugin.huawei.eventgrid;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
@@ -16,6 +14,7 @@ import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.executions.metrics.Counter;
 import io.kestra.core.models.flows.State;
+import io.kestra.core.models.property.Data;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
@@ -35,9 +34,7 @@ import lombok.extern.jackson.Jacksonized;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,8 +53,9 @@ import java.util.UUID;
         Publishes one or more CloudEvents-1.0-formatted events to an EventGrid custom channel via
         `putEvents` — the Huawei Cloud equivalent of `io.kestra.plugin.aws.eventbridge.PutEvents`.
 
-        `events` accepts either an inline list of events or a `kestra://` internal storage URI pointing
-        to ION-serialized events (e.g. produced by a previous task). Every event requires `source` and
+        `events` accepts a single event, an inline list of events, or a URI pointing to serialized events
+        in Kestra internal storage (e.g. produced by a previous task), following the same structured-data
+        conventions as `io.kestra.plugin.huawei.dms.kafka.Produce#from`. Every event requires `source` and
         `type`; `id` is auto-generated and `specversion` defaults to `1.0` when omitted.
 
         EventGrid's per-request batch size cap is not documented — this task always sends the whole
@@ -101,7 +99,10 @@ import java.util.UUID;
 )
 public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEvents.Output> {
 
-    private static final ObjectMapper MAPPER = JacksonMapper.ofIon().setSerializationInclusion(JsonInclude.Include.ALWAYS);
+    // JacksonMapper.ofIon() returns the shared core singleton — never mutate it (e.g. via setSerializationInclusion),
+    // only read from it. The default NON_NULL inclusion is fine here: omitting eventId/errorCode/errorMsg when absent
+    // reads just as clearly in the results file as writing them out as null.
+    private static final ObjectMapper MAPPER = JacksonMapper.ofIon();
 
     @Schema(title = "EventGrid channel ID", description = "The ID of the EventGrid custom channel to publish events to.")
     @NotNull
@@ -111,13 +112,13 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
     @Schema(
         title = "Events to publish",
         description = """
-            Either an inline list of events, or a `kestra://` internal storage URI pointing to
-            ION-serialized events (e.g. produced by a previous task). Every event requires `source` and
-            `type` per the CloudEvents 1.0 specification.
+            A single event, a list of events, or a URI pointing to serialized events in Kestra internal
+            storage (e.g. produced by a previous task). Every event requires `source` and `type` per the
+            CloudEvents 1.0 specification.
             """,
         oneOf = { String.class, Event[].class }
     )
-    @PluginProperty(dynamic = true, group = "main")
+    @PluginProperty(group = "main")
     @NotNull
     private Object events;
 
@@ -259,22 +260,11 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
         return sb.toString();
     }
 
-    @SuppressWarnings("unchecked")
     private static List<Event> readEvents(RunContext runContext, Object events) throws Exception {
-        if (events instanceof String s) {
-            var uri = new URI(runContext.render(s));
-            if (!"kestra".equals(uri.getScheme())) {
-                throw new IllegalArgumentException(
-                    "'events' must be a Kestra internal storage URI (kestra://...) or a list of events.");
-            }
-            try (var reader = new InputStreamReader(runContext.storage().getFile(uri), StandardCharsets.UTF_8)) {
-                return FileSerde.readAll(reader, Event.class).collectList().block();
-            }
-        } else if (events instanceof List<?> list) {
-            return MAPPER.convertValue(list, new TypeReference<List<Event>>() {});
-        }
-        throw new IllegalArgumentException(
-            "Invalid 'events' type '" + events.getClass() + "' — must be a list of events or a kestra:// URI.");
+        return Data.from(events)
+            .readAs(runContext, Event.class, map -> MAPPER.convertValue(map, Event.class))
+            .collectList()
+            .block();
     }
 
     @Value

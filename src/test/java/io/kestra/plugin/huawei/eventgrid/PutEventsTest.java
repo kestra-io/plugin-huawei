@@ -1,5 +1,6 @@
 package io.kestra.plugin.huawei.eventgrid;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
@@ -30,6 +31,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
@@ -133,6 +135,44 @@ class PutEventsTest {
             .withRequestBody(WireMock.matchingJsonPath("$.events[0].specversion", WireMock.equalTo("1.0")))
             .withRequestBody(WireMock.matchingJsonPath("$.events[0].id"))
             .withRequestBody(WireMock.matchingJsonPath("$.events[1].type", WireMock.equalTo("com.mycompany.order.cancelled"))));
+    }
+
+    @Test
+    void putEvents_fromRawMaps_deserializesAndPublishes() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*" + putEventsPath()))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_count": 0, "events": [{"event_id": "evt-1"}]}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        // events as they actually arrive from a YAML flow: raw Map instances, not pre-built Event objects,
+        // exercising the Data-based Map -> Event conversion rather than the "already typed" shortcut.
+        var task = baseTask()
+            .events(List.of(
+                Map.of(
+                    "source", "my-order-service",
+                    "type", "com.mycompany.order.created",
+                    "data", Map.of("orderId", 12345)
+                )
+            ))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getEventCount(), equalTo(1));
+        assertThat(output.getFailedEventCount(), equalTo(0));
+
+        var requests = wireMock.findAll(postRequestedFor(urlMatching(".*" + putEventsPath())));
+        assertThat(requests, hasSize(1));
+        var event = new ObjectMapper().readTree(requests.getFirst().getBodyAsString()).get("events").get(0);
+        assertThat(event.get("source").asText(), equalTo("my-order-service"));
+        assertThat(event.get("type").asText(), equalTo("com.mycompany.order.created"));
+        assertThat(event.get("specversion").asText(), equalTo("1.0"));
+        assertThat(event.get("id").asText(), is(notNullValue()));
+        assertThat(event.get("data").get("orderId").asInt(), equalTo(12345));
     }
 
     @Test
