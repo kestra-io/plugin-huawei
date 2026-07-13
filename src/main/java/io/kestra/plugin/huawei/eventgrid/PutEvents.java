@@ -1,6 +1,5 @@
 package io.kestra.plugin.huawei.eventgrid;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.eg.v1.model.CloudEvents;
@@ -19,7 +18,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.models.tasks.RunnableTask;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.FileSerde;
-import io.kestra.core.serializers.JacksonMapper;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
@@ -41,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 @SuperBuilder
 @ToString
@@ -58,9 +57,9 @@ import java.util.UUID;
         conventions as `io.kestra.plugin.huawei.dms.kafka.Produce#from`. Every event requires `source` and
         `type`; `id` is auto-generated and `specversion` defaults to `1.0` when omitted.
 
-        EventGrid's per-request batch size cap is not documented — this task always sends the whole
-        `events` list in a single `putEvents` call and surfaces any size-related API error verbatim
-        rather than guessing a safe chunk size.
+        EventGrid's per-request batch size cap is not documented, so events are sent in batches of at
+        most 10 (matching the AWS EventBridge equivalent) rather than in one unbounded request; the
+        per-event results are aggregated back together by submission order.
 
         Authentication uses AK/SK request signing. Provide `accessKeyId` and `secretAccessKey` via
         `{{ secret('NAME') }}`, or configure `temporaryCredentials` for inline IAM credential exchange.
@@ -99,10 +98,10 @@ import java.util.UUID;
 )
 public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEvents.Output> {
 
-    // JacksonMapper.ofIon() returns the shared core singleton — never mutate it (e.g. via setSerializationInclusion),
-    // only read from it. The default NON_NULL inclusion is fine here: omitting eventId/errorCode/errorMsg when absent
-    // reads just as clearly in the results file as writing them out as null.
-    private static final ObjectMapper MAPPER = JacksonMapper.ofIon();
+    // EventGrid's per-request cap is undocumented, so — like ces.Push and the AWS EventBridge PutEvents this
+    // task mirrors — events are sent in batches of at most this many, and the per-event results are aggregated
+    // back together by submission order. This also bounds the size of any single request built in memory.
+    private static final int MAX_BATCH_SIZE = 10;
 
     @Schema(title = "EventGrid channel ID", description = "The ID of the EventGrid custom channel to publish events to.")
     @NotNull
@@ -151,23 +150,38 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
         }
 
         var client = client(runContext);
-        var request = new PutEventsRequest()
-            .withChannelId(rChannelId)
-            .withBody(new PutEventsReq().withEvents(cloudEvents));
 
-        PutEventsResponse response;
-        try {
-            response = client.putEvents(request);
-        } catch (ServiceResponseException e) {
-            throw new IllegalStateException(
-                "EventGrid PutEvents failed (HTTP " + e.getHttpStatusCode() + "): " + e.getErrorMsg() +
-                " — verify the channelId and that the AK/SK has 'EG FullAccess' permission.", e);
-        } catch (SdkException e) {
-            throw new IllegalStateException("EventGrid SDK error publishing events: " + e.getMessage(), e);
+        // Send in bounded batches and concatenate the per-batch results in order. EventGrid returns one result
+        // per submitted event in submission order, so the flat concatenation stays index-aligned with cloudEvents.
+        var results = new ArrayList<PutEventsRespEvents>(cloudEvents.size());
+        var failedCount = 0;
+        for (var chunk : partition(cloudEvents, MAX_BATCH_SIZE)) {
+            var request = new PutEventsRequest()
+                .withChannelId(rChannelId)
+                .withBody(new PutEventsReq().withEvents(chunk));
+
+            PutEventsResponse response;
+            try {
+                response = client.putEvents(request);
+            } catch (ServiceResponseException e) {
+                throw new IllegalStateException(
+                    "EventGrid PutEvents failed (HTTP " + e.getHttpStatusCode() + "): " + e.getErrorMsg() +
+                    " — verify the channelId and that the AK/SK has 'EG FullAccess' permission.", e);
+            } catch (SdkException e) {
+                throw new IllegalStateException("EventGrid SDK error publishing events: " + e.getMessage(), e);
+            }
+
+            var chunkResults = response.getEvents() != null ? response.getEvents() : List.<PutEventsRespEvents>of();
+            if (chunkResults.size() != chunk.size()) {
+                runContext.logger().warn(
+                    "EventGrid returned {} result(s) for a batch of {} submitted event(s); per-event results are " +
+                    "matched by submission order and may be misaligned.", chunkResults.size(), chunk.size());
+            }
+            results.addAll(chunkResults);
+            failedCount += response.getFailedCount() != null ? response.getFailedCount() : 0;
         }
 
-        var failedCount = response.getFailedCount() != null ? response.getFailedCount() : 0;
-        var uri = runContext.storage().putFile(writeResults(runContext, eventList, response));
+        var uri = runContext.storage().putFile(writeResults(runContext, eventList.size(), results));
 
         runContext.metric(Counter.of("eventgrid.putevents.count", eventList.size() - failedCount));
         runContext.logger().info(
@@ -177,7 +191,7 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
         if (rFailOnUnsuccessful && failedCount > 0) {
             throw new IllegalStateException(
                 "EventGrid rejected " + failedCount + " of " + eventList.size() + " event(s): " +
-                describeFailures(response));
+                describeFailures(results));
         }
 
         return Output.builder()
@@ -187,28 +201,40 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
             .build();
     }
 
-    private static CloudEvents toCloudEvent(RunContext runContext, Event event, int index) {
+    // The event maps arrive from Data un-rendered (see readEvents), so every field is rendered here exactly once.
+    // Rendering must NOT happen a second time anywhere downstream: a value that a first render resolves to another
+    // Pebble expression (e.g. an input whose value is literally `{{ secret('X') }}`) would otherwise be evaluated,
+    // leaking the resolved value into the published event.
+    @SuppressWarnings("unchecked")
+    private static CloudEvents toCloudEvent(RunContext runContext, Map<String, Object> event, int index) {
         try {
-            var rId = runContext.render(event.getId()).as(String.class).orElseGet(() -> UUID.randomUUID().toString());
-            var rSource = runContext.render(event.getSource()).as(String.class)
-                .orElseThrow(() -> new IllegalArgumentException("events[" + index + "].source is required"));
-            var rType = runContext.render(event.getType()).as(String.class)
-                .orElseThrow(() -> new IllegalArgumentException("events[" + index + "].type is required"));
-            var rSpecversion = runContext.render(event.getSpecversion()).as(String.class).orElse("1.0");
-            var rData = runContext.render(event.getData()).asMap(String.class, Object.class);
-            var rSubject = runContext.render(event.getSubject()).as(String.class).orElse(null);
-            var rTime = runContext.render(event.getTime()).as(String.class).orElse(Instant.now().toString());
-            var rDatacontenttype = runContext.render(event.getDatacontenttype()).as(String.class)
-                .orElse(rData.isEmpty() ? null : "application/json");
-            var rDataschema = runContext.render(event.getDataschema()).as(String.class).orElse(null);
+            var rId = renderScalar(runContext, event.get("id"));
+            var rSource = renderScalar(runContext, event.get("source"));
+            if (rSource == null || rSource.isBlank()) {
+                throw new IllegalArgumentException("events[" + index + "].source is required");
+            }
+            var rType = renderScalar(runContext, event.get("type"));
+            if (rType == null || rType.isBlank()) {
+                throw new IllegalArgumentException("events[" + index + "].type is required");
+            }
+            var rSpecversion = renderScalar(runContext, event.get("specversion"));
+            var rSubject = renderScalar(runContext, event.get("subject"));
+            var rTime = renderScalar(runContext, event.get("time"));
+            var rDatacontenttype = renderScalar(runContext, event.get("datacontenttype"));
+            var rDataschema = renderScalar(runContext, event.get("dataschema"));
+
+            Map<String, Object> rData = null;
+            if (event.get("data") instanceof Map<?, ?> dataMap) {
+                rData = runContext.render((Map<String, Object>) dataMap);
+            }
 
             var cloudEvent = new CloudEvents()
-                .withId(rId)
+                .withId(rId != null && !rId.isBlank() ? rId : UUID.randomUUID().toString())
                 .withSource(rSource)
                 .withType(rType)
-                .withSpecversion(rSpecversion)
-                .withTime(rTime);
-            if (!rData.isEmpty()) {
+                .withSpecversion(rSpecversion != null && !rSpecversion.isBlank() ? rSpecversion : "1.0")
+                .withTime(rTime != null && !rTime.isBlank() ? rTime : Instant.now().toString());
+            if (rData != null && !rData.isEmpty()) {
                 cloudEvent.withData(rData);
             }
             if (rSubject != null) {
@@ -216,6 +242,8 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
             }
             if (rDatacontenttype != null) {
                 cloudEvent.withDatacontenttype(rDatacontenttype);
+            } else if (rData != null && !rData.isEmpty()) {
+                cloudEvent.withDatacontenttype("application/json");
             }
             if (rDataschema != null) {
                 cloudEvent.withDataschema(rDataschema);
@@ -228,11 +256,14 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
         }
     }
 
-    private static File writeResults(RunContext runContext, List<Event> eventList, PutEventsResponse response) throws Exception {
-        var responseEvents = response.getEvents() != null ? response.getEvents() : List.<PutEventsRespEvents>of();
+    private static String renderScalar(RunContext runContext, Object value) throws Exception {
+        return value == null ? null : runContext.render(value.toString());
+    }
+
+    private static File writeResults(RunContext runContext, int eventCount, List<PutEventsRespEvents> responseEvents) throws Exception {
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            for (var i = 0; i < eventList.size(); i++) {
+            for (var i = 0; i < eventCount; i++) {
                 var respEvent = i < responseEvents.size() ? responseEvents.get(i) : null;
                 var result = EventResult.builder()
                     .index(i)
@@ -247,24 +278,45 @@ public class PutEvents extends AbstractEventGrid implements RunnableTask<PutEven
         return tempFile;
     }
 
-    private static String describeFailures(PutEventsResponse response) {
-        var responseEvents = response.getEvents() != null ? response.getEvents() : List.<PutEventsRespEvents>of();
-        var sb = new StringBuilder();
+    // Cap the number of failures listed so a large batch with a high failure rate can't produce a huge
+    // exception message; the full per-event breakdown is always available in the results file.
+    private static final int MAX_REPORTED_FAILURES = 20;
+
+    private static String describeFailures(List<PutEventsRespEvents> responseEvents) {
+        var failures = new ArrayList<String>();
+        var total = 0;
         for (var i = 0; i < responseEvents.size(); i++) {
             var respEvent = responseEvents.get(i);
             if (respEvent.getErrorCode() != null) {
-                sb.append("index ").append(i).append(": ").append(respEvent.getErrorCode())
-                    .append(" - ").append(respEvent.getErrorMsg()).append("; ");
+                total++;
+                if (failures.size() < MAX_REPORTED_FAILURES) {
+                    failures.add("index " + i + ": " + respEvent.getErrorCode() + " - " + respEvent.getErrorMsg());
+                }
             }
         }
-        return sb.toString();
+        var summary = String.join("; ", failures);
+        if (total > failures.size()) {
+            summary += "; ... and " + (total - failures.size()) + " more";
+        }
+        return summary;
     }
 
-    private static List<Event> readEvents(RunContext runContext, Object events) throws Exception {
-        return Data.from(events)
-            .readAs(runContext, Event.class, map -> MAPPER.convertValue(map, Event.class))
+    private static List<Map<String, Object>> readEvents(RunContext runContext, Object events) throws Exception {
+        // Normalize a single inline event (a Map) into a one-element list so Data takes its list branch, which
+        // returns the raw maps un-rendered — a single inline Map would otherwise be pre-rendered by Data, and the
+        // per-field render in toCloudEvent would then be a second render. All shapes (inline list, storage URI,
+        // JSON string) thus reach toCloudEvent un-rendered, keeping rendering to exactly one pass.
+        var normalized = events instanceof Map ? List.of(events) : events;
+        return Data.from(normalized)
+            .read(runContext)
             .collectList()
             .block();
+    }
+
+    private static <T> List<List<T>> partition(List<T> items, int size) {
+        return IntStream.range(0, (items.size() + size - 1) / size)
+            .mapToObj(i -> items.subList(i * size, Math.min(items.size(), (i + 1) * size)))
+            .toList();
     }
 
     @Value

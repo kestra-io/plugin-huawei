@@ -102,15 +102,15 @@ class PutEventsTest {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask()
             .events(List.of(
-                PutEvents.Event.builder()
-                    .source(Property.ofValue("my-order-service"))
-                    .type(Property.ofValue("com.mycompany.order.created"))
-                    .data(Property.ofValue(Map.of("orderId", 12345)))
-                    .build(),
-                PutEvents.Event.builder()
-                    .source(Property.ofValue("my-order-service"))
-                    .type(Property.ofValue("com.mycompany.order.cancelled"))
-                    .build()
+                Map.of(
+                    "source", "my-order-service",
+                    "type", "com.mycompany.order.created",
+                    "data", Map.of("orderId", 12345)
+                ),
+                Map.of(
+                    "source", "my-order-service",
+                    "type", "com.mycompany.order.cancelled"
+                )
             ))
             .build();
 
@@ -176,6 +176,33 @@ class PutEventsTest {
     }
 
     @Test
+    void putEvents_inlineExpression_renderedExactlyOnce_notReevaluated() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*" + putEventsPath()))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_count": 0, "events": [{"event_id": "evt-1"}]}
+                    """)));
+
+        // `dynamicSource` resolves to a string that itself looks like a Pebble expression. Rendering the event
+        // field exactly once must substitute it verbatim (`{{ 1 + 1 }}`); a second render would evaluate that to
+        // `2`. With a real secret in place of `1 + 1`, a double render would publish the resolved secret — this is
+        // the regression the Data-migration double-render introduced.
+        var runContext = runContextFactory.of(Map.of("dynamicSource", "{{ 1 + 1 }}"));
+        var task = baseTask()
+            .events(List.of(Map.of("source", "{{ dynamicSource }}", "type", "t")))
+            .build();
+
+        task.run(runContext);
+
+        var requests = wireMock.findAll(postRequestedFor(urlMatching(".*" + putEventsPath())));
+        assertThat(requests, hasSize(1));
+        var event = new ObjectMapper().readTree(requests.getFirst().getBodyAsString()).get("events").get(0);
+        assertThat(event.get("source").asText(), equalTo("{{ 1 + 1 }}"));
+    }
+
+    @Test
     void putEvents_fromStorageUri_readsIonEvents() throws Exception {
         wireMock.stubFor(post(urlMatching(".*" + putEventsPath()))
             .willReturn(aResponse()
@@ -189,10 +216,10 @@ class PutEventsTest {
 
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         try (var stream = new FileOutputStream(tempFile)) {
-            FileSerde.write(stream, PutEvents.Event.builder()
-                .source(Property.ofValue("my-order-service"))
-                .type(Property.ofValue("com.mycompany.order.created"))
-                .build());
+            FileSerde.write(stream, Map.of(
+                "source", "my-order-service",
+                "type", "com.mycompany.order.created"
+            ));
         }
         var storedUri = runContext.storage().putFile(tempFile);
 
@@ -202,6 +229,44 @@ class PutEventsTest {
 
         assertThat(output.getEventCount(), equalTo(1));
         assertThat(output.getFailedEventCount(), equalTo(0));
+    }
+
+    @Test
+    void putEvents_moreThanBatchSize_chunksIntoBatchesOfTen() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*" + putEventsPath()))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_count": 0, "events": []}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var events = java.util.stream.IntStream.range(0, 12)
+            .<Map<String, Object>>mapToObj(i -> Map.of("source", "svc", "type", "type." + i))
+            .toList();
+        var task = baseTask().events(events).build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getEventCount(), equalTo(12));
+        assertThat(output.getFailedEventCount(), equalTo(0));
+
+        // 12 events must be split into two requests of 10 and 2 (MAX_BATCH_SIZE = 10).
+        var requests = wireMock.findAll(postRequestedFor(urlMatching(".*" + putEventsPath())));
+        assertThat(requests, hasSize(2));
+        var mapper = new ObjectMapper();
+        var sizes = requests.stream()
+            .map(r -> {
+                try {
+                    return mapper.readTree(r.getBodyAsString()).get("events").size();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            })
+            .sorted()
+            .toList();
+        assertThat(sizes, equalTo(List.of(2, 10)));
     }
 
     // ── Partial failure ──────────────────────────────────────────────────────────
@@ -219,8 +284,8 @@ class PutEventsTest {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask()
             .events(List.of(
-                PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.a")).build(),
-                PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.b")).build()
+                Map.of("source", "svc", "type", "type.a"),
+                Map.of("source", "svc", "type", "type.b")
             ))
             .build();
 
@@ -243,8 +308,8 @@ class PutEventsTest {
         var task = baseTask()
             .failOnUnsuccessfulEvents(Property.ofValue(false))
             .events(List.of(
-                PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.a")).build(),
-                PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.b")).build()
+                Map.of("source", "svc", "type", "type.a"),
+                Map.of("source", "svc", "type", "type.b")
             ))
             .build();
 
@@ -269,7 +334,7 @@ class PutEventsTest {
     void putEvents_missingSource_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask()
-            .events(List.of(PutEvents.Event.builder().type(Property.ofValue("type.a")).build()))
+            .events(List.of(Map.of("type", "type.a")))
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
@@ -280,7 +345,7 @@ class PutEventsTest {
     void putEvents_missingType_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask()
-            .events(List.of(PutEvents.Event.builder().source(Property.ofValue("svc")).build()))
+            .events(List.of(Map.of("source", "svc")))
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
@@ -304,7 +369,7 @@ class PutEventsTest {
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .endpointOverride(Property.ofValue(wireMockUrl()))
             .channelId(Property.ofValue(CHANNEL_ID))
-            .events(List.of(PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.a")).build()))
+            .events(List.of(Map.of("source", "svc", "type", "type.a")))
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
@@ -319,7 +384,7 @@ class PutEventsTest {
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
             .channelId(Property.ofValue(CHANNEL_ID))
-            .events(List.of(PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.a")).build()))
+            .events(List.of(Map.of("source", "svc", "type", "type.a")))
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
@@ -334,7 +399,7 @@ class PutEventsTest {
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .projectId(Property.ofValue(PROJECT_ID))
             .channelId(Property.ofValue(CHANNEL_ID))
-            .events(List.of(PutEvents.Event.builder().source(Property.ofValue("svc")).type(Property.ofValue("type.a")).build()))
+            .events(List.of(Map.of("source", "svc", "type", "type.a")))
             .build();
 
         assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
@@ -360,11 +425,11 @@ class PutEventsTest {
             .projectId(Property.ofValue(projectId))
             .channelId(Property.ofValue(channelId))
             .events(List.of(
-                PutEvents.Event.builder()
-                    .source(Property.ofValue("kestra-plugin-huawei-test"))
-                    .type(Property.ofValue("io.kestra.test.event"))
-                    .data(Property.ofValue(Map.of("message", "hello from PutEventsTest")))
-                    .build()
+                Map.of(
+                    "source", "kestra-plugin-huawei-test",
+                    "type", "io.kestra.test.event",
+                    "data", Map.of("message", "hello from PutEventsTest")
+                )
             ))
             .build();
 
