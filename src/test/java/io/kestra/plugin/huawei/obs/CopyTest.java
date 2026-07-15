@@ -22,6 +22,7 @@ class CopyTest extends AbstractObsTest {
         var srcKey = "copy-test/" + IdUtils.create() + "/src.txt";
         var dstKey = "copy-test/" + IdUtils.create() + "/dst.txt";
         seedObject(srcKey, content, "text/plain");
+        trackForCleanup(dstKey);
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(Copy.builder())
@@ -56,6 +57,7 @@ class CopyTest extends AbstractObsTest {
         var srcKey = "copy-test/" + IdUtils.create() + "/to-move.txt";
         var dstKey = "copy-test/" + IdUtils.create() + "/moved.txt";
         seedObject(srcKey, content, "text/plain");
+        trackForCleanup(dstKey);
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(Copy.builder())

@@ -83,6 +83,7 @@ class TriggerTest extends AbstractObsTest {
         var srcPrefix = "trigger-test/" + runId + "/src/";
         var dstPrefix = "trigger-test/" + runId + "/dst/";
         seedObject(srcPrefix + "data.csv", "col1,col2", "text/csv");
+        trackPrefixForCleanup(dstPrefix);
 
         var trigger = applyObsConfig(Trigger.builder())
             .id(IdUtils.create())

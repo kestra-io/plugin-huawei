@@ -4,18 +4,26 @@ import com.obs.services.ObsClient;
 import com.obs.services.ObsConfiguration;
 import com.obs.services.exception.ObsException;
 import com.obs.services.model.CreateBucketRequest;
+import com.obs.services.model.DeleteObjectsRequest;
+import com.obs.services.model.KeyAndVersion;
+import com.obs.services.model.ListObjectsRequest;
 import com.obs.services.model.ObjectMetadata;
 import com.obs.services.model.PutObjectRequest;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -64,6 +72,20 @@ abstract class AbstractObsTest {
     /** Raw client used for seeding and verification, bypassing task code. */
     ObsClient rawClient;
 
+    /**
+     * Exact object keys to remove after each test. Auto-populated by {@link #seedObject}; tests that
+     * create objects through the task under test (Upload, Copy destination, …) register them via
+     * {@link #trackForCleanup(String)}.
+     */
+    private final Set<String> cleanupKeys = new LinkedHashSet<>();
+
+    /**
+     * Key prefixes to sweep-and-delete after each test, for objects whose exact keys the test does not
+     * know up front (e.g. MOVE destinations produced by Downloads/Trigger). Register via
+     * {@link #trackPrefixForCleanup(String)}.
+     */
+    private final Set<String> cleanupPrefixes = new LinkedHashSet<>();
+
     @Inject
     RunContextFactory runContextFactory;
 
@@ -111,6 +133,75 @@ abstract class AbstractObsTest {
         var req = new PutObjectRequest(testBucket, key, new ByteArrayInputStream(bytes));
         req.setMetadata(meta);
         rawClient.putObject(req);
+        cleanupKeys.add(key);
+    }
+
+    /** Registers an object key created by the task under test for post-test cleanup. */
+    void trackForCleanup(String key) {
+        cleanupKeys.add(key);
+    }
+
+    /** Registers a key prefix to sweep-and-delete after the test (for keys not known up front). */
+    void trackPrefixForCleanup(String prefix) {
+        cleanupPrefixes.add(prefix);
+    }
+
+    /**
+     * Best-effort removal of every object the test class touched, run once after all its methods.
+     *
+     * <p>The OBS integration tests were written for a disposable MinIO container; when repointed at a
+     * shared, persistent bucket (via {@code OBS_TEST_BUCKET}, as CI does against real Huawei Cloud OBS)
+     * they would otherwise accumulate forever. Cleanup is scoped to this run's own keys/prefixes so it
+     * never deletes objects belonging to a concurrent run against the same shared bucket. Failures are
+     * swallowed — cleanup must never turn a green test red, and the bucket lifecycle rule is the backstop.
+     *
+     * <p>Runs in {@code @AfterAll} (not {@code @AfterEach}) because some subclasses seed shared fixtures
+     * in {@code @BeforeAll} ({@link ListTest}); a per-method sweep would delete them out from under the
+     * remaining test methods.
+     */
+    @AfterAll
+    void cleanupSeededObjects() {
+        try {
+            var keys = new LinkedHashSet<>(cleanupKeys);
+            for (var prefix : cleanupPrefixes) {
+                var req = new ListObjectsRequest(testBucket);
+                req.setPrefix(prefix);
+                req.setMaxKeys(1000);
+                String marker = null;
+                do {
+                    req.setMarker(marker);
+                    var listing = rawClient.listObjects(req);
+                    listing.getObjects().forEach(o -> keys.add(o.getObjectKey()));
+                    marker = listing.isTruncated() ? listing.getNextMarker() : null;
+                } while (marker != null);
+            }
+            deleteInBatches(keys);
+        } catch (RuntimeException e) {
+            // Best-effort: leave the rest to the bucket lifecycle rule.
+        } finally {
+            cleanupKeys.clear();
+            cleanupPrefixes.clear();
+        }
+    }
+
+    /** Deletes keys in chunks of 1000 (the OBS deleteObjects per-request cap). */
+    private void deleteInBatches(Set<String> keys) {
+        var chunk = new ArrayList<KeyAndVersion>(1000);
+        for (var key : keys) {
+            chunk.add(new KeyAndVersion(key));
+            if (chunk.size() == 1000) {
+                flushDelete(chunk);
+                chunk.clear();
+            }
+        }
+        if (!chunk.isEmpty()) {
+            flushDelete(chunk);
+        }
+    }
+
+    private void flushDelete(List<KeyAndVersion> chunk) {
+        var req = new DeleteObjectsRequest(testBucket, false, chunk.toArray(KeyAndVersion[]::new));
+        rawClient.deleteObjects(req);
     }
 
     /**

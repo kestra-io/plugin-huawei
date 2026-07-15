@@ -85,6 +85,7 @@ class DownloadsTest extends AbstractObsTest {
         var srcPrefix = "downloads-test/" + runId + "/move-src/";
         var dstPrefix = "downloads-test/" + runId + "/move-dst/";
         seedObject(srcPrefix + "file.txt", "content-move", "text/plain");
+        trackPrefixForCleanup(dstPrefix);
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(Downloads.builder())
