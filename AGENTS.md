@@ -27,6 +27,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.functiongraph` — FunctionGraph tasks (`AbstractFunctionGraph`, `FunctionGraphConnectionInterface`, `FunctionGraphUtils`, `FunctionGraphInvokeException`, `Invoke`)
 - `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 - `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
+- `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -98,6 +99,12 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.ces.AbstractCesTrigger` — Connection-aware base for CES triggers extending `AbstractTrigger` and implementing `CesConnectionInterface`; holds the shared connection + endpoint properties (mirrors `AbstractObsTrigger`) so `Trigger` (and any future CES trigger) inherits them instead of re-declaring each one
 - `io.kestra.plugin.huawei.ces.CesUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `service.item` namespace format validation (`validateNamespaceFormat`, `validateCustomNamespace`)
 - `io.kestra.plugin.huawei.ces.Dimension` — Shared `name`/`value` pair used by both `Push` (per-metric dimensions) and `Query`/`Trigger` (resource-identifying dimensions), mapped to CES's `dim.0`/`dim.1`/`dim.2` query parameters as `name,value` strings
+
+**SMN (Simple Message Notification)**
+
+- `io.kestra.plugin.huawei.smn.Publish` — Publishes exactly one message to an SMN topic via `publishMessage`, the Huawei Cloud equivalent of `io.kestra.plugin.aws.sns.Publish`; requires exactly one of `message` (plain text), `messageStructure` (per-protocol `Property<Map<String, Object>>`, serialized to the JSON string SMN expects), or `messageTemplateName` (+ `tags` to fill its placeholders); `subject` applies only to `email` subscriptions; optional `messageAttributes` (name/type/value, only `STRING` type currently supported) and `timeToLive`; wraps `ServiceResponseException`/`SdkException` with actionable messages and returns `Output(messageId, requestId)`
+- `io.kestra.plugin.huawei.smn.AbstractSmn` — Base class extending `AbstractConnection`; builds `SmnClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SmnRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (SMN v2 APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.smn.SmnUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -258,6 +265,12 @@ plugin-huawei/
 │   │   ├── Query.java
 │   │   ├── Trigger.java
 │   │   └── package-info.java
+│   ├── smn/
+│   │   ├── AbstractSmn.java
+│   │   ├── SmnConnectionInterface.java
+│   │   ├── SmnUtils.java
+│   │   ├── Publish.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -305,6 +318,9 @@ plugin-huawei/
 │   │   ├── CesUtilsTest.java
 │   │   ├── QueryPushTest.java
 │   │   └── TriggerTest.java
+│   ├── smn/
+│   │   ├── SmnUtilsTest.java
+│   │   └── PublishTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -348,6 +364,12 @@ plugin-huawei/
 - CES v1 APIs embed the project ID in the request path (`/V1.0/{project_id}/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`, e.g. sovereign clouds like `myhuaweicloud.eu`) bypasses that and leaves `{project_id}` unsubstituted, yielding an opaque gateway 400 (`ces.0047 "URI incorrect."` / APIGW auth errors). `AbstractCes.client()` therefore fails fast requiring `projectId` whenever a custom endpoint is set — applies to `Push`, `Query`, and `Trigger` (which runs through `Query`)
 - CES `Push` always sends `ttl` (default 172800s / 2 days) and `collect_time` (default now); CES marks both mandatory on `createMetricData`, so they are never omitted even when the flow leaves them unset
 - CES integration test gate: `CES_TESTS=true`; WireMock-based unit tests run unconditionally
+- SMN SDK: `com.huaweicloud.sdk:huaweicloud-sdk-smn` (version managed by `huaweicloud-sdk-bom`); the publish API lives in `com.huaweicloud.sdk.smn.v2` (`SmnClient.publishMessage`); `SmnRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- SMN v2 APIs embed the project ID in the request path (`/v2/{project_id}/notifications/topics/{topic_urn}/publish`), same failure mode as CES/DLI: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractSmn.client()` fails fast requiring `projectId` whenever a custom endpoint is set
+- SMN topics are addressed by URN (`urn:smn:<region>:<project_id>:<topic_name>`), not an ARN; `Publish` sends exactly one message per call (no AWS-style multi-message `from` batching)
+- `Publish` requires exactly one of `message`, `messageStructure`, or `messageTemplateName` — fails fast naming all three when zero or more than one is set. `tags` is only valid together with `messageTemplateName`
+- SMN's `MessageAttribute.TypeEnum` also defines `STRING_ARRAY` and `PROTOCOL`, but `Publish.MessageAttributeType` only exposes `STRING` — the common case; extending to array/protocol semantics is deferred until a concrete need arises
+- SMN integration test gate: `SMN_TESTS=true` (real SMN topic; requires `SMN_TOPIC_URN` and `SMN_REGION` env vars); WireMock-based unit tests run unconditionally
 
 ## References
 
