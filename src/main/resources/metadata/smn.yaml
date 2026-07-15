@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.smn
+name: "smn"
+title: "Huawei SMN"
+description: "Tasks for Huawei Cloud SMN: publish notification messages to a topic."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"

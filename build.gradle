@@ -105,6 +105,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-ces") {
         exclude group: "org.slf4j"
     }
+
+    // SMN (Simple Message Notification) SDK — publish messages to topics via the SMN V2 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-smn") {
+        exclude group: "org.slf4j"
+    }
 }
 
 
