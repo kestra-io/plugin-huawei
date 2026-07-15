@@ -18,7 +18,7 @@ class DownloadsTest extends AbstractObsTest {
     @Test
     void downloads_actionNone_filesDownloadedAndObjectsRemain() throws Exception {
         var runId = IdUtils.create();
-        var prefix = "downloads-test/" + runId + "/none/";
+        var prefix = key(runId + "/none/");
         seedObject(prefix + "a.txt", "content-a", "text/plain");
         seedObject(prefix + "b.txt", "content-b", "text/plain");
 
@@ -52,7 +52,7 @@ class DownloadsTest extends AbstractObsTest {
     @Test
     void downloads_actionDelete_objectsAreRemovedAfterDownload() throws Exception {
         var runId = IdUtils.create();
-        var prefix = "downloads-test/" + runId + "/delete/";
+        var prefix = key(runId + "/delete/");
         seedObject(prefix + "x.txt", "content-x", "text/plain");
         seedObject(prefix + "y.txt", "content-y", "text/plain");
 
@@ -82,8 +82,8 @@ class DownloadsTest extends AbstractObsTest {
     @Test
     void downloads_actionMove_objectsRelocatedToNewPrefix() throws Exception {
         var runId = IdUtils.create();
-        var srcPrefix = "downloads-test/" + runId + "/move-src/";
-        var dstPrefix = "downloads-test/" + runId + "/move-dst/";
+        var srcPrefix = key(runId + "/move-src/");
+        var dstPrefix = key(runId + "/move-dst/");
         seedObject(srcPrefix + "file.txt", "content-move", "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());

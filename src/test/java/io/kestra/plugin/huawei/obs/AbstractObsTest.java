@@ -4,17 +4,23 @@ import com.obs.services.ObsClient;
 import com.obs.services.ObsConfiguration;
 import com.obs.services.exception.ObsException;
 import com.obs.services.model.CreateBucketRequest;
+import com.obs.services.model.DeleteObjectsRequest;
+import com.obs.services.model.KeyAndVersion;
+import com.obs.services.model.ListObjectsRequest;
 import com.obs.services.model.ObjectMetadata;
 import com.obs.services.model.PutObjectRequest;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
 import jakarta.inject.Inject;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -39,8 +45,9 @@ import java.util.UUID;
  *   OBS_TEST_BUCKET=my-pre-created-bucket
  * </pre>
  * When this variable is set the {@link #setUpBucket()} method skips creation and uses it directly.
- * The bucket must exist, be writable by the test credentials, and be exclusively used by this
- * test run (prefix isolation in each test provides logical separation).
+ * The bucket may be shared: every object key is namespaced under a per-run, per-class prefix (see
+ * {@link #key(String)}), giving logical isolation, and {@link #cleanupRunPrefix()} deletes only that
+ * namespace so concurrent runs never disturb each other.
  *
  * <p>The test gate ({@code OBS_MINIO_TESTS=true}) is unchanged and must always be set.
  */
@@ -64,8 +71,28 @@ abstract class AbstractObsTest {
     /** Raw client used for seeding and verification, bypassing task code. */
     ObsClient rawClient;
 
+    /**
+     * Per-run, per-class key namespace, e.g. {@code it/upload/3f2a9c…/}. The random component makes it
+     * unique per JVM run, so two concurrent CI runs sharing one real OBS bucket never collide — and so
+     * {@link #cleanupRunPrefix()} can delete every object this run created, seeded or task-produced, by
+     * sweeping this one prefix with no per-test bookkeeping. All object keys a test uses must be built
+     * through {@link #key(String)} so they land under here.
+     */
+    private final String runPrefix =
+        "it/" + getClass().getSimpleName().toLowerCase(Locale.ROOT).replace("test", "").replace("_", "")
+            + "/" + UUID.randomUUID().toString().replace("-", "") + "/";
+
     @Inject
     RunContextFactory runContextFactory;
+
+    /**
+     * Returns {@code suffix} rooted under this run's unique {@link #runPrefix}. Every object key a test
+     * touches — both what it seeds and what it hands to the task under test — must come from here, so the
+     * {@code @AfterAll} sweep catches it. New tests get cleanup for free just by using this helper.
+     */
+    String key(String suffix) {
+        return runPrefix + suffix;
+    }
 
     @BeforeAll
     void setUpBucket() {
@@ -111,6 +138,50 @@ abstract class AbstractObsTest {
         var req = new PutObjectRequest(testBucket, key, new ByteArrayInputStream(bytes));
         req.setMetadata(meta);
         rawClient.putObject(req);
+    }
+
+    /**
+     * Best-effort deletion of everything under this run's {@link #runPrefix}, once after all the class's
+     * test methods.
+     *
+     * <p>The OBS integration tests were written for a disposable MinIO container; when repointed at a
+     * shared, persistent bucket (via {@code OBS_TEST_BUCKET}, as CI does against real Huawei Cloud OBS)
+     * they would otherwise accumulate forever. Because every key is namespaced under {@link #runPrefix},
+     * a single prefix sweep removes seeded and task-produced objects alike without any per-test tracking,
+     * and it is inherently scoped to this run — it can never touch a concurrent run's data on the shared
+     * bucket. Failures are swallowed: cleanup must never turn a green test red, and the bucket lifecycle
+     * rule is the backstop.
+     *
+     * <p>Runs in {@code @AfterAll} (not {@code @AfterEach}) because some subclasses seed shared fixtures
+     * in {@code @BeforeAll} ({@link ListTest}); a per-method sweep would delete them out from under the
+     * remaining test methods.
+     */
+    @AfterAll
+    void cleanupRunPrefix() {
+        try {
+            var keys = new ArrayList<KeyAndVersion>();
+            var req = new ListObjectsRequest(testBucket);
+            req.setPrefix(runPrefix);
+            req.setMaxKeys(1000);
+            String marker = null;
+            do {
+                req.setMarker(marker);
+                var listing = rawClient.listObjects(req);
+                listing.getObjects().forEach(o -> keys.add(new KeyAndVersion(o.getObjectKey())));
+                marker = listing.isTruncated() ? listing.getNextMarker() : null;
+            } while (marker != null);
+            deleteInBatches(keys);
+        } catch (RuntimeException e) {
+            // Best-effort: leave the rest to the bucket lifecycle rule.
+        }
+    }
+
+    /** Deletes keys in chunks of 1000 (the OBS deleteObjects per-request cap). */
+    private void deleteInBatches(List<KeyAndVersion> keys) {
+        for (var i = 0; i < keys.size(); i += 1000) {
+            var chunk = keys.subList(i, Math.min(i + 1000, keys.size()));
+            rawClient.deleteObjects(new DeleteObjectsRequest(testBucket, false, chunk.toArray(KeyAndVersion[]::new)));
+        }
     }
 
     /**

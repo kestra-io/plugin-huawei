@@ -19,8 +19,8 @@ class CopyTest extends AbstractObsTest {
     @Test
     void copy_happyPath_destinationHasSameContent() throws Exception {
         var content = "copy test content";
-        var srcKey = "copy-test/" + IdUtils.create() + "/src.txt";
-        var dstKey = "copy-test/" + IdUtils.create() + "/dst.txt";
+        var srcKey = key(IdUtils.create() + "/src.txt");
+        var dstKey = key(IdUtils.create() + "/dst.txt");
         seedObject(srcKey, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -53,8 +53,8 @@ class CopyTest extends AbstractObsTest {
     @Test
     void copy_withDeleteTrue_sourceIsRemovedAfterCopy() throws Exception {
         var content = "move me";
-        var srcKey = "copy-test/" + IdUtils.create() + "/to-move.txt";
-        var dstKey = "copy-test/" + IdUtils.create() + "/moved.txt";
+        var srcKey = key(IdUtils.create() + "/to-move.txt");
+        var dstKey = key(IdUtils.create() + "/moved.txt");
         seedObject(srcKey, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
