@@ -110,6 +110,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-smn") {
         exclude group: "org.slf4j"
     }
+
+    // DIS (Data Ingestion Service) SDK — put/consume stream records via the DIS V2 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-dis") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

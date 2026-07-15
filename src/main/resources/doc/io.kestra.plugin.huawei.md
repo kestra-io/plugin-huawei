@@ -13,6 +13,7 @@ Tasks and triggers for Huawei Cloud services, spanning object storage, identity 
 - **FunctionGraph** (`io.kestra.plugin.huawei.functiongraph`): synchronously invoke a FunctionGraph function.
 - **KooCLI** (`io.kestra.plugin.huawei.koocli`): run arbitrary Huawei Cloud CLI (`hcloud`) commands in a container.
 - **SMN** (`io.kestra.plugin.huawei.smn`): publish notification messages to a topic.
+- **DIS** (`io.kestra.plugin.huawei.dis`): write and consume records on a data stream, and trigger flows on new records, the Huawei equivalent of AWS Kinesis Data Streams.
 
 ## Authentication
 

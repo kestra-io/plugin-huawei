@@ -28,6 +28,8 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.koocli` — KooCLI tasks (`KooCLI`)
 - `io.kestra.plugin.huawei.ces` — CES (Cloud Eye Service) tasks/trigger (`AbstractCes`, `AbstractCesTrigger`, `CesConnectionInterface`, `CesUtils`, `Dimension`, `Push`, `Query`, `Trigger`)
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
+- `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
+- `io.kestra.plugin.huawei.dis.models` — DIS output models (`Record`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -105,6 +107,20 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.smn.Publish` — Publishes exactly one message to an SMN topic via `publishMessage`, the Huawei Cloud equivalent of `io.kestra.plugin.aws.sns.Publish`; requires exactly one of `message` (plain text), `messageStructure` (per-protocol `Property<Map<String, Object>>`, serialized to the JSON string SMN expects), or `messageTemplateName` (+ `tags` to fill its placeholders); `subject` applies only to `email` subscriptions; optional `messageAttributes` (name/type/value, only `STRING` type currently supported) and `timeToLive` (`Property<Integer>` seconds, validated to SMN's 1–86400 range, sent to the SDK as a String); wraps `ServiceResponseException`/`SdkException` with actionable messages (`remediationHint` maps `SMN.0076`/`0027`/`0021` to console-specific next steps) and returns `Output(messageId, requestId)`
 - `io.kestra.plugin.huawei.smn.AbstractSmn` — Base class extending `AbstractConnection`; builds `SmnClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SmnRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (SMN v2 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.smn.SmnUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+
+**DIS (Data Ingestion Service)**
+
+- `io.kestra.plugin.huawei.dis.PutRecords` — Writes a batch of records to a stream via `sendRecords` (wraps `PutRecordsRequest`), the Huawei Cloud equivalent of `io.kestra.plugin.aws.kinesis.PutRecords`; accepts inline maps or a `kestra://` ION file via `io.kestra.core.models.property.Data`/`Data.From`; each record needs `data` and either `partitionKey` or `partitionId` (+ optional `explicitHashKey`); chunks batches to DIS's 500-record/5 MB-per-request limits and fails fast on any single record over 1 MB; DIS can reject individual records within an HTTP 200 response, so `failedRecordCount` and the `uri` output (per-record results) surface partial failures, and `failOnUnsuccessfulRecords` (default `true`) fails the task on any rejection
+- `io.kestra.plugin.huawei.dis.Consume` — One-shot task reading every partition of a stream (or a single `partitionId`) via `consumeRecords`/`showCursor`; loops round-robin across partitions until `maxRecords`/`maxDuration` or a full round returns zero records (caught up); always starts from `startingPosition` (`TRIM_HORIZON` default/`LATEST`/`AT_TIMESTAMP`) since it has no persisted state across executions; writes ND-decoded records to ION at `uri`
+- `io.kestra.plugin.huawei.dis.Trigger extends AbstractDisTrigger` — Polling trigger delegating to `Consume`'s shared `poll(...)` helper; persists a per-partition sequence-number watermark in the flow's namespace KV Store (key `dis_trigger_watermark_<flowId.length()>_<flowId>_<triggerId>`) so overlapping polls never re-deliver a record
+- `io.kestra.plugin.huawei.dis.RealtimeTrigger extends AbstractDisTrigger` — Persistent poll loop across every partition; fires one execution per record; persists the same KV Store watermark after each non-empty batch so a restart resumes near where it left off instead of re-reading the whole stream; `kill()`/`stop()` via `AtomicBoolean` + `CountDownLatch`
+- `io.kestra.plugin.huawei.dis.AbstractDis` — Base class extending `AbstractConnection`; delegates client construction to `DisService.buildClient(...)` (suffix-first endpoint ordering, mirrors `AbstractDli`/`AbstractSmn`; fails fast requiring `projectId` on a custom endpoint — DIS v2 APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.dis.AbstractDisTrigger` — Connection-aware base for both DIS triggers; holds the shared connection/endpoint properties and the same `client(RunContext)` factory (via `DisService.buildClient`) so `Trigger` and `RealtimeTrigger` inherit them instead of re-declaring each one
+- `io.kestra.plugin.huawei.dis.DisService` — Package-private static helpers: `buildClient(...)` (shared by both base classes), `listPartitionIds(...)` (paginated via `hasMorePartitions`), `cursorFor(...)` (resolves a partition cursor from `startingPosition`/`startingTimestamp`, or resumes `AFTER_SEQUENCE_NUMBER` when a watermark is supplied)
+- `io.kestra.plugin.huawei.dis.DisWatermark` — Package-private KV Store helpers shared by `Trigger` and `RealtimeTrigger`: builds the length-prefixed watermark key and reads/writes the per-partition sequence-number map
+- `io.kestra.plugin.huawei.dis.DisUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.dis.SerdeType` — `STRING`/`JSON`/`BINARY` serialization for the record `data` payload, applied before/after DIS's own base64 wire encoding
+- `io.kestra.plugin.huawei.dis.StartingPosition` — `TRIM_HORIZON`/`LATEST`/`AT_TIMESTAMP`, mirroring DIS's `ShowCursorRequest.CursorTypeEnum` subset relevant to a first read
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -271,6 +287,22 @@ plugin-huawei/
 │   │   ├── SmnUtils.java
 │   │   ├── Publish.java
 │   │   └── package-info.java
+│   ├── dis/
+│   │   ├── AbstractDis.java
+│   │   ├── AbstractDisTrigger.java
+│   │   ├── DisConnectionInterface.java
+│   │   ├── DisService.java
+│   │   ├── DisUtils.java
+│   │   ├── DisWatermark.java
+│   │   ├── SerdeType.java
+│   │   ├── StartingPosition.java
+│   │   ├── PutRecords.java
+│   │   ├── Consume.java
+│   │   ├── Trigger.java
+│   │   ├── RealtimeTrigger.java
+│   │   ├── package-info.java
+│   │   └── models/
+│   │       └── Record.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -321,6 +353,11 @@ plugin-huawei/
 │   ├── smn/
 │   │   ├── SmnUtilsTest.java
 │   │   └── PublishTest.java
+│   ├── dis/
+│   │   ├── DisUtilsTest.java
+│   │   ├── PutRecordsTest.java
+│   │   ├── ConsumeTest.java
+│   │   └── TriggerTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -370,6 +407,12 @@ plugin-huawei/
 - `Publish` requires exactly one of `message`, `messageStructure`, or `messageTemplateName` — fails fast naming all three when zero or more than one is set. `tags` is only valid together with `messageTemplateName`
 - SMN's `MessageAttribute.TypeEnum` also defines `STRING_ARRAY` and `PROTOCOL`, but `Publish.MessageAttributeType` only exposes `STRING` — the common case; extending to array/protocol semantics is deferred until a concrete need arises
 - SMN integration test gate: `SMN_TESTS=true` (real SMN topic; requires `SMN_TOPIC_URN` and `SMN_REGION` env vars); WireMock-based unit tests run unconditionally
+- DIS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dis` (version managed by `huaweicloud-sdk-bom`); the stream API lives in `com.huaweicloud.sdk.dis.v2` (`DisClient`); `DisRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- DIS v2 APIs embed the project ID in the request path (`/v2/{project_id}/...`), same failure mode as CES/SMN/DLI: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractDis.client()`/`AbstractDisTrigger.client()` (both delegating to `DisService.buildClient(...)`) fail fast requiring `projectId` whenever a custom endpoint is set
+- DIS has no dedicated `putRecords`/`getRecords`/`getPartitionCursor` methods on `DisClient` despite the model classes (`PutRecordsRequest`, etc.) being named that way: writes go through `sendRecords` (wrapping `PutRecordsRequest`/`PutRecordsResultEntry`), partition-cursor resolution through `showCursor` (`ShowCursorRequest.CursorTypeEnum`: `TRIM_HORIZON`/`LATEST`/`AT_TIMESTAMP`/`AT_SEQUENCE_NUMBER`/`AFTER_SEQUENCE_NUMBER`), reads through `consumeRecords`, and partition enumeration through `showStream` (paginated via `hasMorePartitions`/`startPartitionId`)
+- `PutRecords` can receive an HTTP 200 from `sendRecords` while still rejecting individual records (`failedRecordCount` > 0 in the body) — `failOnUnsuccessfulRecords` (default `true`) fails the task in that case; per-record results (including `errorCode`/`errorMessage`) are written to ION at `uri` rather than returned inline, since a batch can be arbitrarily large
+- `Trigger` and `RealtimeTrigger` deliberately avoid DIS's server-side app/checkpoint API (`CreateApp`/`CommitCheckpoint`/`ShowCheckpoint`/`ShowConsumerState`) in favor of client-side partition cursors plus a watermark (last delivered sequence number per partition) persisted in the flow's namespace KV Store, mirroring `ces.Trigger`'s watermark approach; the KV key is length-prefixed (`dis_trigger_watermark_<flowId.length()>_<flowId>_<triggerId>`) to avoid `flowId`/`triggerId` concatenation collisions
+- DIS integration test gate: `DIS_TESTS=true` (real DIS stream; requires `DIS_STREAM_NAME` and `DIS_REGION` env vars); WireMock-based unit tests run unconditionally
 
 ## References
 
