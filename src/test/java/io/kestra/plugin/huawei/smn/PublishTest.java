@@ -288,6 +288,71 @@ class PublishTest {
         assertThat(ex.getMessage(), is(containsString("topicUrn")));
     }
 
+    @Test
+    void publish_defaultTemplateMissing_wrapsWithConsoleHint() {
+        wireMock.stubFor(WireMock.post(urlMatching(".*/notifications/topics/.*/publish"))
+            .willReturn(aResponse()
+                .withStatus(400)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"error_code": "SMN.0076", "error_msg": "Default message template not found."}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Publish.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .topicUrn(Property.ofValue(TOPIC_URN))
+            .messageTemplateName(Property.ofValue("kestra_qa_tpl"))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        // Surfaces SMN's own message plus the console-specific next step, not the generic hint.
+        assertThat(ex.getMessage(), is(containsString("Default message template not found")));
+        assertThat(ex.getMessage(), is(containsString("SMN console")));
+        assertThat(ex.getMessage(), is(containsString("Protocol `Default`")));
+    }
+
+    // ── remediationHint mapping (pure, no WireMock) ──────────────────────────────
+
+    @Test
+    void remediationHint_defaultTemplateMissing_byCode_pointsToConsole() {
+        var hint = Publish.remediationHint("SMN.0076", "Default message template not found.");
+        assertThat(hint, is(containsString("SMN console")));
+        assertThat(hint, is(containsString("Protocol `Default`")));
+    }
+
+    @Test
+    void remediationHint_defaultTemplateMissing_byMessageWhenCodeAbsent() {
+        // Robust to regions/gateways that omit the error code but keep the message.
+        var hint = Publish.remediationHint(null, "Default message template not found.");
+        assertThat(hint, is(containsString("Message Templates")));
+        assertThat(hint, is(containsString("Protocol `Default`")));
+    }
+
+    @Test
+    void remediationHint_templateNotFound_pointsToMessageTemplateName() {
+        var hint = Publish.remediationHint("SMN.0027", "Template not found.");
+        assertThat(hint, is(containsString("messageTemplateName")));
+    }
+
+    @Test
+    void remediationHint_invalidMessageStructure_explainsDefaultKey() {
+        var hint = Publish.remediationHint("SMN.0021", "MessageStructure is invalid.");
+        assertThat(hint, is(containsString("messageStructure")));
+        assertThat(hint, is(containsString("default")));
+    }
+
+    @Test
+    void remediationHint_unknownCode_fallsBackToGenericHint() {
+        var hint = Publish.remediationHint("SMN.9999", "Some other error.");
+        assertThat(hint, is(containsString("topicUrn")));
+        assertThat(hint, is(containsString("SMN FullAccess")));
+    }
+
     // ── Integration test (guarded) ───────────────────────────────────────────────
 
     @Test

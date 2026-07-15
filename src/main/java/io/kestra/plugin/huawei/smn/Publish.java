@@ -27,6 +27,7 @@ import lombok.extern.jackson.Jacksonized;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @SuperBuilder
@@ -133,6 +134,10 @@ public class Publish extends AbstractSmn implements RunnableTask<Publish.Output>
             Publishes via a pre-created SMN message template instead of an inline body. Combine with
             `tags` to fill the template's placeholders. Mutually exclusive with `message` and
             `messageStructure` — exactly one must be set.
+
+            The template must include a variant with the `Default` protocol (SMN's mandatory fallback for
+            every subscription protocol); otherwise SMN rejects the publish with `SMN.0076 Default message
+            template not found`.
             """
     )
     @PluginProperty(group = "main")
@@ -248,10 +253,41 @@ public class Publish extends AbstractSmn implements RunnableTask<Publish.Output>
         } catch (ServiceResponseException e) {
             throw new IllegalStateException(
                 "SMN publish failed (HTTP " + e.getHttpStatusCode() + "): " + e.getErrorMsg() +
-                " — verify that 'topicUrn' is correct and that the AK/SK has 'SMN FullAccess' permission.", e);
+                remediationHint(e.getErrorCode(), e.getErrorMsg()), e);
         } catch (SdkException e) {
             throw new IllegalStateException("SMN SDK error publishing message: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Builds an actionable remediation hint appended to the wrapped SMN error.
+     *
+     * <p>Several SMN failures are console/account configuration issues the flow author must fix in the
+     * SMN console rather than in the flow — most notably {@code SMN.0076}, raised when publishing via
+     * {@code messageTemplateName} while the template has no {@code Default}-protocol variant (SMN uses
+     * that variant as the fallback for every subscription protocol, so it is mandatory). A blanket
+     * "check topicUrn/permissions" hint is misleading for those, so map the known codes to a concrete
+     * next step and fall back to the generic hint otherwise. Matching is by error code <em>or</em>
+     * error-message text, since the exact code population can vary by region/gateway.
+     */
+    static String remediationHint(String errorCode, String errorMsg) {
+        var code = errorCode == null ? "" : errorCode.trim();
+        var msg = errorMsg == null ? "" : errorMsg.toLowerCase(Locale.ROOT);
+
+        if (code.equals("SMN.0076") || msg.contains("default message template")) {
+            return " — the message template has no `Default`-protocol variant. In the SMN console " +
+                "(Message Templates), create a template with the SAME name and Protocol `Default` " +
+                "(the mandatory fallback for every protocol), then retry.";
+        }
+        if (code.equals("SMN.0027") || (msg.contains("template") && msg.contains("not found"))) {
+            return " — no message template named in `messageTemplateName` exists in this region. " +
+                "Create it in the SMN console (Message Templates), or correct `messageTemplateName`.";
+        }
+        if (code.equals("SMN.0021") || msg.contains("messagestructure")) {
+            return " — `messageStructure` is invalid: it must be a JSON object that includes a `default` " +
+                "entry alongside any per-protocol keys.";
+        }
+        return " — verify that 'topicUrn' is correct and that the AK/SK has 'SMN FullAccess' permission.";
     }
 
     public enum MessageAttributeType {
