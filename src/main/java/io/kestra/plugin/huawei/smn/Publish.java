@@ -165,7 +165,7 @@ public class Publish extends AbstractSmn implements RunnableTask<Publish.Output>
         title = "Time-to-live",
         description = "How long SMN retains the message for retry before giving up, e.g. `3600` (seconds). Optional; SMN applies its own default when omitted."
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "reliability")
     private Property<String> timeToLive;
 
     @Override
