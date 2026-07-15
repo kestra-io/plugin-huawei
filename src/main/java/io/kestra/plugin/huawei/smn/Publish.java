@@ -101,6 +101,9 @@ import java.util.Map;
 )
 public class Publish extends AbstractSmn implements RunnableTask<Publish.Output> {
 
+    // SMN caps message time-to-live at 86400s (24h); minimum 1s. SMN applies its own 3600s default when omitted.
+    private static final int MAX_TIME_TO_LIVE_SECONDS = 86_400;
+
     @Schema(
         title = "Topic URN to publish to",
         description = "Format: `urn:smn:<region>:<project_id>:<topic_name>`, found on the SMN topic's detail page."
@@ -163,10 +166,11 @@ public class Publish extends AbstractSmn implements RunnableTask<Publish.Output>
 
     @Schema(
         title = "Time-to-live",
-        description = "How long SMN retains the message for retry before giving up, e.g. `3600` (seconds). Optional; SMN applies its own default when omitted."
+        description = "How long SMN retains the message for retry before giving up, in seconds. Must be a positive " +
+            "integer from 1 to 86400 (24 hours). Optional; SMN applies its own default (3600s) when omitted."
     )
     @PluginProperty(group = "reliability")
-    private Property<String> timeToLive;
+    private Property<Integer> timeToLive;
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -233,9 +237,15 @@ public class Publish extends AbstractSmn implements RunnableTask<Publish.Output>
             body.withMessageAttributes(sdkAttributes);
         }
 
-        var rTimeToLive = runContext.render(timeToLive).as(String.class).orElse(null);
-        if (rTimeToLive != null && !rTimeToLive.isBlank()) {
-            body.withTimeToLive(rTimeToLive);
+        var rTimeToLive = runContext.render(timeToLive).as(Integer.class).orElse(null);
+        if (rTimeToLive != null) {
+            if (rTimeToLive < 1 || rTimeToLive > MAX_TIME_TO_LIVE_SECONDS) {
+                throw new IllegalArgumentException(
+                    "'timeToLive' must be a positive integer from 1 to " + MAX_TIME_TO_LIVE_SECONDS +
+                    " seconds (24 hours), but was " + rTimeToLive + ".");
+            }
+            // The SMN SDK models time_to_live as a String of seconds.
+            body.withTimeToLive(String.valueOf(rTimeToLive));
         }
 
         var client = client(runContext);

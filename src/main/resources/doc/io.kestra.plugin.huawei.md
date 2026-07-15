@@ -1,6 +1,6 @@
 # How to use the Huawei Cloud plugin
 
-Tasks and triggers for Huawei Cloud services: Object Storage Service (OBS), Identity and Access Management (IAM), Distributed Message Service (DMS) for Kafka and RocketMQ, and DataArts Studio.
+Tasks and triggers for Huawei Cloud services, spanning object storage, identity and access management, messaging, data integration, monitoring, serverless functions, CLI access, and notifications. See the full list below.
 
 ## Services
 
@@ -10,6 +10,8 @@ Tasks and triggers for Huawei Cloud services: Object Storage Service (OBS), Iden
 - **DMS for RocketMQ** (`io.kestra.plugin.huawei.dms.rocketmq`): publish, consume, and trigger on messages using the Apache RocketMQ protocol.
 - **DataArts Studio** (`io.kestra.plugin.huawei.dataarts`): start, monitor, and stop DataArts Factory batch job runs.
 - **CES** (`io.kestra.plugin.huawei.ces`): push custom metrics, query metric statistics, and trigger flows on metric datapoints.
+- **FunctionGraph** (`io.kestra.plugin.huawei.functiongraph`): synchronously invoke a FunctionGraph function.
+- **KooCLI** (`io.kestra.plugin.huawei.koocli`): run arbitrary Huawei Cloud CLI (`hcloud`) commands in a container.
 - **SMN** (`io.kestra.plugin.huawei.smn`): publish notification messages to a topic.
 
 ## Authentication

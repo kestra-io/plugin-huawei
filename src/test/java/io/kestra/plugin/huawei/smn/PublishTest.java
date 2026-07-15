@@ -161,6 +161,73 @@ class PublishTest {
     }
 
     @Test
+    void publish_messageTemplateName_sendsTemplateAndForwardsTags() throws Exception {
+        stubPublishSuccess();
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Publish.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .topicUrn(Property.ofValue(TOPIC_URN))
+            .messageTemplateName(Property.ofValue("kestra_qa_tpl"))
+            .tags(Property.ofValue(Map.of("jobName", "nightly-etl", "status", "SUCCESS")))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getMessageId(), equalTo("msg-456"));
+        wireMock.verify(postRequestedFor(urlMatching(".*/notifications/topics/.*/publish"))
+            .withRequestBody(WireMock.matchingJsonPath("$.message_template_name", WireMock.equalTo("kestra_qa_tpl")))
+            .withRequestBody(WireMock.matchingJsonPath("$.tags.jobName", WireMock.equalTo("nightly-etl")))
+            .withRequestBody(WireMock.matchingJsonPath("$.tags.status", WireMock.equalTo("SUCCESS"))));
+    }
+
+    @Test
+    void publish_timeToLive_forwardedAsStringSeconds() throws Exception {
+        stubPublishSuccess();
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Publish.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .topicUrn(Property.ofValue(TOPIC_URN))
+            .message(Property.ofValue("hello"))
+            .timeToLive(Property.ofValue(3600))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getMessageId(), equalTo("msg-456"));
+        wireMock.verify(postRequestedFor(urlMatching(".*/notifications/topics/.*/publish"))
+            .withRequestBody(WireMock.matchingJsonPath("$.time_to_live", WireMock.equalTo("3600"))));
+    }
+
+    @Test
+    void publish_timeToLiveOutOfRange_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = Publish.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .topicUrn(Property.ofValue(TOPIC_URN))
+            .message(Property.ofValue("hello"))
+            .timeToLive(Property.ofValue(999_999))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("timeToLive")));
+        assertThat(ex.getMessage(), is(containsString("86400")));
+    }
+
+    @Test
     void publish_noModeSet_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
