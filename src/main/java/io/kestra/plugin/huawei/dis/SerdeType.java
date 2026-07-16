@@ -29,7 +29,13 @@ public enum SerdeType {
         return switch (this) {
             case STRING -> value.toString().getBytes(StandardCharsets.UTF_8);
             case JSON -> JacksonMapper.ofJson().writeValueAsBytes(value);
-            case BINARY -> (byte[]) value;
+            case BINARY -> {
+                if (!(value instanceof byte[] b)) {
+                    throw new IllegalArgumentException(
+                        "'data' must be a byte array when serdeType=BINARY, got " + value.getClass().getSimpleName());
+                }
+                yield b;
+            }
         };
     }
 

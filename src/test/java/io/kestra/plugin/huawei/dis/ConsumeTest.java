@@ -5,6 +5,7 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.FileSerde;
 import io.kestra.plugin.huawei.dis.models.Record;
@@ -15,7 +16,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.time.Duration;
 import java.util.Base64;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +31,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -93,6 +97,80 @@ class ConsumeTest {
                 .withBody("""
                     {"partition_cursor": "initial-cursor"}
                     """)));
+    }
+
+    private void stubTwoPartitionStream() {
+        wireMock.stubFor(get(urlMatching(".*/streams/.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"stream_name": "my-stream", "partitions": [
+                        {"partition_id": "0", "status": "ACTIVE"},
+                        {"partition_id": "1", "status": "ACTIVE"}
+                    ], "has_more_partitions": false}
+                    """)));
+    }
+
+    private void stubCursorForPartition(String partitionId, String cursor) {
+        wireMock.stubFor(get(urlMatching(".*/cursors.*"))
+            .withQueryParam("partition-id", WireMock.equalTo(partitionId))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"partition_cursor\": \"" + cursor + "\"}")));
+    }
+
+    private void stubRecordsForCursor(String cursor, String body) {
+        wireMock.stubFor(get(urlMatching(".*/records.*"))
+            .withQueryParam("partition-cursor", WireMock.equalTo(cursor))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(body)));
+    }
+
+    private String encode(String s) {
+        return Base64.getEncoder().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void poll_multiplePartitions_roundRobinsAndTracksPerPartitionWatermark() throws Exception {
+        stubTwoPartitionStream();
+        stubCursorForPartition("0", "p0-c1");
+        stubCursorForPartition("1", "p1-c1");
+
+        stubRecordsForCursor("p0-c1", """
+            {"records": [
+                {"partition_key": "pk0", "sequence_number": "p0-seq-1", "data": "%s", "timestamp": 1000},
+                {"partition_key": "pk0", "sequence_number": "p0-seq-2", "data": "%s", "timestamp": 2000}
+            ], "next_partition_cursor": "p0-c2"}
+            """.formatted(encode("p0-first"), encode("p0-second")));
+        stubRecordsForCursor("p0-c2", """
+            {"records": [], "next_partition_cursor": "p0-c2"}
+            """);
+        stubRecordsForCursor("p1-c1", """
+            {"records": [
+                {"partition_key": "pk1", "sequence_number": "p1-seq-1", "data": "%s", "timestamp": 1500}
+            ], "next_partition_cursor": "p1-c2"}
+            """.formatted(encode("p1-first")));
+        stubRecordsForCursor("p1-c2", """
+            {"records": [], "next_partition_cursor": "p1-c2"}
+            """);
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var client = baseTask().build().client(runContext);
+        var out = new ByteArrayOutputStream();
+
+        var result = Consume.poll(
+            runContext, client, "my-stream", List.of("0", "1"), null,
+            StartingPosition.TRIM_HORIZON, null, SerdeType.STRING,
+            100, null, Consume.MAX_FETCH_BYTES_HARD_CAP, out
+        );
+
+        assertThat(result.count(), equalTo(3));
+        assertThat(result.lastSequenceNumbers().get("0"), equalTo("p0-seq-2"));
+        assertThat(result.lastSequenceNumbers().get("1"), equalTo("p1-seq-1"));
     }
 
     @Test
@@ -181,7 +259,7 @@ class ConsumeTest {
             .streamName(Property.ofValue("my-stream"))
             .build();
 
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
     }
 
     @Test
@@ -189,7 +267,7 @@ class ConsumeTest {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask().maxRecords(Property.ofValue(Consume.MAX_RECORDS_HARD_CAP + 1)).build();
 
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
     }
 
     @Test
@@ -204,10 +282,10 @@ class ConsumeTest {
             .maxDuration(Property.ofValue(Duration.ofHours(25)))
             .build();
 
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
     }
 
-    private List<Record> readRecords(io.kestra.core.runners.RunContext runContext, java.net.URI uri) throws Exception {
+    private List<Record> readRecords(RunContext runContext, URI uri) throws Exception {
         try (var reader = new InputStreamReader(runContext.storage().getFile(uri), StandardCharsets.UTF_8)) {
             return FileSerde.readAll(reader, Record.class).collectList().block();
         }

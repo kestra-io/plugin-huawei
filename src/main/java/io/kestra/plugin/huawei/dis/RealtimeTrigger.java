@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
@@ -80,6 +81,11 @@ public class RealtimeTrigger extends AbstractDisTrigger
 
     // Delay between rounds when a full round across all partitions returned zero records, to avoid busy-spinning DIS.
     private static final Duration IDLE_POLL_DELAY = Duration.ofSeconds(2);
+
+    // consumeRecords() is a blocking HTTP call with no wakeup() equivalent, so a kill() during a slow or
+    // hanging call must not block indefinitely: cap the wait and let the poll loop finish tearing down in
+    // the background instead.
+    private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
     @Schema(title = "DIS stream name")
     @NotNull
@@ -236,10 +242,15 @@ public class RealtimeTrigger extends AbstractDisTrigger
         if (!isActive.compareAndSet(true, false)) {
             return;
         }
-        LoggerFactory.getLogger(RealtimeTrigger.class).debug("Stopping DIS realtime trigger triggerId={} (wait={})", this.id, wait);
+        var logger = LoggerFactory.getLogger(RealtimeTrigger.class);
+        logger.debug("Stopping DIS realtime trigger triggerId={} (wait={})", this.id, wait);
         if (wait) {
             try {
-                waitForTermination.await();
+                if (!waitForTermination.await(SHUTDOWN_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+                    logger.warn(
+                        "DIS realtime trigger triggerId={} did not terminate within {} — proceeding without waiting further",
+                        this.id, SHUTDOWN_TIMEOUT);
+                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }

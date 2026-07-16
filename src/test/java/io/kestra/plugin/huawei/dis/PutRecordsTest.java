@@ -5,6 +5,7 @@ import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
+import io.kestra.core.runners.RunContext;
 import io.kestra.core.runners.RunContextFactory;
 import io.kestra.core.serializers.FileSerde;
 import jakarta.inject.Inject;
@@ -16,13 +17,17 @@ import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.io.InputStreamReader;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.exactly;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -209,7 +214,50 @@ class PutRecordsTest {
         assertThat(output.getFailedRecordCount(), equalTo(1));
     }
 
-    private List<PutRecords.Result> readResults(io.kestra.core.runners.RunContext runContext, java.net.URI uri) throws Exception {
+    // ── Chunking ───────────────────────────────────────────────────────────────
+
+    @Test
+    void run_recordCountExceedsBatchLimit_chunksIntoTwoRequests() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*/records"))
+            .inScenario("chunking")
+            .whenScenarioStateIs("Started")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_record_count": 0, "records": []}
+                    """))
+            .willSetStateTo("second-batch"));
+        wireMock.stubFor(post(urlMatching(".*/records"))
+            .inScenario("chunking")
+            .whenScenarioStateIs("second-batch")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_record_count": 1, "records": [
+                        {"error_code": "DIS.4302", "error_message": "Too many requests."}
+                    ]}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var records = new ArrayList<Map<String, Object>>();
+        for (var i = 0; i < 501; i++) {
+            records.add(Map.of("data", "record-" + i, "partitionKey", "user-1"));
+        }
+        var task = baseTask()
+            .from(records)
+            .failOnUnsuccessfulRecords(Property.ofValue(false))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRecordCount(), equalTo(501));
+        assertThat(output.getFailedRecordCount(), equalTo(1));
+        wireMock.verify(exactly(2), postRequestedFor(urlMatching(".*/records")));
+    }
+
+    private List<PutRecords.Result> readResults(RunContext runContext, URI uri) throws Exception {
         try (var reader = new InputStreamReader(runContext.storage().getFile(uri), StandardCharsets.UTF_8)) {
             return FileSerde.readAll(reader, PutRecords.Result.class).collectList().block();
         }

@@ -253,10 +253,15 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
                 try {
                     response = client.consumeRecords(request);
                 } catch (ServiceResponseException e) {
+                    // A 401/403 means the credentials themselves are rejected, not the cursor — retrying with a
+                    // fresh cursor would just repeat the same failure while masking the real problem.
+                    if (e.getHttpStatusCode() == 401 || e.getHttpStatusCode() == 403) {
+                        throw e;
+                    }
                     // DIS partition cursors expire after a few minutes of inactivity. Rather than guess at a
-                    // specific error code (which Huawei does not document as stable), treat any rejection here
+                    // specific error code (which Huawei does not document as stable), treat any other rejection here
                     // as a possibly-expired cursor and request a fresh one from the last known sequence number.
-                    logger.debug("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
+                    logger.warn("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
                     var refreshed = DisService.cursorFor(
                         client, rStreamName, pid, rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid));
                     response = client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(refreshed).withMaxFetchBytes(rMaxFetchBytes));
