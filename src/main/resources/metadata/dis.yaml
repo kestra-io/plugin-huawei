@@ -1,6 +1,6 @@
 group: io.kestra.plugin.huawei.dis
 name: "dis"
-title: "DIS"
+title: "Huawei DIS"
 description: "Tasks and triggers for Huawei Cloud DIS (Data Ingestion Service): write and consume records on a data stream, the Huawei equivalent of AWS Kinesis Data Streams."
 body: ""
 videos: []
