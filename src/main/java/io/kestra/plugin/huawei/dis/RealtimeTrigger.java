@@ -192,7 +192,12 @@ public class RealtimeTrigger extends AbstractDisTrigger
                         try {
                             response = client.consumeRecords(request);
                         } catch (ServiceResponseException e) {
-                            logger.debug("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
+                            // A 401/403 means the credentials themselves are rejected, not the cursor — retrying with a
+                            // fresh cursor would just repeat the same failure while masking the real problem.
+                            if (e.getHttpStatusCode() == 401 || e.getHttpStatusCode() == 403) {
+                                throw e;
+                            }
+                            logger.warn("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
                             var refreshed = DisService.cursorFor(
                                 client, rStreamName, pid, rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid));
                             response = client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(refreshed).withMaxFetchBytes(rMaxFetchBytes));
