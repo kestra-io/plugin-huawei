@@ -72,14 +72,30 @@ abstract class AbstractObsTest {
     ObsClient rawClient;
 
     /**
-     * Per-run, per-class key namespace, e.g. {@code it/upload/3f2a9c…/}. The random component makes it
-     * unique per JVM run, so two concurrent CI runs sharing one real OBS bucket never collide — and so
-     * {@link #cleanupRunPrefix()} can delete every object this run created, seeded or task-produced, by
-     * sweeping this one prefix with no per-test bookkeeping. All object keys a test uses must be built
-     * through {@link #key(String)} so they land under here.
+     * CI-run scope shared by every test class in this JVM: {@code GITHUB_RUN_ID} when running in
+     * GitHub Actions, else a random id for local runs. Rooting every {@link #runPrefix} under this
+     * lets {@code .github/cleanup-unit.sh} reclaim exactly this CI run's objects — and nothing a
+     * concurrent run created — by sweeping {@code it/<GITHUB_RUN_ID>/}.
+     */
+    private static final String RUN_SCOPE = resolveRunScope();
+
+    private static String resolveRunScope() {
+        var runId = System.getenv("GITHUB_RUN_ID");
+        return runId != null && !runId.isBlank()
+            ? runId
+            : UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * Per-run, per-class key namespace, e.g. {@code it/<GITHUB_RUN_ID>/upload/3f2a9c…/}. The random
+     * component makes it unique per JVM run, so two concurrent CI runs sharing one real OBS bucket
+     * never collide — and so {@link #cleanupRunPrefix()} can delete every object this run created,
+     * seeded or task-produced, by sweeping this one prefix with no per-test bookkeeping. All object
+     * keys a test uses must be built through {@link #key(String)} so they land under here.
      */
     private final String runPrefix =
-        "it/" + getClass().getSimpleName().toLowerCase(Locale.ROOT).replace("test", "").replace("_", "")
+        "it/" + RUN_SCOPE + "/"
+            + getClass().getSimpleName().toLowerCase(Locale.ROOT).replace("test", "").replace("_", "")
             + "/" + UUID.randomUUID().toString().replace("-", "") + "/";
 
     @Inject
