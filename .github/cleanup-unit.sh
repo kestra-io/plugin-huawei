@@ -11,6 +11,7 @@ set -uo pipefail
 # eu-west-101 is Huawei's EU cloud — endpoints live under .myhuaweicloud.eu, not .com.
 OBS_ENDPOINT="https://obs.eu-west-101.myhuaweicloud.eu"
 OBS_BUCKET="kestra-unit-test"
+# DO NOT REMOVE OBS_REGION / AWS_DEFAULT_REGION below — load-bearing, not boilerplate.
 # OBS's S3-compatible API validates the SigV4 region in the request. Without this the aws CLI signs
 # for its default (us-east-1), OBS rejects it with SignatureDoesNotMatch, and — because the error is
 # swallowed below — the delete becomes a silent no-op that leaves every object behind. Setting the
