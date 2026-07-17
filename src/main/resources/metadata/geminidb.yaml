@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.geminidb
+name: "geminidb"
+title: "Huawei GeminiDB"
+description: "Tasks for Huawei Cloud GeminiDB for NoSQL: put, get, delete, query, and scan items via its DynamoDB-Compatible API."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
