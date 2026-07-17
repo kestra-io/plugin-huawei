@@ -115,6 +115,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-dli") {
         exclude group: "org.slf4j"
     }
+
+    // EventGrid (EG) SDK — publish CloudEvents to a custom channel via the EG v1 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-eg") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

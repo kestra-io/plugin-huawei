@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.eventgrid
+name: "eventgrid"
+title: "Huawei EventGrid"
+description: "Tasks for Huawei Cloud EventGrid: publish CloudEvents-formatted events to a custom channel."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
