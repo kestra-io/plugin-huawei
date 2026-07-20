@@ -25,8 +25,10 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Get a GeminiDB (DynamoDB-compatible) item by key",
-    description = "Retrieves a single item by its primary key. Returns an empty `row` when the item " +
-        "does not exist."
+    description = """
+        Retrieves a single item by its primary key. Returns an empty `row` when the item does not
+        exist.
+        """
 )
 @Plugin(
     examples = {

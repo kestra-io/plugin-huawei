@@ -103,9 +103,11 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Schema(
         title = "Expression attribute values",
-        description = "Map of `:placeholder` values referenced by `keyConditionExpression` and, if " +
-            "set, `filterExpression`. Numeric values are stored as DynamoDB string (`S`) attributes, " +
-            "not numbers (`N`) — quote or compare them as strings."
+        description = """
+            Map of `:placeholder` values referenced by `keyConditionExpression` and, if set,
+            `filterExpression`. Numeric values are stored as DynamoDB string (`S`) attributes, not
+            numbers (`N`) — quote or compare them as strings.
+            """
     )
     @NotNull
     @PluginProperty(group = "main")
@@ -120,8 +122,10 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Schema(
         title = "Maximum number of items to evaluate",
-        description = "Caps the number of items read in the single response page (1-1000). Defaults " +
-            "to 100. Does not paginate across `LastEvaluatedKey` — see the task description."
+        description = """
+            Caps the number of items read in the single response page (1-1000). Defaults to 100.
+            Does not paginate across `LastEvaluatedKey` — see the task description.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "processing")
@@ -129,9 +133,11 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Schema(
         title = "Fetch strategy",
-        description = "`STORE` (default) writes matching rows to internal storage; `FETCH` loads all " +
-            "rows into memory; `FETCH_ONE` returns only the first row; `NONE` runs the query without " +
-            "fetching results."
+        description = """
+            `STORE` (default) writes matching rows to internal storage; `FETCH` loads all rows into
+            memory; `FETCH_ONE` returns only the first row; `NONE` runs the query without fetching
+            results.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "processing")

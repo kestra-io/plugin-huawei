@@ -55,9 +55,11 @@ public class PutItem extends AbstractGeminiDb implements RunnableTask<VoidOutput
 
     @Schema(
         title = "Item",
-        description = "Full item content as a map, including its primary key attributes. Numeric " +
-            "values are stored as DynamoDB string (`S`) attributes, not numbers (`N`) — quote or " +
-            "compare them as strings in downstream expressions."
+        description = """
+            Full item content as a map, including its primary key attributes. Numeric values are
+            stored as DynamoDB string (`S`) attributes, not numbers (`N`) — quote or compare them as
+            strings in downstream expressions.
+            """
     )
     @NotNull
     @PluginProperty(group = "main")

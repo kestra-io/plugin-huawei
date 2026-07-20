@@ -25,8 +25,9 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Delete a GeminiDB (DynamoDB-compatible) item by key",
-    description = "Deletes a single item using the provided primary key; no condition expression is " +
-        "applied."
+    description = """
+        Deletes a single item using the provided primary key; no condition expression is applied.
+        """
 )
 @Plugin(
     examples = {
