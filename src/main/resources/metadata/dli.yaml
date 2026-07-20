@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.dli
+name: "dli"
+title: "Huawei DLI"
+description: "Tasks for Huawei Cloud DLI (Data Lake Insight): run SQL queries against data in OBS or federated sources."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
