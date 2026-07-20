@@ -120,6 +120,11 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-eg") {
         exclude group: "org.slf4j"
     }
+
+    // MRS (MapReduce Service) SDK — create clusters, submit jobs, and delete clusters via the MRS v2 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-mrs") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

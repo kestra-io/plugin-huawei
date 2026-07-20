@@ -30,6 +30,8 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
 - `io.kestra.plugin.huawei.dli` — DLI (Data Lake Insight) task (`AbstractDli`, `DliConnectionInterface`, `DliUtils`, `DliService`, `Query`)
 - `io.kestra.plugin.huawei.eventgrid` — EventGrid (EG) task (`AbstractEventGrid`, `EventGridConnectionInterface`, `EventGridUtils`, `PutEvents`)
+- `io.kestra.plugin.huawei.mrs` — MRS (MapReduce Service) tasks (`AbstractMrs`, `MrsConnectionInterface`, `MrsUtils`, `MrsService`, `ClusterType`, `LoginMode`, `SafeMode`, `JobType`, `CreateClusterAndSubmitJob`, `SubmitJob`, `DeleteCluster`)
+- `io.kestra.plugin.huawei.mrs.models` — MRS input models (`JobConfig`, `NodeGroupConfig`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -120,6 +122,17 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.eventgrid.PutEvents` — Huawei Cloud equivalent of `io.kestra.plugin.aws.eventbridge.PutEvents`; publishes one or more CloudEvents-1.0 events to an EventGrid custom channel via `putEvents`; `events` accepts either an inline list or a `kestra://` internal storage URI of ION-serialized events; auto-generates `id` (random UUID) and defaults `specversion` to `1.0` when omitted; writes per-event `index`/`eventId`/`errorCode`/`errorMsg` results to internal storage as ION; throws when `failOnUnsuccessfulEvents` (default `true`) and at least one event is rejected, otherwise reports `WARNING` on partial failure; always sends the whole `events` list in a single request (EG's per-request batch cap is undocumented, so no chunking is attempted)
 - `io.kestra.plugin.huawei.eventgrid.AbstractEventGrid` — Base class extending `AbstractConnection`; builds `EgClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `EgRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (EG v1 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.eventgrid.EventGridUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+
+**MRS (MapReduce Service)**
+
+- `io.kestra.plugin.huawei.mrs.CreateClusterAndSubmitJob` — Huawei Cloud equivalent of `io.kestra.plugin.aws.emr.CreateClusterAndSubmitSteps`; calls the MRS V2 `runJobFlow` API to create a cluster and, optionally, queue job `steps` on it in a single request; models MRS's own (richer) property surface rather than reusing EMR field names: cluster identity (`clusterName`/`clusterVersion`/`clusterType`/`components`), VPC/subnet placement, per-role `nodeGroups`, and either a node root password (`loginMode=PASSWORD`) or a key pair (`loginMode=PUBLICKEY`), plus a mandatory MRS Manager `managerAdminPassword`. Billing is hardcoded to pay-per-use (`postPaid`) — prepaid is not exposed. `wait` (default `true`) polls cluster status via the V1 `showClusterDetails` API until `running`/failure, then best-effort resolves submitted steps' job IDs (via V2 `showJobExeListNew`, matched by job name and a submission-time watermark) since `runJobFlow`'s response only returns the new `clusterId`. Does not override `kill()`: the created cluster is a long-lived infrastructure resource, not an ephemeral job owned by this task — use `DeleteCluster` to tear it down
+- `io.kestra.plugin.huawei.mrs.SubmitJob` — Huawei Cloud equivalent of `io.kestra.plugin.aws.emr.SubmitSteps`, adapted to MRS's one-job-per-call `createExecuteJob` API (singular, unlike EMR's multi-step batch submission); submits a single `job` (`JobConfig`) to an existing, running cluster; `wait` (default `true`) polls `showSingleJobExe` until `COMPLETED`/failure. Overrides `kill()` to cancel the in-flight job via `stopJob` — the job is a Kestra-owned cancellable unit of work, unlike the parent cluster
+- `io.kestra.plugin.huawei.mrs.DeleteCluster` — Huawei Cloud equivalent of `io.kestra.plugin.aws.emr.DeleteCluster`; calls the MRS V1 `deleteCluster` API (deletion is asynchronous; the cluster transitions to `terminating`)
+- `io.kestra.plugin.huawei.mrs.AbstractMrs` — Base class extending `AbstractConnection`; builds **two** SDK clients since MRS V2 has no cluster-detail or delete-cluster endpoint: a V2 `MrsClient` (job submission/status/cancellation, cluster+job creation) via `client(RunContext)`, and a V1 `MrsClient` (cluster status/deletion) via `clientV1(RunContext)` — both resolve to the same host (`mrs.<region>.myhuaweicloud.com`) using the CES-style suffix-first endpoint ordering, so a shared generic `buildClient` helper parameterizes only the region-enum class (`v1.region.MrsRegion` vs `v2.region.MrsRegion`) per client version; fails fast requiring `projectId` whenever a custom endpoint is used (MRS APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.mrs.MrsUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.mrs.MrsService` — Static cluster/job polling helpers shared between `CreateClusterAndSubmitJob` and `SubmitJob`: `pollClusterUntilTerminal` (V1 `showClusterDetails`), `pollJobUntilTerminal` (V2 `showSingleJobExe`), `resolveStepJobIds` (V2 `showJobExeListNew`, best-effort), and `cancelJobQuietly` (V2 `stopJob`, never throws)
+- `io.kestra.plugin.huawei.mrs.models.JobConfig` — Shared job-step model (`jobType`, `jobName`, `arguments`, `properties`) used by both `CreateClusterAndSubmitJob`'s `steps` list and `SubmitJob`'s single `job`
+- `io.kestra.plugin.huawei.mrs.models.NodeGroupConfig` — Per-role node group sizing (`groupName`, `nodeNum`, `nodeSize`, root/data volume type+size, `dataVolumeCount`) used by `CreateClusterAndSubmitJob`'s `nodeGroups` list
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -302,6 +315,22 @@ plugin-huawei/
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
+│   ├── mrs/
+│   │   ├── AbstractMrs.java
+│   │   ├── ClusterType.java
+│   │   ├── CreateClusterAndSubmitJob.java
+│   │   ├── DeleteCluster.java
+│   │   ├── JobType.java
+│   │   ├── LoginMode.java
+│   │   ├── MrsConnectionInterface.java
+│   │   ├── MrsService.java
+│   │   ├── MrsUtils.java
+│   │   ├── SafeMode.java
+│   │   ├── SubmitJob.java
+│   │   ├── package-info.java
+│   │   └── models/
+│   │       ├── JobConfig.java
+│   │       └── NodeGroupConfig.java
 │   └── obs/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
@@ -359,6 +388,11 @@ plugin-huawei/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
 │   │   └── GetTemporaryCredentialsTest.java
+│   ├── mrs/
+│   │   ├── MrsUtilsTest.java
+│   │   ├── CreateClusterAndSubmitJobTest.java
+│   │   ├── SubmitJobTest.java
+│   │   └── DeleteClusterTest.java
 │   └── obs/
 │       ├── AbstractObsTest.java
 │       ├── CopyTest.java
@@ -416,6 +450,14 @@ plugin-huawei/
 - ⚠️ EventGrid's EU/sovereign host is unverified: the SDK's `EgRegion` enum has no EU entry (so an unknown region always falls back to suffix-derivation, `eg.<region>.myhuaweicloud.com`), while Huawei's own EU documentation shows a different host (`events.eu-west-101.myhuaweicloud.eu`). Use `endpointOverride`/`endpointSuffix` as the escape hatch until this is verified against a live EU-sovereign account
 - `PutEvents` has no per-request batch cap enforced client-side — EventGrid's documented limit (if any) is unknown, so the task always sends the full `events` list in a single `putEvents` call and surfaces any size-related API error verbatim rather than guessing a safe chunk size
 - EventGrid integration test gate: `EVENTGRID_TESTS=true`; WireMock-based unit tests run unconditionally
+- MRS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-mrs` (version managed by `huaweicloud-sdk-bom`); MRS V2 (`com.huaweicloud.sdk.mrs.v2.MrsClient`) is the vendor-recommended API for cluster+job creation (`runJobFlow`) and job submission/status/cancellation (`createExecuteJob`/`showSingleJobExe`/`stopJob`/`showJobExeListNew`), but has **no cluster-detail or delete-cluster endpoint** — those only exist on the older V1 API (`com.huaweicloud.sdk.mrs.v1.MrsClient`, `showClusterDetails`/`deleteCluster`). `AbstractMrs` therefore builds both client versions from a shared generic `buildClient` helper; both resolve to the identical host (`mrs.<region>.myhuaweicloud.com`)
+- MRS APIs embed the project ID in the request path (e.g. `/v2/{project_id}/run-job-flow`, `/v1.1/{project_id}/clusters/{cluster_id}`), same failure mode as CES/DLI/SMN/EventGrid: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractMrs`'s client builders fail fast requiring `projectId` whenever a custom endpoint is set
+- MRS's V1 `Cluster` response model uses **camelCase** JSON keys (`clusterId`, `clusterState`, …) — unlike every V2 model in the same SDK jar, which uses snake_case (`cluster_id`, `job_state`, …). Confirmed by inspecting the SDK's embedded `HttpRequestDef`/`@JsonProperty` metadata directly; get this wrong in a WireMock stub and the test silently gets an all-null `Cluster` back instead of a deserialization error
+- ⚠️ `ClusterType`/`LoginMode`/`SafeMode`/`JobType` enum wire values (`ANALYSIS`/`STREAMING`/`MIXED`/`CUSTOM`, `PASSWORD`/`PUBLICKEY`, `SIMPLE`/`KERBEROS`, `MapReduce`/`SparkSubmit`/`HiveScript`/`HiveSql`/`DistCp`/`SparkScript`/`SparkSql`/`Flink`) are based on Huawei's public MRS V2 API documentation, not verified against a live cluster creation — same caveat as the EventGrid EU endpoint above. Use `endpointOverride` against a WireMock/real endpoint to confirm before relying on an unusual combination in production
+- `CreateClusterAndSubmitJob`'s response (`runJobFlow`) only returns the new `clusterId` — no job IDs for any submitted `steps`. When `wait=true`, job IDs are resolved best-effort afterward via `showJobExeListNew`, matching by job name and a request-start-time watermark; when `wait=false`, `jobIds` is always empty since the cluster and its steps are still being provisioned asynchronously
+- `CreateClusterAndSubmitJob` does not override `kill()`: the cluster it creates is a long-lived infrastructure resource, not an ephemeral job owned by the task, so a killed Kestra execution does not delete it (mirrors the reasoning that keeps `DeleteCluster` a separate, explicit task). `SubmitJob` does override `kill()` (via `stopJob`) since the job execution it submits is a Kestra-owned cancellable unit of work
+- MRS billing is hardcoded to pay-per-use (`ChargeInfo.chargeMode=postPaid`) in `CreateClusterAndSubmitJob` — prepaid clusters are out of scope, since job-triggered clusters are on-demand by nature
+- MRS integration test gate: `MRS_TESTS=true` (real MRS; requires `MRS_REGION`, a pre-existing running cluster via `MRS_TEST_CLUSTER_ID`, plus the shared `HUAWEI_ACCESS_KEY`/`HUAWEI_SECRET_ACCESS_KEY`/`HUAWEI_PROJECT_ID`) — only exercises `SubmitJob` against that pre-existing cluster, since cluster creation/deletion is too slow and costly to run on every gated CI pass; WireMock-based unit tests (covering all three tasks) run unconditionally
 
 ## References
 
