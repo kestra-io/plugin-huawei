@@ -10,8 +10,11 @@ import java.util.Collections;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ScanTest extends AbstractGeminiDbTest {
@@ -64,5 +67,61 @@ class ScanTest extends AbstractGeminiDbTest {
             .build();
 
         assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+    }
+
+    @Test
+    void scan_fetchOne_returnsSingleRowOnly() throws Exception {
+        rawClient.putItem(builder -> builder
+            .tableName(testTableName)
+            .item(Map.of("id", AttributeValue.fromS(IdUtils.create()), "kind", AttributeValue.fromS("fetch-one"))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = applyGeminiDbConfig(Scan.builder())
+            .fetchType(Property.ofValue(FetchType.FETCH_ONE))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRow(), notNullValue());
+        assertThat(output.getRows(), nullValue());
+        assertThat(output.getUri(), nullValue());
+    }
+
+    @Test
+    void scan_fetchTypeNone_returnsNoRows() throws Exception {
+        rawClient.putItem(builder -> builder
+            .tableName(testTableName)
+            .item(Map.of("id", AttributeValue.fromS(IdUtils.create()), "kind", AttributeValue.fromS("none-fetch"))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = applyGeminiDbConfig(Scan.builder())
+            .fetchType(Property.ofValue(FetchType.NONE))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRows(), nullValue());
+        assertThat(output.getRow(), nullValue());
+        assertThat(output.getUri(), nullValue());
+        assertThat(output.getSize(), equalTo(0L));
+    }
+
+    @Test
+    void scan_truncatedByLimit_returnsBoundedResult() throws Exception {
+        for (int i = 0; i < 3; i++) {
+            rawClient.putItem(builder -> builder
+                .tableName(testTableName)
+                .item(Map.of("id", AttributeValue.fromS(IdUtils.create()), "kind", AttributeValue.fromS("truncation"))));
+        }
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = applyGeminiDbConfig(Scan.builder())
+            .fetchType(Property.ofValue(FetchType.FETCH))
+            .limit(Property.ofValue(1))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRows(), hasSize(1));
     }
 }

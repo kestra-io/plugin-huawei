@@ -35,6 +35,26 @@ class PutItemTest extends AbstractGeminiDbTest {
     }
 
     @Test
+    void putItem_withSecurityToken_usesSessionCredentials() throws Exception {
+        var id = IdUtils.create();
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = applyGeminiDbConfig(PutItem.builder())
+            .securityToken(Property.ofValue("dummy-session-token"))
+            .item(Property.ofValue(Map.of("id", id, "firstname", "Jane")))
+            .build();
+
+        var output = task.run(runContext);
+        assertThat(output, nullValue());
+
+        var response = rawClient.getItem(builder -> builder
+            .tableName(testTableName)
+            .key(Map.of("id", AttributeValue.fromS(id))));
+
+        assertThat(response.item().get("firstname").s(), equalTo("Jane"));
+    }
+
+    @Test
     void putItem_existingKey_upsertsInPlace() throws Exception {
         var id = IdUtils.create();
         var runContext = runContextFactory.of(Collections.emptyMap());
