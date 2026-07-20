@@ -63,11 +63,11 @@ public class GetItem extends AbstractGeminiDb implements RunnableTask<GetItem.Ou
     @Override
     public Output run(RunContext runContext) throws Exception {
         try (var dynamoDb = client(runContext)) {
-            var renderedKey = runContext.render(this.key).asMap(String.class, Object.class);
+            var rKey = runContext.render(this.key).asMap(String.class, Object.class);
 
             var getRequest = GetItemRequest.builder()
                 .tableName(renderedTableName(runContext))
-                .key(valueMapFrom(renderedKey))
+                .key(valueMapFrom(rKey))
                 .build();
 
             var response = dynamoDb.getItem(getRequest);

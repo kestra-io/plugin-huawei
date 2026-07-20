@@ -63,11 +63,11 @@ public class DeleteItem extends AbstractGeminiDb implements RunnableTask<VoidOut
     @Override
     public VoidOutput run(RunContext runContext) throws Exception {
         try (var dynamoDb = client(runContext)) {
-            var renderedKey = runContext.render(this.key).asMap(String.class, Object.class);
+            var rKey = runContext.render(this.key).asMap(String.class, Object.class);
 
             var deleteRequest = DeleteItemRequest.builder()
                 .tableName(renderedTableName(runContext))
-                .key(valueMapFrom(renderedKey))
+                .key(valueMapFrom(rKey))
                 .build();
 
             dynamoDb.deleteItem(deleteRequest);
