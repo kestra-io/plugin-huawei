@@ -25,8 +25,7 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Put an item into a GeminiDB (DynamoDB-compatible) table",
-    description = "Creates or replaces an item — an upsert when the key already exists. The Huawei " +
-        "Cloud GeminiDB for NoSQL equivalent of `io.kestra.plugin.aws.dynamodb.PutItem`."
+    description = "Creates or replaces an item — an upsert when the key already exists."
 )
 @Plugin(
     examples = {
@@ -56,7 +55,9 @@ public class PutItem extends AbstractGeminiDb implements RunnableTask<VoidOutput
 
     @Schema(
         title = "Item",
-        description = "Full item content as a map, including its primary key attributes."
+        description = "Full item content as a map, including its primary key attributes. Numeric " +
+            "values are stored as DynamoDB string (`S`) attributes, not numbers (`N`) — quote or " +
+            "compare them as strings in downstream expressions."
     )
     @NotNull
     @PluginProperty(group = "main")

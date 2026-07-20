@@ -26,8 +26,7 @@ import java.util.Map;
 @Schema(
     title = "Get a GeminiDB (DynamoDB-compatible) item by key",
     description = "Retrieves a single item by its primary key. Returns an empty `row` when the item " +
-        "does not exist — the Huawei Cloud GeminiDB for NoSQL equivalent of " +
-        "`io.kestra.plugin.aws.dynamodb.GetItem`."
+        "does not exist."
 )
 @Plugin(
     examples = {

@@ -29,8 +29,7 @@ import java.util.Map;
 @Schema(
     title = "Scan a GeminiDB (DynamoDB-compatible) table",
     description = """
-        Performs a Scan over the entire table — the Huawei Cloud GeminiDB for NoSQL equivalent of
-        `io.kestra.plugin.aws.dynamodb.Scan`. `fetchType` defaults to `STORE`, writing matching rows
+        Performs a Scan over the entire table. `fetchType` defaults to `STORE`, writing matching rows
         to internal storage; `FETCH`/`FETCH_ONE` load them into memory; `NONE` runs the scan without
         fetching any results. An optional `filterExpression` narrows the returned set after items are
         read, so it does not reduce the read cost.
@@ -98,7 +97,9 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
 
     @Schema(
         title = "Expression attribute values",
-        description = "Map of `:placeholder` values referenced by `filterExpression`."
+        description = "Map of `:placeholder` values referenced by `filterExpression`. Numeric values " +
+            "are stored as DynamoDB string (`S`) attributes, not numbers (`N`) — quote or compare " +
+            "them as strings."
     )
     @PluginProperty(group = "processing")
     private Property<Map<String, Object>> expressionAttributeValues;

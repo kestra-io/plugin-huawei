@@ -30,8 +30,7 @@ import java.util.Map;
 @Schema(
     title = "Query items from a GeminiDB (DynamoDB-compatible) table",
     description = """
-        Executes a Query request using a key condition expression — the Huawei Cloud GeminiDB for
-        NoSQL equivalent of `io.kestra.plugin.aws.dynamodb.Query`. `fetchType` defaults to `STORE`,
+        Executes a Query request using a key condition expression. `fetchType` defaults to `STORE`,
         writing matching rows to internal storage; `FETCH`/`FETCH_ONE` load them into memory; `NONE`
         runs the query without fetching any results.
 
@@ -104,7 +103,9 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Schema(
         title = "Expression attribute values",
-        description = "Map of `:placeholder` values referenced by `keyConditionExpression` and, if set, `filterExpression`."
+        description = "Map of `:placeholder` values referenced by `keyConditionExpression` and, if " +
+            "set, `filterExpression`. Numeric values are stored as DynamoDB string (`S`) attributes, " +
+            "not numbers (`N`) — quote or compare them as strings."
     )
     @NotNull
     @PluginProperty(group = "main")

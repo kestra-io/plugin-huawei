@@ -48,6 +48,22 @@
 - Provides plugin components under `io.kestra.plugin.huawei`.
 - Includes classes such as `Example`, `Trigger`.
 
+## Services
+
+### GeminiDB for NoSQL (DynamoDB-Compatible API)
+
+Tasks: `io.kestra.plugin.huawei.geminidb.PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`.
+
+GeminiDB for NoSQL exposes a DynamoDB-compatible data-plane API. Huawei has no data-plane SDK for
+it (the `huaweicloud-sdk-nosql` SDK is control-plane only, covering instance CRUD), so this plugin
+uses the **AWS SDK v2** (`software.amazon.awssdk:dynamodb`) as the wire-compatible client — the
+same way you would connect from boto3 with an explicit `endpoint_url`.
+
+Instances are addressed by a per-instance `endpoint` connection address (found on the instance's
+"Connection Management" page in the Huawei Cloud console), not derived from `region` like other
+Huawei services in this plugin. `region` is only used for SigV4 request signing and has no effect
+on routing.
+
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)
 * Documentation for developing a plugin is included in the [Plugin Developer Guide](https://kestra.io/docs/plugin-developer-guide/)

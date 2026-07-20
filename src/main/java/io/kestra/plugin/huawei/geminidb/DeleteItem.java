@@ -26,8 +26,7 @@ import java.util.Map;
 @Schema(
     title = "Delete a GeminiDB (DynamoDB-compatible) item by key",
     description = "Deletes a single item using the provided primary key; no condition expression is " +
-        "applied. The Huawei Cloud GeminiDB for NoSQL equivalent of " +
-        "`io.kestra.plugin.aws.dynamodb.DeleteItem`."
+        "applied."
 )
 @Plugin(
     examples = {

@@ -61,6 +61,10 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
             `https://192.168.0.10:8635`. Find it on the instance's "Connection Management" page in
             the Huawei Cloud console. Unlike other Huawei Cloud services, this address is
             per-instance and cannot be derived from `region`.
+
+            `region` is used only for SigV4 request signing and does not affect routing — GeminiDB
+            routes solely by this `endpoint` property; leave `region` at its default unless signing
+            requires a specific value.
             """
     )
     @NotNull
