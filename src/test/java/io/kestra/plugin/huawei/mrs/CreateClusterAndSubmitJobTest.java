@@ -101,6 +101,14 @@ class CreateClusterAndSubmitJobTest {
                 .withBody("{\"cluster_id\": \"" + CLUSTER_ID + "\"}")));
     }
 
+    private void stubCreateCluster() {
+        wireMock.stubFor(post(urlMatching(".*/clusters"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"cluster_id\": \"" + CLUSTER_ID + "\"}")));
+    }
+
     private void stubClusterState(String state) {
         wireMock.stubFor(get(urlMatching(".*/cluster_infos/" + CLUSTER_ID))
             .willReturn(aResponse()
@@ -148,8 +156,27 @@ class CreateClusterAndSubmitJobTest {
     }
 
     @Test
+    void createCluster_noSteps_callsCreateClusterNotRunJobFlow() throws Exception {
+        stubCreateCluster();
+        stubClusterState("running");
+        // No run-job-flow or job-list stubs registered — a call to either would fail the test.
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getClusterId(), equalTo(CLUSTER_ID));
+        assertThat(output.getClusterState(), equalTo("running"));
+        assertThat(output.getJobIds(), equalTo(List.of()));
+
+        wireMock.verify(WireMock.postRequestedFor(urlMatching(".*/clusters")));
+        wireMock.verify(0, WireMock.postRequestedFor(urlMatching(".*/run-job-flow")));
+    }
+
+    @Test
     void createCluster_waitFalse_returnsImmediatelyWithoutPolling() throws Exception {
-        stubRunJobFlow();
+        stubCreateCluster();
         // No cluster-state or job-list stubs registered — a call to either would fail the test.
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -166,7 +193,7 @@ class CreateClusterAndSubmitJobTest {
 
     @Test
     void createCluster_clusterFails_throwsActionableError() {
-        stubRunJobFlow();
+        stubCreateCluster();
         stubClusterState("failed");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -179,7 +206,7 @@ class CreateClusterAndSubmitJobTest {
 
     @Test
     void createCluster_timeout_throwsActionableError() {
-        stubRunJobFlow();
+        stubCreateCluster();
         stubClusterState("bootstrapping");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
