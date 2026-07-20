@@ -153,12 +153,15 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         if (value.hasSs()) {
             return value.ss();
         }
+        if (value.hasL()) {
+            return value.l().stream().map(this::objectFrom).toList();
+        }
         if (value.hasM()) {
             return objectMapFrom(value.m());
         }
 
-        // We may miss some cases (numbers, binary, lists), but this covers the common shapes for a
-        // first implementation — mirrors io.kestra.plugin.aws.dynamodb.AbstractDynamoDb.
+        // We may miss some cases (numbers, binary), but this covers the common shapes for a first
+        // implementation — mirrors io.kestra.plugin.aws.dynamodb.AbstractDynamoDb.
         return value.s();
     }
 
@@ -180,7 +183,7 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
             return AttributeValue.fromBool(b);
         }
         if (value instanceof List<?> list) {
-            return AttributeValue.fromSs((List<String>) list);
+            return AttributeValue.fromL(list.stream().map(this::objectFrom).toList());
         }
         if (value instanceof Map<?, ?> map) {
             return AttributeValue.fromM(valueMapFrom((Map<String, Object>) map));

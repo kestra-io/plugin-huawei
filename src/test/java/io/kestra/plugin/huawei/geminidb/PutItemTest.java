@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -74,5 +75,28 @@ class PutItemTest extends AbstractGeminiDbTest {
             .key(Map.of("id", AttributeValue.fromS(id))));
 
         assertThat(response.item().get("status").s(), equalTo("done"));
+    }
+
+    @Test
+    void putItem_listWithDuplicates_roundTripsAsListPreservingOrderAndDuplicates() throws Exception {
+        var id = IdUtils.create();
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var tags = List.of("z", "a", "z");
+
+        var task = applyGeminiDbConfig(PutItem.builder())
+            .item(Property.ofValue(Map.of("id", id, "tags", tags, "nested", Map.of("labels", tags))))
+            .build();
+
+        var putOutput = task.run(runContext);
+        assertThat(putOutput, nullValue());
+
+        var getTask = applyGeminiDbConfig(GetItem.builder())
+            .key(Property.ofValue(Map.of("id", id)))
+            .build();
+
+        var getOutput = getTask.run(runContext);
+
+        assertThat(getOutput.getRow().get("tags"), equalTo(tags));
+        assertThat(((Map<?, ?>) getOutput.getRow().get("nested")).get("labels"), equalTo(tags));
     }
 }
