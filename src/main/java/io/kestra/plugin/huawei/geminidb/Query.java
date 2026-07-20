@@ -145,10 +145,11 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Override
     public FetchOutput run(RunContext runContext) throws Exception {
+        var rTableName = renderedTableName(runContext);
         int rLimit = renderedLimit(runContext, this.limit);
         try (var dynamoDb = client(runContext)) {
             var queryBuilder = QueryRequest.builder()
-                .tableName(renderedTableName(runContext))
+                .tableName(rTableName)
                 .keyConditionExpression(runContext.render(this.keyConditionExpression).as(String.class)
                     .orElseThrow(() -> new IllegalArgumentException("'keyConditionExpression' must be set")))
                 .expressionAttributeValues(valueMapFrom(runContext.render(this.expressionAttributeValues).asMap(String.class, Object.class)))
@@ -161,9 +162,9 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
             var response = dynamoDb.query(queryBuilder.build());
 
-            this.warnIfTruncated(runContext, response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty(), "query");
+            this.warnIfTruncated(runContext, response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty(), "query", rTableName);
 
-            return this.fetchOutputs(response.items(), runContext.render(this.fetchType).as(FetchType.class).orElse(FetchType.STORE), runContext);
+            return this.fetchOutputs(response.items(), runContext.render(this.fetchType).as(FetchType.class).orElse(FetchType.STORE), runContext, rTableName);
         }
     }
 }

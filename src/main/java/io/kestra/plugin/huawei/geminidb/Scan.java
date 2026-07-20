@@ -130,10 +130,11 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
 
     @Override
     public FetchOutput run(RunContext runContext) throws Exception {
+        var rTableName = renderedTableName(runContext);
         int rLimit = renderedLimit(runContext, this.limit);
         try (var dynamoDb = client(runContext)) {
             var scanBuilder = ScanRequest.builder()
-                .tableName(renderedTableName(runContext))
+                .tableName(rTableName)
                 .limit(rLimit);
 
             var rFilterExpression = runContext.render(this.filterExpression).as(String.class).orElse(null);
@@ -147,9 +148,9 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
 
             var response = dynamoDb.scan(scanBuilder.build());
 
-            this.warnIfTruncated(runContext, response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty(), "scan");
+            this.warnIfTruncated(runContext, response.hasLastEvaluatedKey() && !response.lastEvaluatedKey().isEmpty(), "scan", rTableName);
 
-            return this.fetchOutputs(response.items(), runContext.render(this.fetchType).as(FetchType.class).orElse(FetchType.STORE), runContext);
+            return this.fetchOutputs(response.items(), runContext.render(this.fetchType).as(FetchType.class).orElse(FetchType.STORE), runContext, rTableName);
         }
     }
 }

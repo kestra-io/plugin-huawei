@@ -50,31 +50,7 @@
 
 ## Services
 
-- **OBS** (`io.kestra.plugin.huawei.obs`): upload, download, list, copy, delete, batch-delete, create and delete buckets, and trigger flows on new objects.
-- **IAM** (`io.kestra.plugin.huawei.iam`): exchange long-lived credentials for short-lived STS credentials.
-- **DMS for Kafka** (`io.kestra.plugin.huawei.dms.kafka`): produce, consume, and trigger on messages using the Apache Kafka protocol.
-- **DMS for RocketMQ** (`io.kestra.plugin.huawei.dms.rocketmq`): publish, consume, and trigger on messages using the Apache RocketMQ protocol.
-- **DataArts Studio** (`io.kestra.plugin.huawei.dataarts`): start, monitor, and stop DataArts Factory batch job runs.
-- **CES** (`io.kestra.plugin.huawei.ces`): push custom metrics, query metric statistics, and trigger flows on metric datapoints.
-- **FunctionGraph** (`io.kestra.plugin.huawei.functiongraph`): synchronously invoke a FunctionGraph function.
-- **KooCLI** (`io.kestra.plugin.huawei.koocli`): run arbitrary Huawei Cloud CLI (`hcloud`) commands in a container.
-- **SMN** (`io.kestra.plugin.huawei.smn`): publish notification messages to a topic.
-- **DLI** (`io.kestra.plugin.huawei.dli`): run SQL queries against data in OBS or federated sources, the Huawei equivalent of AWS Athena.
-- **GeminiDB for NoSQL** (`io.kestra.plugin.huawei.geminidb`): put, get, delete, query, and scan items against a GeminiDB instance's DynamoDB-Compatible data-plane API — detailed below.
-
-### GeminiDB for NoSQL (DynamoDB-Compatible API)
-
-Tasks: `io.kestra.plugin.huawei.geminidb.PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`.
-
-GeminiDB for NoSQL exposes a DynamoDB-compatible data-plane API. Huawei has no data-plane SDK for
-it (the `huaweicloud-sdk-nosql` SDK is control-plane only, covering instance CRUD), so this plugin
-uses the **AWS SDK v2** (`software.amazon.awssdk:dynamodb`) as the wire-compatible client — the
-same way you would connect from boto3 with an explicit `endpoint_url`.
-
-Instances are addressed by a per-instance `endpoint` connection address (found on the instance's
-"Connection Management" page in the Huawei Cloud console), not derived from `region` like other
-Huawei services in this plugin. `region` is only used for SigV4 request signing and has no effect
-on routing.
+See [AGENTS.md](AGENTS.md) for the full, per-service list of tasks, triggers, and shared abstractions.
 
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)

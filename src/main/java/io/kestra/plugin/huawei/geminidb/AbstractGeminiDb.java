@@ -198,19 +198,20 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
      * Logs a message when the response was truncated to a single page: {@code Query}/{@code Scan}
      * never follow {@code LastEvaluatedKey}, so a truncated result could otherwise go unnoticed.
      */
-    protected void warnIfTruncated(final RunContext runContext, boolean hasMoreResults, String operation) throws Exception {
+    protected void warnIfTruncated(final RunContext runContext, boolean hasMoreResults, String operation, String rTableName) {
         if (hasMoreResults) {
             runContext.logger().info(
                 "GeminiDB {} on table '{}' returned a LastEvaluatedKey — more items are available but " +
                 "this task only reads a single page. Narrow the {} or raise 'limit' to retrieve more.",
-                operation, renderedTableName(runContext), operation);
+                operation, rTableName, operation);
         }
     }
 
     protected FetchOutput fetchOutputs(
         final List<Map<String, AttributeValue>> items,
         final FetchType fetchType,
-        final RunContext runContext
+        final RunContext runContext,
+        final String rTableName
     ) throws Exception {
         var outputBuilder = FetchOutput.builder();
 
@@ -239,7 +240,7 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         }
 
         var output = outputBuilder.build();
-        runContext.metric(Counter.of("records", output.getSize(), "tableName", renderedTableName(runContext)));
+        runContext.metric(Counter.of("records", output.getSize(), "tableName", rTableName));
 
         return output;
     }
