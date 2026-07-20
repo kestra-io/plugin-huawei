@@ -125,6 +125,18 @@ dependencies {
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-mrs") {
         exclude group: "org.slf4j"
     }
+
+    // GeminiDB for NoSQL ships a DynamoDB-compatible data-plane API (no Huawei SDK covers item
+    // operations), so the AWS SDK v2 is used as the wire-compatible transport, pointed at the
+    // GeminiDB instance via endpointOverride. Versions are aligned by the io.kestra:platform BOM,
+    // which already imports the software.amazon.awssdk BOM — no explicit version needed here.
+    implementation("software.amazon.awssdk:dynamodb") {
+        exclude group: "org.slf4j"
+    }
+    // Lightweight synchronous HTTP client for the DynamoDB SDK; avoids pulling in Apache HttpClient.
+    implementation("software.amazon.awssdk:url-connection-client") {
+        exclude group: "org.slf4j"
+    }
 }
 
 

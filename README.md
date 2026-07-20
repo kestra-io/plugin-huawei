@@ -48,6 +48,10 @@
 - Provides plugin components under `io.kestra.plugin.huawei`.
 - Includes classes such as `Example`, `Trigger`.
 
+## Services
+
+See [AGENTS.md](AGENTS.md) for the full, per-service list of tasks, triggers, and shared abstractions.
+
 ## Documentation
 * Full documentation can be found under: [kestra.io/docs](https://kestra.io/docs)
 * Documentation for developing a plugin is included in the [Plugin Developer Guide](https://kestra.io/docs/plugin-developer-guide/)
