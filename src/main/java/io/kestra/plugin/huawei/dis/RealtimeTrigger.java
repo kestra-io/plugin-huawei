@@ -1,8 +1,5 @@
 package io.kestra.plugin.huawei.dis;
 
-import com.huaweicloud.sdk.core.exception.ServiceResponseException;
-import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsRequest;
-import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -31,7 +28,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -77,7 +73,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
     }
 )
 public class RealtimeTrigger extends AbstractDisTrigger
-    implements RealtimeTriggerInterface, TriggerOutput<Record> {
+    implements RealtimeTriggerInterface, TriggerOutput<Record>, ConsumeOptionsInterface {
 
     // Delay between rounds when a full round across all partitions returned zero records, to avoid busy-spinning DIS.
     private static final Duration IDLE_POLL_DELAY = Duration.ofSeconds(2);
@@ -87,40 +83,24 @@ public class RealtimeTrigger extends AbstractDisTrigger
     // the background instead.
     private static final Duration SHUTDOWN_TIMEOUT = Duration.ofSeconds(10);
 
-    @Schema(title = "DIS stream name")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> streamName;
 
-    @Schema(
-        title = "Single partition to consume from",
-        description = "When omitted (default), every partition of the stream is consumed."
-    )
     @PluginProperty(group = "main")
     private Property<String> partitionId;
 
-    @Schema(
-        title = "Where to start reading a partition the first time it has no watermark yet",
-        description = "`TRIM_HORIZON` (default) reads from the oldest retained record. `LATEST` reads only new " +
-            "records. `AT_TIMESTAMP` reads from the oldest record at or after `startingTimestamp` (required in that case)."
-    )
     @Builder.Default
     @PluginProperty(group = "main")
     private Property<StartingPosition> startingPosition = Property.ofValue(StartingPosition.TRIM_HORIZON);
 
-    @Schema(title = "Starting timestamp", description = "Required when `startingPosition` is `AT_TIMESTAMP`.")
     @PluginProperty(group = "main")
     private Property<Instant> startingTimestamp;
 
-    @Schema(title = "Deserialization type applied to each record's `data` value")
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> serdeType = Property.ofValue(SerdeType.STRING);
 
-    @Schema(
-        title = "Maximum bytes fetched per partition, per call",
-        description = "Defaults to 2 MB (2097152 bytes), DIS's per-request payload ceiling."
-    )
     @Builder.Default
     @PluginProperty(group = "execution")
     private Property<Integer> maxFetchBytes = Property.ofValue(Consume.MAX_FETCH_BYTES_HARD_CAP);
@@ -168,7 +148,12 @@ public class RealtimeTrigger extends AbstractDisTrigger
                 var watermark = DisWatermark.read(kv, watermarkKey);
 
                 var cursors = new LinkedHashMap<String, String>();
-                var lastSequenceNumbers = new LinkedHashMap<String, String>(watermark != null ? watermark : Map.<String, String>of());
+                var lastSequenceNumbers = new LinkedHashMap<String, String>();
+                for (var pid : partitionIds) {
+                    if (watermark != null && watermark.get(pid) != null) {
+                        lastSequenceNumbers.put(pid, watermark.get(pid));
+                    }
+                }
                 for (var pid : partitionIds) {
                     cursors.put(pid, DisService.cursorFor(
                         client, rStreamName, pid, rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid)));
@@ -187,25 +172,16 @@ public class RealtimeTrigger extends AbstractDisTrigger
                             continue;
                         }
 
-                        var request = new ConsumeRecordsRequest().withPartitionCursor(cursor).withMaxFetchBytes(rMaxFetchBytes);
-                        ConsumeRecordsResponse response;
-                        try {
-                            response = client.consumeRecords(request);
-                        } catch (ServiceResponseException e) {
-                            // A 401/403 means the credentials themselves are rejected, not the cursor — retrying with a
-                            // fresh cursor would just repeat the same failure while masking the real problem.
-                            if (e.getHttpStatusCode() == 401 || e.getHttpStatusCode() == 403) {
-                                throw e;
-                            }
-                            logger.warn("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
-                            var refreshed = DisService.cursorFor(
-                                client, rStreamName, pid, rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid));
-                            response = client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(refreshed).withMaxFetchBytes(rMaxFetchBytes));
-                        }
+                        var response = DisService.consumeWithCursorRefresh(
+                            client, logger, rStreamName, pid, cursor, rMaxFetchBytes,
+                            rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid));
 
                         var records = response.getRecords();
                         if (records != null) {
                             for (var record : records) {
+                                if (!isActive.get()) {
+                                    break;
+                                }
                                 var decoded = Consume.toRecord(pid, record, rSerdeType);
                                 sink.next(TriggerService.generateRealtimeExecution(this, conditionContext, triggerContext, decoded));
                                 lastSequenceNumbers.put(pid, record.getSequenceNumber());

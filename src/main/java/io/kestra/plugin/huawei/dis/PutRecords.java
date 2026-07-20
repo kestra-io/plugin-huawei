@@ -1,8 +1,8 @@
 package io.kestra.plugin.huawei.dis;
 
+import com.huaweicloud.sdk.dis.v2.DisClient;
 import com.huaweicloud.sdk.dis.v2.model.PutRecordsRequest;
 import com.huaweicloud.sdk.dis.v2.model.PutRecordsRequestEntry;
-import com.huaweicloud.sdk.dis.v2.model.PutRecordsResultEntry;
 import com.huaweicloud.sdk.dis.v2.model.SendRecordsRequest;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
@@ -25,6 +25,7 @@ import lombok.experimental.SuperBuilder;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -152,111 +153,111 @@ public class PutRecords extends AbstractDis implements RunnableTask<PutRecords.O
         var rSerdeType = runContext.render(serdeType).as(SerdeType.class).orElse(SerdeType.STRING);
         var rFailOnUnsuccessful = runContext.render(failOnUnsuccessfulRecords).as(Boolean.class).orElse(true);
 
-        var entries = new ArrayList<PutRecordsRequestEntry>();
-        var index = 0;
-        for (var map : Data.from(from).read(runContext).toIterable()) {
-            var rawData = map.get("data");
-            if (rawData == null) {
-                throw new IllegalArgumentException("Record at index " + index + " is missing the required 'data' field");
-            }
-            var partitionKey = map.get("partitionKey") != null ? String.valueOf(map.get("partitionKey")) : null;
-            var partitionId = map.get("partitionId") != null ? String.valueOf(map.get("partitionId")) : null;
-            if (partitionKey == null && partitionId == null) {
-                throw new IllegalArgumentException(
-                    "Record at index " + index + " must set either 'partitionKey' or 'partitionId'");
-            }
-
-            var bytes = rSerdeType.serialize(rawData);
-            if (bytes != null && bytes.length > MAX_RECORD_BYTES) {
-                throw new IllegalArgumentException(
-                    "Record at index " + index + " (partitionKey=" + partitionKey + ") is " + bytes.length +
-                    " bytes, exceeding DIS's " + MAX_RECORD_BYTES + " byte (1 MB) per-record limit — split the payload before sending.");
-            }
-
-            var entry = new PutRecordsRequestEntry()
-                .withData(bytes != null ? Base64.getEncoder().encodeToString(bytes) : null)
-                .withPartitionKey(partitionKey)
-                .withPartitionId(partitionId);
-            if (map.get("explicitHashKey") != null) {
-                entry.withExplicitHashKey(String.valueOf(map.get("explicitHashKey")));
-            }
-            entries.add(entry);
-            index++;
-        }
-
-        if (entries.isEmpty()) {
-            throw new IllegalArgumentException("'from' produced no records to send to DIS stream '" + rStreamName + "'");
-        }
-
         var client = client(runContext);
-        var results = new ArrayList<PutRecordsResultEntry>();
+
+        var recordCount = 0;
         var failedCount = 0;
-        for (var batch : chunk(entries)) {
-            var request = new PutRecordsRequest().withStreamName(rStreamName).withRecords(batch);
-            var response = client.sendRecords(new SendRecordsRequest().withBody(request));
-            if (response.getRecords() != null) {
-                results.addAll(response.getRecords());
-            }
-            failedCount += response.getFailedRecordCount() != null ? response.getFailedRecordCount() : 0;
-        }
+        var index = 0;
 
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            for (var result : results) {
-                FileSerde.write(output, Result.builder()
-                    .partitionId(result.getPartitionId())
-                    .sequenceNumber(result.getSequenceNumber())
-                    .errorCode(result.getErrorCode())
-                    .errorMessage(result.getErrorMessage())
-                    .build());
+            var batch = new ArrayList<PutRecordsRequestEntry>();
+            var batchBytes = 0L;
+
+            for (var map : Data.from(from).read(runContext).toIterable()) {
+                var rawData = map.get("data");
+                if (rawData == null) {
+                    throw new IllegalArgumentException("Record at index " + index + " is missing the required 'data' field");
+                }
+                var partitionKey = map.get("partitionKey") != null ? String.valueOf(map.get("partitionKey")) : null;
+                var partitionId = map.get("partitionId") != null ? String.valueOf(map.get("partitionId")) : null;
+                if (partitionKey == null && partitionId == null) {
+                    throw new IllegalArgumentException(
+                        "Record at index " + index + " must set either 'partitionKey' or 'partitionId'");
+                }
+
+                var bytes = rSerdeType.serialize(rawData);
+                if (bytes != null && bytes.length > MAX_RECORD_BYTES) {
+                    throw new IllegalArgumentException(
+                        "Record at index " + index + " (partitionKey=" + partitionKey + ") is " + bytes.length +
+                        " bytes, exceeding DIS's " + MAX_RECORD_BYTES + " byte (1 MB) per-record limit — split the payload before sending.");
+                }
+
+                var entry = new PutRecordsRequestEntry()
+                    .withData(bytes != null ? Base64.getEncoder().encodeToString(bytes) : null)
+                    .withPartitionKey(partitionKey)
+                    .withPartitionId(partitionId);
+                if (map.get("explicitHashKey") != null) {
+                    entry.withExplicitHashKey(String.valueOf(map.get("explicitHashKey")));
+                }
+
+                var entryBytes = estimateBytes(entry);
+                if (!batch.isEmpty() && (batch.size() >= MAX_RECORDS_PER_BATCH || batchBytes + entryBytes > MAX_BATCH_BYTES)) {
+                    failedCount += sendBatch(client, rStreamName, batch, output);
+                    batch = new ArrayList<>();
+                    batchBytes = 0L;
+                }
+                batch.add(entry);
+                batchBytes += entryBytes;
+                recordCount++;
+                index++;
             }
+
+            if (recordCount == 0) {
+                throw new IllegalArgumentException("'from' produced no records to send to DIS stream '" + rStreamName + "'");
+            }
+
+            if (!batch.isEmpty()) {
+                failedCount += sendBatch(client, rStreamName, batch, output);
+            }
+
             output.flush();
         }
 
-        runContext.metric(Counter.of("dis.putrecords.count", entries.size()));
+        runContext.metric(Counter.of("dis.putrecords.count", recordCount));
         runContext.metric(Counter.of("dis.putrecords.failed", failedCount));
 
         var uri = runContext.storage().putFile(tempFile);
 
         if (rFailOnUnsuccessful && failedCount > 0) {
             throw new IllegalStateException(
-                failedCount + " of " + entries.size() + " record(s) were rejected by DIS stream '" + rStreamName +
+                failedCount + " of " + recordCount + " record(s) were rejected by DIS stream '" + rStreamName +
                 "' — inspect the 'uri' output for the per-record error codes, or set 'failOnUnsuccessfulRecords' " +
                 "to false to continue despite partial failures.");
         }
 
         return Output.builder()
-            .recordCount(entries.size())
+            .recordCount(recordCount)
             .failedRecordCount(failedCount)
             .uri(uri)
             .build();
     }
 
-    /** Splits entries into DIS-sized batches, respecting both the record-count and byte-size limits. */
-    private static List<List<PutRecordsRequestEntry>> chunk(List<PutRecordsRequestEntry> entries) {
-        var batches = new ArrayList<List<PutRecordsRequestEntry>>();
-        var current = new ArrayList<PutRecordsRequestEntry>();
-        var currentBytes = 0L;
-
-        for (var entry : entries) {
-            var entryBytes = estimateBytes(entry);
-            if (!current.isEmpty() && (current.size() >= MAX_RECORDS_PER_BATCH || currentBytes + entryBytes > MAX_BATCH_BYTES)) {
-                batches.add(current);
-                current = new ArrayList<>();
-                currentBytes = 0L;
+    /** Sends one batch and streams its per-record results straight to the ION output, so callers never hold a full-batch results list in memory. */
+    private static int sendBatch(DisClient client, String streamName, List<PutRecordsRequestEntry> batch, OutputStream out) throws Exception {
+        var response = client.sendRecords(new SendRecordsRequest().withBody(
+            new PutRecordsRequest().withStreamName(streamName).withRecords(batch)));
+        if (response.getRecords() != null) {
+            for (var result : response.getRecords()) {
+                FileSerde.write(out, Result.builder()
+                    .partitionId(result.getPartitionId())
+                    .sequenceNumber(result.getSequenceNumber())
+                    .errorCode(result.getErrorCode())
+                    .errorMessage(result.getErrorMessage())
+                    .build());
             }
-            current.add(entry);
-            currentBytes += entryBytes;
         }
-        if (!current.isEmpty()) {
-            batches.add(current);
-        }
-        return batches;
+        return response.getFailedRecordCount() != null ? response.getFailedRecordCount() : 0;
     }
 
+    // Conservative upper bound: uses the base64-ENCODED data length (~33% larger than raw, which is
+    // what travels on the wire) plus the routing-key fields, so a batch never under-counts against
+    // DIS's 5 MB per-request limit. Over-counting only costs an extra request, never a rejected batch.
     private static long estimateBytes(PutRecordsRequestEntry entry) {
-        var size = entry.getData() != null ? entry.getData().length() : 0;
+        long size = entry.getData() != null ? entry.getData().length() : 0;
         size += entry.getPartitionKey() != null ? entry.getPartitionKey().length() : 0;
+        size += entry.getPartitionId() != null ? entry.getPartitionId().length() : 0;
+        size += entry.getExplicitHashKey() != null ? entry.getExplicitHashKey().length() : 0;
         return size;
     }
 

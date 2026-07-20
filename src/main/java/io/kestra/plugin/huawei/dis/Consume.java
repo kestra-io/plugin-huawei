@@ -1,9 +1,6 @@
 package io.kestra.plugin.huawei.dis;
 
-import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.dis.v2.DisClient;
-import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsRequest;
-import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsResponse;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Metric;
 import io.kestra.core.models.annotations.Plugin;
@@ -76,7 +73,7 @@ import java.util.Map;
             description = "Number of records consumed from the DIS stream.")
     }
 )
-public class Consume extends AbstractDis implements RunnableTask<Consume.Output> {
+public class Consume extends AbstractDis implements RunnableTask<Consume.Output>, ConsumeOptionsInterface {
 
     // Hard caps so a mistyped or malicious value cannot force an unbounded loop or file.
     static final int MAX_RECORDS_HARD_CAP = 1_000_000;
@@ -84,32 +81,20 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
     // DIS's documented ceiling for a single consumeRecords call.
     static final int MAX_FETCH_BYTES_HARD_CAP = 2 * 1024 * 1024;
 
-    @Schema(title = "DIS stream name")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> streamName;
 
-    @Schema(
-        title = "Single partition to consume from",
-        description = "When omitted (default), every partition of the stream is consumed."
-    )
     @PluginProperty(group = "main")
     private Property<String> partitionId;
 
-    @Schema(
-        title = "Where to start reading when no earlier position is known",
-        description = "`TRIM_HORIZON` (default) reads from the oldest retained record. `LATEST` reads only new " +
-            "records. `AT_TIMESTAMP` reads from the oldest record at or after `startingTimestamp` (required in that case)."
-    )
     @Builder.Default
     @PluginProperty(group = "main")
     private Property<StartingPosition> startingPosition = Property.ofValue(StartingPosition.TRIM_HORIZON);
 
-    @Schema(title = "Starting timestamp", description = "Required when `startingPosition` is `AT_TIMESTAMP`.")
     @PluginProperty(group = "main")
     private Property<Instant> startingTimestamp;
 
-    @Schema(title = "Deserialization type applied to each record's `data` value")
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> serdeType = Property.ofValue(SerdeType.STRING);
@@ -130,10 +115,6 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 
-    @Schema(
-        title = "Maximum bytes fetched per partition, per call",
-        description = "Defaults to 2 MB (2097152 bytes), DIS's per-request payload ceiling."
-    )
     @Builder.Default
     @PluginProperty(group = "execution")
     private Property<Integer> maxFetchBytes = Property.ofValue(MAX_FETCH_BYTES_HARD_CAP);
@@ -163,14 +144,12 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
             ? List.of(rPartitionId)
             : DisService.listPartitionIds(client, rStreamName);
 
+        var config = new PollConfig(rStartingPosition, rStartingTimestamp, rSerdeType, rMaxRecords, rMaxDuration, rMaxFetchBytes);
+
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         PollResult result;
         try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            result = poll(
-                runContext, client, rStreamName, partitionIds, null,
-                rStartingPosition, rStartingTimestamp, rSerdeType,
-                rMaxRecords, rMaxDuration, rMaxFetchBytes, output
-            );
+            result = poll(runContext, client, rStreamName, partitionIds, null, config, output);
             output.flush();
         }
 
@@ -212,6 +191,11 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
         return resolved;
     }
 
+    /** Bundles the immutable per-call knobs {@link #poll} needs, keeping its signature manageable. */
+    record PollConfig(StartingPosition startingPosition, Instant startingTimestamp, SerdeType serdeType,
+                      int maxRecords, Duration maxDuration, int maxFetchBytes) {
+    }
+
     /**
      * Round-robins {@code consumeRecords} across every partition until a stop condition is reached:
      * {@code maxRecords}/{@code maxDuration}, or a full round with zero records delivered (caught up).
@@ -220,9 +204,7 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
      */
     static PollResult poll(
         RunContext runContext, DisClient client, String rStreamName, List<String> partitionIds,
-        Map<String, String> resumeFrom, StartingPosition rStartingPosition, Instant rStartingTimestamp,
-        SerdeType rSerdeType, int rMaxRecords, Duration rMaxDuration, int rMaxFetchBytes,
-        OutputStream out
+        Map<String, String> resumeFrom, PollConfig config, OutputStream out
     ) throws Exception {
         var logger = runContext.logger();
         var cursors = new LinkedHashMap<String, String>();
@@ -230,7 +212,7 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
 
         for (var pid : partitionIds) {
             var resumeSeq = resumeFrom != null ? resumeFrom.get(pid) : null;
-            cursors.put(pid, DisService.cursorFor(client, rStreamName, pid, rStartingPosition, rStartingTimestamp, resumeSeq));
+            cursors.put(pid, DisService.cursorFor(client, rStreamName, pid, config.startingPosition(), config.startingTimestamp(), resumeSeq));
             if (resumeSeq != null) {
                 lastSequenceNumbers.put(pid, resumeSeq);
             }
@@ -248,46 +230,31 @@ public class Consume extends AbstractDis implements RunnableTask<Consume.Output>
                     continue;
                 }
 
-                var request = new ConsumeRecordsRequest().withPartitionCursor(cursor).withMaxFetchBytes(rMaxFetchBytes);
-                ConsumeRecordsResponse response;
-                try {
-                    response = client.consumeRecords(request);
-                } catch (ServiceResponseException e) {
-                    // A 401/403 means the credentials themselves are rejected, not the cursor — retrying with a
-                    // fresh cursor would just repeat the same failure while masking the real problem.
-                    if (e.getHttpStatusCode() == 401 || e.getHttpStatusCode() == 403) {
-                        throw e;
-                    }
-                    // DIS partition cursors expire after a few minutes of inactivity. Rather than guess at a
-                    // specific error code (which Huawei does not document as stable), treat any other rejection here
-                    // as a possibly-expired cursor and request a fresh one from the last known sequence number.
-                    logger.warn("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", pid, e.getMessage());
-                    var refreshed = DisService.cursorFor(
-                        client, rStreamName, pid, rStartingPosition, rStartingTimestamp, lastSequenceNumbers.get(pid));
-                    response = client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(refreshed).withMaxFetchBytes(rMaxFetchBytes));
-                }
+                var response = DisService.consumeWithCursorRefresh(
+                    client, logger, rStreamName, pid, cursor, config.maxFetchBytes(),
+                    config.startingPosition(), config.startingTimestamp(), lastSequenceNumbers.get(pid));
 
                 var records = response.getRecords();
                 if (records != null) {
                     for (var record : records) {
-                        FileSerde.write(out, toRecord(pid, record, rSerdeType));
+                        FileSerde.write(out, toRecord(pid, record, config.serdeType()));
                         lastSequenceNumbers.put(pid, record.getSequenceNumber());
                         total++;
                         roundRecords++;
-                        if (rMaxRecords >= 0 && total >= rMaxRecords) {
+                        if (config.maxRecords() >= 0 && total >= config.maxRecords()) {
                             break;
                         }
                     }
                 }
                 cursors.put(pid, response.getNextPartitionCursor());
 
-                if (rMaxRecords >= 0 && total >= rMaxRecords) {
+                if (config.maxRecords() >= 0 && total >= config.maxRecords()) {
                     break;
                 }
             }
 
-            finished = (rMaxRecords >= 0 && total >= rMaxRecords)
-                || (rMaxDuration != null && Instant.now().isAfter(started.plus(rMaxDuration)))
+            finished = (config.maxRecords() >= 0 && total >= config.maxRecords())
+                || (config.maxDuration() != null && Instant.now().isAfter(started.plus(config.maxDuration())))
                 || roundRecords == 0;
         }
 

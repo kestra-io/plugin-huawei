@@ -19,9 +19,9 @@ import org.junit.jupiter.api.TestInstance;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
-import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 
@@ -164,8 +164,8 @@ class ConsumeTest {
 
         var result = Consume.poll(
             runContext, client, "my-stream", List.of("0", "1"), null,
-            StartingPosition.TRIM_HORIZON, null, SerdeType.STRING,
-            100, null, Consume.MAX_FETCH_BYTES_HARD_CAP, out
+            new Consume.PollConfig(StartingPosition.TRIM_HORIZON, null, SerdeType.STRING, 100, null, Consume.MAX_FETCH_BYTES_HARD_CAP),
+            out
         );
 
         assertThat(result.count(), equalTo(3));

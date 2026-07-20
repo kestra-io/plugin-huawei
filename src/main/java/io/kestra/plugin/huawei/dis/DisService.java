@@ -1,11 +1,15 @@
 package io.kestra.plugin.huawei.dis;
 
 import com.huaweicloud.sdk.core.auth.BasicCredentials;
+import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.dis.v2.DisClient;
+import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsRequest;
+import com.huaweicloud.sdk.dis.v2.model.ConsumeRecordsResponse;
 import com.huaweicloud.sdk.dis.v2.model.ShowCursorRequest;
 import com.huaweicloud.sdk.dis.v2.model.ShowStreamRequest;
 import com.huaweicloud.sdk.dis.v2.region.DisRegion;
 import io.kestra.plugin.huawei.AbstractConnection;
+import org.slf4j.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -143,5 +147,28 @@ final class DisService {
         }
 
         return client.showCursor(request).getPartitionCursor();
+    }
+
+    /**
+     * Calls {@code consumeRecords}; on any non-401/403 service error, treats it as a possibly-expired
+     * cursor (DIS partition cursors expire after a few minutes of inactivity and Huawei documents no
+     * stable error code to key on), logs a WARN, resolves a fresh cursor from the last known sequence
+     * number, and retries once. A 401/403 is rethrown unchanged — that means the credentials are
+     * rejected, not the cursor, and a retry would only mask the real problem.
+     */
+    static ConsumeRecordsResponse consumeWithCursorRefresh(
+        DisClient client, Logger logger, String streamName, String partitionId, String cursor,
+        int maxFetchBytes, StartingPosition startingPosition, Instant startingTimestamp, String lastSequenceNumber
+    ) {
+        try {
+            return client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(cursor).withMaxFetchBytes(maxFetchBytes));
+        } catch (ServiceResponseException e) {
+            if (e.getHttpStatusCode() == 401 || e.getHttpStatusCode() == 403) {
+                throw e;
+            }
+            logger.warn("DIS partition cursor for partition '{}' was rejected ({}); requesting a fresh cursor", partitionId, e.getMessage());
+            var refreshed = cursorFor(client, streamName, partitionId, startingPosition, startingTimestamp, lastSequenceNumber);
+            return client.consumeRecords(new ConsumeRecordsRequest().withPartitionCursor(refreshed).withMaxFetchBytes(maxFetchBytes));
+        }
     }
 }

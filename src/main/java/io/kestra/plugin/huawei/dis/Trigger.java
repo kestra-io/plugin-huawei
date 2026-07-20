@@ -25,9 +25,7 @@ import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @SuperBuilder
@@ -75,39 +73,27 @@ import java.util.Optional;
     }
 )
 public class Trigger extends AbstractDisTrigger
-    implements PollingTriggerInterface, TriggerOutput<Consume.Output> {
+    implements PollingTriggerInterface, TriggerOutput<Consume.Output>, ConsumeOptionsInterface {
 
     @Schema(title = "Polling interval", description = "ISO-8601 duration between poll cycles, e.g. `PT60S` (default).")
     @Builder.Default
     @PluginProperty(group = "advanced")
     private Duration interval = Duration.ofSeconds(60);
 
-    @Schema(title = "DIS stream name")
     @NotNull
     @PluginProperty(group = "main")
     private Property<String> streamName;
 
-    @Schema(
-        title = "Single partition to consume from",
-        description = "When omitted (default), every partition of the stream is consumed."
-    )
     @PluginProperty(group = "main")
     private Property<String> partitionId;
 
-    @Schema(
-        title = "Where to start reading a partition the first time it has no watermark yet",
-        description = "`TRIM_HORIZON` (default) reads from the oldest retained record. `LATEST` reads only new " +
-            "records. `AT_TIMESTAMP` reads from the oldest record at or after `startingTimestamp` (required in that case)."
-    )
     @Builder.Default
     @PluginProperty(group = "main")
     private Property<StartingPosition> startingPosition = Property.ofValue(StartingPosition.TRIM_HORIZON);
 
-    @Schema(title = "Starting timestamp", description = "Required when `startingPosition` is `AT_TIMESTAMP`.")
     @PluginProperty(group = "main")
     private Property<Instant> startingTimestamp;
 
-    @Schema(title = "Deserialization type applied to each record's `data` value")
     @Builder.Default
     @PluginProperty(group = "processing")
     private Property<SerdeType> serdeType = Property.ofValue(SerdeType.STRING);
@@ -126,10 +112,6 @@ public class Trigger extends AbstractDisTrigger
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 
-    @Schema(
-        title = "Maximum bytes fetched per partition, per call",
-        description = "Defaults to 2 MB (2097152 bytes), DIS's per-request payload ceiling."
-    )
     @Builder.Default
     @PluginProperty(group = "execution")
     private Property<Integer> maxFetchBytes = Property.ofValue(Consume.MAX_FETCH_BYTES_HARD_CAP);
@@ -167,22 +149,19 @@ public class Trigger extends AbstractDisTrigger
         var watermarkKey = DisWatermark.key(triggerContext);
         var watermark = DisWatermark.read(kv, watermarkKey);
 
+        var config = new Consume.PollConfig(rStartingPosition, rStartingTimestamp, rSerdeType, rMaxRecords, rMaxDuration, rMaxFetchBytes);
+
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         Consume.PollResult result;
         try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            result = Consume.poll(
-                runContext, client, rStreamName, partitionIds, watermark,
-                rStartingPosition, rStartingTimestamp, rSerdeType,
-                rMaxRecords, rMaxDuration, rMaxFetchBytes, output
-            );
+            result = Consume.poll(runContext, client, rStreamName, partitionIds, watermark, config, output);
             output.flush();
         }
 
-        // Advances every observed partition's watermark, even those with zero new records this poll,
-        // so a future poll never re-inspects data already accounted for.
-        var merged = new HashMap<>(watermark != null ? watermark : Map.<String, String>of());
-        merged.putAll(result.lastSequenceNumbers());
-        DisWatermark.write(kv, watermarkKey, merged);
+        // poll() already carries every current partition's prior watermark forward into
+        // result.lastSequenceNumbers(), so persisting it directly keeps active partitions correct while
+        // dropping entries for partitions that no longer exist (avoiding unbounded watermark-map growth).
+        DisWatermark.write(kv, watermarkKey, result.lastSequenceNumbers());
 
         runContext.logger().info(
             "DIS trigger polled stream={} partitions={}: {} records", rStreamName, partitionIds.size(), result.count());

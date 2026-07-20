@@ -88,8 +88,6 @@ class PutRecordsTest {
                 .withBody(body)));
     }
 
-    // ── Happy path ───────────────────────────────────────────────────────────────
-
     @Test
     void run_rawMapEntries_happyPath() throws Exception {
         stubSendRecords("""
@@ -137,8 +135,6 @@ class PutRecordsTest {
         assertThat(output.getFailedRecordCount(), equalTo(0));
     }
 
-    // ── Validation ───────────────────────────────────────────────────────────────
-
     @Test
     void run_missingData_throws() {
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -166,8 +162,6 @@ class PutRecordsTest {
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage().contains("1 MB"), is(true));
     }
-
-    // ── Partial failure ────────────────────────────────────────────────────────
 
     @Test
     void run_partialFailure_failOnUnsuccessfulTrue_throws() throws Exception {
@@ -214,8 +208,6 @@ class PutRecordsTest {
         assertThat(output.getFailedRecordCount(), equalTo(1));
     }
 
-    // ── Chunking ───────────────────────────────────────────────────────────────
-
     @Test
     void run_recordCountExceedsBatchLimit_chunksIntoTwoRequests() throws Exception {
         wireMock.stubFor(post(urlMatching(".*/records"))
@@ -257,13 +249,54 @@ class PutRecordsTest {
         wireMock.verify(exactly(2), postRequestedFor(urlMatching(".*/records")));
     }
 
+    @Test
+    void run_byteSizeExceedsBatchLimit_chunksIntoTwoRequests() throws Exception {
+        wireMock.stubFor(post(urlMatching(".*/records"))
+            .inScenario("byte-chunking")
+            .whenScenarioStateIs("Started")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_record_count": 0, "records": []}
+                    """))
+            .willSetStateTo("second-batch"));
+        wireMock.stubFor(post(urlMatching(".*/records"))
+            .inScenario("byte-chunking")
+            .whenScenarioStateIs("second-batch")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"failed_record_count": 0, "records": []}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        // Raw 900KB per record, under the 1MB per-record limit; base64 ≈ 1.2MB each, so only 4 fit in a
+        // 5MB batch and the 5th overflows into a second request.
+        var oversizedValue = "x".repeat(900 * 1024);
+        var records = new ArrayList<Map<String, Object>>();
+        for (var i = 0; i < 6; i++) {
+            records.add(Map.of("data", oversizedValue, "partitionKey", "user-1"));
+        }
+        var task = baseTask()
+            .from(records)
+            .failOnUnsuccessfulRecords(Property.ofValue(false))
+            .build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getRecordCount(), equalTo(6));
+        wireMock.verify(exactly(2), postRequestedFor(urlMatching(".*/records")));
+    }
+
     private List<PutRecords.Result> readResults(RunContext runContext, URI uri) throws Exception {
         try (var reader = new InputStreamReader(runContext.storage().getFile(uri), StandardCharsets.UTF_8)) {
             return FileSerde.readAll(reader, PutRecords.Result.class).collectList().block();
         }
     }
 
-    // ── Integration test (guarded) ───────────────────────────────────────────────
+    // Integration test (guarded)
 
     @Test
     @EnabledIfEnvironmentVariable(named = "DIS_TESTS", matches = "true")

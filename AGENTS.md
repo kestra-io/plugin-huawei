@@ -30,7 +30,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
 - `io.kestra.plugin.huawei.dli` — DLI (Data Lake Insight) task (`AbstractDli`, `DliConnectionInterface`, `DliUtils`, `DliService`, `Query`)
 - `io.kestra.plugin.huawei.eventgrid` — EventGrid (EG) task (`AbstractEventGrid`, `EventGridConnectionInterface`, `EventGridUtils`, `PutEvents`)
-- `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
+- `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `ConsumeOptionsInterface`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
 - `io.kestra.plugin.huawei.dis.models` — DIS output models (`Record`)
 
 Infrastructure dependencies (Docker Compose services):
@@ -318,6 +318,7 @@ plugin-huawei/
 │   ├── dis/
 │   │   ├── AbstractDis.java
 │   │   ├── AbstractDisTrigger.java
+│   │   ├── ConsumeOptionsInterface.java
 │   │   ├── DisConnectionInterface.java
 │   │   ├── DisService.java
 │   │   ├── DisUtils.java
@@ -391,7 +392,8 @@ plugin-huawei/
 │   │   ├── DisUtilsTest.java
 │   │   ├── PutRecordsTest.java
 │   │   ├── ConsumeTest.java
-│   │   └── TriggerTest.java
+│   │   ├── TriggerTest.java
+│   │   └── RealtimeTriggerTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
