@@ -3,8 +3,6 @@ package io.kestra.plugin.huawei.mrs.models;
 import io.kestra.core.models.annotations.PluginProperty;
 import io.kestra.core.models.property.Property;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.Value;
@@ -23,9 +21,8 @@ public class NodeGroupConfig {
     @PluginProperty(group = "main")
     Property<String> groupName;
 
-    @Schema(title = "Number of nodes in this group")
+    @Schema(title = "Number of nodes in this group", description = "Must be >= 1.")
     @NotNull
-    @Min(1)
     @PluginProperty(group = "main")
     Property<Integer> nodeNum;
 
@@ -39,9 +36,8 @@ public class NodeGroupConfig {
     @PluginProperty(group = "advanced")
     Property<String> rootVolumeType = Property.ofValue("SATA");
 
-    @Schema(title = "Root volume size (GB)", description = "Defaults to 40 GB.")
+    @Schema(title = "Root volume size (GB)", description = "Must be >= 1. Defaults to 40 GB.")
     @Builder.Default
-    @Min(1)
     @PluginProperty(group = "advanced")
     Property<Integer> rootVolumeSize = Property.ofValue(40);
 
@@ -50,16 +46,13 @@ public class NodeGroupConfig {
     @PluginProperty(group = "advanced")
     Property<String> dataVolumeType = Property.ofValue("SATA");
 
-    @Schema(title = "Data volume size (GB)", description = "Defaults to 100 GB.")
+    @Schema(title = "Data volume size (GB)", description = "Must be >= 1. Defaults to 100 GB.")
     @Builder.Default
-    @Min(1)
     @PluginProperty(group = "advanced")
     Property<Integer> dataVolumeSize = Property.ofValue(100);
 
-    @Schema(title = "Number of data volumes per node", description = "Defaults to 1.")
+    @Schema(title = "Number of data volumes per node", description = "Must be between 1 and 20. Defaults to 1.")
     @Builder.Default
-    @Min(1)
-    @Max(20)
     @PluginProperty(group = "advanced")
     Property<Integer> dataVolumeCount = Property.ofValue(1);
 }

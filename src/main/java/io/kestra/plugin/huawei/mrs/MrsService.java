@@ -98,6 +98,12 @@ final class MrsService {
      * separately once the cluster (and therefore its job-execution list) exists. Matches are made by
      * job name and a submission-time watermark; a step whose job is not yet visible is left absent
      * from the result rather than failing the task, since cluster creation itself already succeeded.
+     *
+     * <p>{@code submittedTimeBegin} is passed through as epoch milliseconds, matching the other
+     * {@code Long} timestamp fields on {@link JobQueryBean} ({@code startedTime}/{@code submittedTime}/
+     * {@code finishedTime}); this unit is not verified against a live cluster. If MRS actually expects
+     * epoch seconds here, the watermark filter would simply never match and this call would keep
+     * returning an empty job list — already handled as a best-effort no-op, not an error.
      */
     static List<String> resolveStepJobIds(
         com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, List<String> stepJobNames, long submittedTimeBegin, Logger logger

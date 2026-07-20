@@ -223,6 +223,43 @@ class CreateClusterAndSubmitJobTest {
     }
 
     @Test
+    void createCluster_nodeNumBelowMinimum_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .nodeGroups(Property.ofValue(List.of(
+                NodeGroupConfig.builder()
+                    .groupName(Property.ofValue("master_node_default_group"))
+                    .nodeNum(Property.ofValue(0))
+                    .nodeSize(Property.ofValue("c6.2xlarge.4"))
+                    .build()
+            )))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("nodeNum"));
+        assertThat(ex.getMessage(), containsString("0"));
+    }
+
+    @Test
+    void createCluster_dataVolumeCountAboveMaximum_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask()
+            .nodeGroups(Property.ofValue(List.of(
+                NodeGroupConfig.builder()
+                    .groupName(Property.ofValue("master_node_default_group"))
+                    .nodeNum(Property.ofValue(1))
+                    .nodeSize(Property.ofValue("c6.2xlarge.4"))
+                    .dataVolumeCount(Property.ofValue(21))
+                    .build()
+            )))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("dataVolumeCount"));
+        assertThat(ex.getMessage(), containsString("21"));
+    }
+
+    @Test
     void createCluster_customEndpointWithoutProjectId_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = baseTask().projectId(null).build();

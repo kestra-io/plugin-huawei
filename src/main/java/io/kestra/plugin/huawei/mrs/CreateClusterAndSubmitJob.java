@@ -362,18 +362,42 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
         return Output.builder().clusterId(clusterId).clusterState(cluster.getClusterState()).jobIds(jobIds).build();
     }
 
+    // `nodeNum`/volume sizes/`dataVolumeCount` can't carry @Min/@Max directly on NodeGroupConfig:
+    // Hibernate Validator has no ValueExtractor for Property<>, so those annotations blow up
+    // flow-save-time bean validation with HV000030 (mirrors AbstractGeminiDb.renderedLimit). The
+    // bounds are enforced here instead, at render time.
+    private static final int MIN_DATA_VOLUME_COUNT = 1;
+    private static final int MAX_DATA_VOLUME_COUNT = 20;
+
     private static NodeGroupV2 toNodeGroupV2(RunContext runContext, NodeGroupConfig config, int index) throws Exception {
         var rGroupName = runContext.render(config.getGroupName()).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException("nodeGroups[" + index + "].groupName is required"));
         var rNodeNum = runContext.render(config.getNodeNum()).as(Integer.class)
             .orElseThrow(() -> new IllegalArgumentException("nodeGroups[" + index + "].nodeNum is required"));
+        if (rNodeNum < 1) {
+            throw new IllegalArgumentException(
+                "nodeGroups[" + index + "].nodeNum must be >= 1 (was " + rNodeNum + ")");
+        }
         var rNodeSize = runContext.render(config.getNodeSize()).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException("nodeGroups[" + index + "].nodeSize is required"));
         var rRootVolumeType = runContext.render(config.getRootVolumeType()).as(String.class).orElse("SATA");
         var rRootVolumeSize = runContext.render(config.getRootVolumeSize()).as(Integer.class).orElse(40);
+        if (rRootVolumeSize < 1) {
+            throw new IllegalArgumentException(
+                "nodeGroups[" + index + "].rootVolumeSize must be >= 1 (was " + rRootVolumeSize + ")");
+        }
         var rDataVolumeType = runContext.render(config.getDataVolumeType()).as(String.class).orElse("SATA");
         var rDataVolumeSize = runContext.render(config.getDataVolumeSize()).as(Integer.class).orElse(100);
+        if (rDataVolumeSize < 1) {
+            throw new IllegalArgumentException(
+                "nodeGroups[" + index + "].dataVolumeSize must be >= 1 (was " + rDataVolumeSize + ")");
+        }
         var rDataVolumeCount = runContext.render(config.getDataVolumeCount()).as(Integer.class).orElse(1);
+        if (rDataVolumeCount < MIN_DATA_VOLUME_COUNT || rDataVolumeCount > MAX_DATA_VOLUME_COUNT) {
+            throw new IllegalArgumentException(
+                "nodeGroups[" + index + "].dataVolumeCount must be between " + MIN_DATA_VOLUME_COUNT +
+                " and " + MAX_DATA_VOLUME_COUNT + " (was " + rDataVolumeCount + ")");
+        }
 
         return new NodeGroupV2()
             .withGroupName(rGroupName)
