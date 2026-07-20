@@ -129,12 +129,12 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
     // Property<>, so those annotations blow up flow-save-time bean validation with HV000030. The
     // bound is enforced here instead, at render time.
     protected int renderedLimit(final RunContext runContext, final Property<Integer> limit) throws Exception {
-        int value = runContext.render(limit).as(Integer.class).orElse(100);
-        if (value < MIN_LIMIT || value > MAX_LIMIT) {
+        int rLimit = runContext.render(limit).as(Integer.class).orElse(100);
+        if (rLimit < MIN_LIMIT || rLimit > MAX_LIMIT) {
             throw new IllegalArgumentException(
-                "'limit' must be between " + MIN_LIMIT + " and " + MAX_LIMIT + " (was " + value + ").");
+                "'limit' must be between " + MIN_LIMIT + " and " + MAX_LIMIT + " (was " + rLimit + ").");
         }
-        return value;
+        return rLimit;
     }
 
     protected Map<String, Object> objectMapFrom(Map<String, AttributeValue> fields) {

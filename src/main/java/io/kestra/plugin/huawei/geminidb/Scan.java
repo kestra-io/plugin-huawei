@@ -133,11 +133,11 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
 
             var rFilterExpression = runContext.render(this.filterExpression).as(String.class).orElse(null);
             if (rFilterExpression != null) {
-                var attributes = runContext.render(this.expressionAttributeValues).asMap(String.class, Object.class);
-                if (attributes.isEmpty()) {
+                var rExpressionAttributeValues = runContext.render(this.expressionAttributeValues).asMap(String.class, Object.class);
+                if (rExpressionAttributeValues.isEmpty()) {
                     throw new IllegalArgumentException("'expressionAttributeValues' must be provided when 'filterExpression' is set");
                 }
-                scanBuilder.filterExpression(rFilterExpression).expressionAttributeValues(valueMapFrom(attributes));
+                scanBuilder.filterExpression(rFilterExpression).expressionAttributeValues(valueMapFrom(rExpressionAttributeValues));
             }
 
             var response = dynamoDb.scan(scanBuilder.build());

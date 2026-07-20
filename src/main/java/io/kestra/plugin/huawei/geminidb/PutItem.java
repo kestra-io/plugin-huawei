@@ -66,11 +66,11 @@ public class PutItem extends AbstractGeminiDb implements RunnableTask<VoidOutput
     @Override
     public VoidOutput run(RunContext runContext) throws Exception {
         try (var dynamoDb = client(runContext)) {
-            var fields = runContext.render(this.item).asMap(String.class, Object.class);
+            var rItem = runContext.render(this.item).asMap(String.class, Object.class);
 
             var putRequest = PutItemRequest.builder()
                 .tableName(renderedTableName(runContext))
-                .item(valueMapFrom(fields))
+                .item(valueMapFrom(rItem))
                 .build();
 
             dynamoDb.putItem(putRequest);
