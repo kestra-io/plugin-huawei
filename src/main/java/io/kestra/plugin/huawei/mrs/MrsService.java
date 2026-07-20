@@ -27,11 +27,24 @@ import java.util.Set;
  */
 final class MrsService {
 
-    private static final Set<String> CLUSTER_FAILURE_STATES = Set.of("failed", "bootstrap_fail", "terminated");
+    // clusterState enumeration per the authoritative MRS V1 showClusterDetails docs:
+    // https://support.huaweicloud.com/intl/en-us/api-mrs/mrs_02_0031.html — starting, running,
+    // terminated, failed, abnormal, terminating, frozen, scaling-out, scaling-in.
+    // `starting`/`terminating`/`scaling-out`/`scaling-in` are intentionally left out of both sets below:
+    // they are transient and expected to progress on their own, so the poll loop must keep waiting
+    // through them. `abnormal` (cluster came up unhealthy) and `frozen` (e.g. billing arrears) will
+    // never reach `running` by themselves and must be treated as terminal failures, not polled forever.
+    private static final Set<String> CLUSTER_FAILURE_STATES = Set.of("failed", "terminated", "abnormal", "frozen");
     private static final String CLUSTER_SUCCESS_STATE = "running";
 
-    private static final Set<String> JOB_FAILURE_STATES = Set.of("FAILED", "ABNORMAL", "TERMINATED", "KILLED");
-    private static final String JOB_SUCCESS_STATE = "COMPLETED";
+    // job_state follows the YARN application state machine (New/NEW_SAVING/SUBMITTED/ACCEPTED/RUNNING
+    // non-terminal; FINISHED/FAILED/KILLED terminal) — it is NOT a job-level success/failure indicator.
+    // YARN can mark an application FINISHED even though it failed at the application level, so the
+    // actual outcome must be read from job_result (SUCCEEDED/FAILED/KILLED/UNDEFINED) once job_state
+    // is terminal, not inferred from job_state alone.
+    private static final Set<String> JOB_TERMINAL_STATES = Set.of("FINISHED", "FAILED", "KILLED");
+    private static final Set<String> JOB_FAILURE_STATES = Set.of("FAILED", "KILLED");
+    private static final Set<String> JOB_RESULT_FAILURE_VALUES = Set.of("FAILED", "KILLED");
 
     private MrsService() {
     }
@@ -47,6 +60,8 @@ final class MrsService {
     ) throws InterruptedException {
         var deadline = System.currentTimeMillis() + maxDuration.toMillis();
         var cluster = showCluster(v1Client, clusterId);
+        var lastLoggedState = cluster.getClusterState();
+        logger.debug("MRS cluster '{}' state={}", clusterId, lastLoggedState);
 
         while (!isClusterTerminal(cluster.getClusterState())) {
             if (System.currentTimeMillis() > deadline) {
@@ -58,7 +73,12 @@ final class MrsService {
             }
             Thread.sleep(interval.toMillis());
             cluster = showCluster(v1Client, clusterId);
-            logger.debug("MRS cluster '{}' state={}", clusterId, cluster.getClusterState());
+            // Only log on a state transition — polling at a fixed interval otherwise floods DEBUG logs
+            // with dozens of identical lines while the cluster sits in a single state for a while.
+            if (!Objects.equals(cluster.getClusterState(), lastLoggedState)) {
+                lastLoggedState = cluster.getClusterState();
+                logger.debug("MRS cluster '{}' state={}", clusterId, lastLoggedState);
+            }
         }
 
         if (isClusterFailure(cluster.getClusterState())) {
@@ -132,8 +152,8 @@ final class MrsService {
     }
 
     /**
-     * Polls a single job execution until it reaches `COMPLETED` (success) or a known failure state,
-     * bounded by {@code maxDuration}.
+     * Polls a single job execution until its {@code job_state} reaches a terminal YARN state
+     * (`FINISHED`, `FAILED`, `KILLED`), bounded by {@code maxDuration}.
      */
     static JobQueryBean pollJobUntilTerminal(
         com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, String jobExecutionId,
@@ -141,6 +161,8 @@ final class MrsService {
     ) throws InterruptedException {
         var deadline = System.currentTimeMillis() + maxDuration.toMillis();
         var job = showJob(v2Client, clusterId, jobExecutionId);
+        var lastLoggedState = job.getJobState();
+        logger.debug("MRS job '{}' state={}", jobExecutionId, lastLoggedState);
 
         while (!isJobTerminal(job.getJobState())) {
             if (System.currentTimeMillis() > deadline) {
@@ -152,10 +174,15 @@ final class MrsService {
             }
             Thread.sleep(interval.toMillis());
             job = showJob(v2Client, clusterId, jobExecutionId);
-            logger.debug("MRS job '{}' state={}", jobExecutionId, job.getJobState());
+            // Only log on a state transition — polling at a fixed interval otherwise floods DEBUG logs
+            // with dozens of identical lines while the job sits in ACCEPTED/RUNNING.
+            if (!Objects.equals(job.getJobState(), lastLoggedState)) {
+                lastLoggedState = job.getJobState();
+                logger.debug("MRS job '{}' state={}", jobExecutionId, lastLoggedState);
+            }
         }
 
-        if (isJobFailure(job.getJobState())) {
+        if (isJobFailure(job)) {
             throw new IllegalStateException(
                 "MRS job '" + jobExecutionId + "' on cluster '" + clusterId + "' finished with state '" +
                 job.getJobState() + "'" + (job.getJobResult() != null ? ": " + job.getJobResult() : "") +
@@ -182,11 +209,22 @@ final class MrsService {
     }
 
     private static boolean isJobTerminal(String state) {
-        return state != null && (JOB_SUCCESS_STATE.equalsIgnoreCase(state) || isJobFailure(state));
+        return state != null && JOB_TERMINAL_STATES.contains(state.toUpperCase());
     }
 
-    private static boolean isJobFailure(String state) {
-        return state != null && JOB_FAILURE_STATES.contains(state.toUpperCase());
+    private static boolean isJobFailure(JobQueryBean job) {
+        var state = job.getJobState();
+        if (state == null) {
+            return false;
+        }
+        if (JOB_FAILURE_STATES.contains(state.toUpperCase())) {
+            return true;
+        }
+        // job_state=FINISHED only means the YARN application terminated; the application-level outcome
+        // (job_result) can still be FAILED/KILLED, which is the actual signal for a job that ran to
+        // completion but failed.
+        var result = job.getJobResult();
+        return result != null && JOB_RESULT_FAILURE_VALUES.contains(result.toUpperCase());
     }
 
     /** Best-effort job cancellation for {@code kill()} — never throws, logs and returns instead. */

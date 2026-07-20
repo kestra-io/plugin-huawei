@@ -3,6 +3,7 @@ package io.kestra.plugin.huawei.mrs;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
@@ -202,6 +203,69 @@ class CreateClusterAndSubmitJobTest {
         var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), containsString("failed"));
         assertThat(ex.getMessage(), containsString(CLUSTER_ID));
+    }
+
+    @Test
+    void createCluster_clusterAbnormal_throwsActionableError() {
+        // `abnormal` (cluster came up unhealthy) never progresses to `running` on its own — must be
+        // treated as a terminal failure, not polled forever.
+        stubCreateCluster();
+        stubClusterState("abnormal");
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("abnormal"));
+        assertThat(ex.getMessage(), containsString(CLUSTER_ID));
+    }
+
+    @Test
+    void createCluster_clusterFrozen_throwsActionableError() {
+        // `frozen` (e.g. billing arrears) never progresses to `running` on its own — must be treated
+        // as a terminal failure, not polled forever.
+        stubCreateCluster();
+        stubClusterState("frozen");
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("frozen"));
+        assertThat(ex.getMessage(), containsString(CLUSTER_ID));
+    }
+
+    @Test
+    void createCluster_startingThenRunning_transientStateDoesNotBlockSuccess() throws Exception {
+        // `starting` is transient and must be polled through, not treated as terminal.
+        stubCreateCluster();
+        wireMock.stubFor(get(urlMatching(".*/cluster_infos/" + CLUSTER_ID))
+            .inScenario("cluster-starting")
+            .whenScenarioStateIs(Scenario.STARTED)
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"cluster": {"clusterId": "%s", "clusterName": "kestra-test-cluster", "clusterState": "starting"}}
+                    """.formatted(CLUSTER_ID)))
+            .willSetStateTo("running"));
+        wireMock.stubFor(get(urlMatching(".*/cluster_infos/" + CLUSTER_ID))
+            .inScenario("cluster-starting")
+            .whenScenarioStateIs("running")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"cluster": {"clusterId": "%s", "clusterName": "kestra-test-cluster", "clusterState": "running"}}
+                    """.formatted(CLUSTER_ID))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var output = task.run(runContext);
+
+        assertThat(output.getClusterId(), equalTo(CLUSTER_ID));
+        assertThat(output.getClusterState(), equalTo("running"));
     }
 
     @Test

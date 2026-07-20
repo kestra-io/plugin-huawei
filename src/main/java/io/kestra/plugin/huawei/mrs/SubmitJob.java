@@ -39,7 +39,7 @@ import java.util.concurrent.atomic.AtomicReference;
         one-job-per-call submission API.
 
         Set `wait` to `true` (the default) to poll the job until it reaches a terminal state
-        (`COMPLETED`, or a failure state), or `false` to fire-and-forget and return immediately after
+        (`FINISHED`, or a failure state), or `false` to fire-and-forget and return immediately after
         submission.
         """
 )
@@ -84,7 +84,7 @@ public class SubmitJob extends AbstractMrs implements RunnableTask<SubmitJob.Out
 
     @Schema(
         title = "Wait for the job to reach a terminal state",
-        description = "When `true` (the default), polls the job until `COMPLETED` or a failure state. When `false`, returns immediately after submission."
+        description = "When `true` (the default), polls the job until `FINISHED` or a failure state. When `false`, returns immediately after submission."
     )
     @Builder.Default
     @PluginProperty(group = "reliability")
@@ -196,7 +196,7 @@ public class SubmitJob extends AbstractMrs implements RunnableTask<SubmitJob.Out
         @Schema(title = "MRS job execution ID")
         private final String jobId;
 
-        @Schema(title = "Terminal job state", description = "`COMPLETED` on success. `null` when `wait` is `false`.")
+        @Schema(title = "Terminal job state", description = "`FINISHED` on success. `null` when `wait` is `false`.")
         private final String jobState;
     }
 }
