@@ -30,6 +30,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
 - `io.kestra.plugin.huawei.dli` — DLI (Data Lake Insight) task (`AbstractDli`, `DliConnectionInterface`, `DliUtils`, `DliService`, `Query`)
 - `io.kestra.plugin.huawei.eventgrid` — EventGrid (EG) task (`AbstractEventGrid`, `EventGridConnectionInterface`, `EventGridUtils`, `PutEvents`)
+- `io.kestra.plugin.huawei.geminidb` — GeminiDB for NoSQL (DynamoDB-Compatible API) tasks (`AbstractGeminiDb`, `PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -37,6 +38,7 @@ Infrastructure dependencies (Docker Compose services):
 - `minio` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
 - `kafka` (`docker-compose-ci.yml`) — KRaft-mode Kafka broker for DMS Kafka integration tests (port 9092, no auth)
 - `rocketmq-namesrv` / `rocketmq-broker` (`docker-compose-ci.yml`) — Apache RocketMQ 4.9.4 for DMS RocketMQ integration tests (namesrv port 9876, broker port 10911); the 5.5.0 client is backward-compatible with the 4.x broker
+- `dynamodb-local` (`docker-compose-ci.yml`) — `amazon/dynamodb-local` standing in for GeminiDB's DynamoDB-compatible data-plane API in unit tests (port 8000, in-memory, shared DB); started unconditionally by `.github/setup-unit.sh` so the default-path GeminiDB tests run without any env gate
 
 ### Key Plugin Classes
 
@@ -121,6 +123,15 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.eventgrid.AbstractEventGrid` — Base class extending `AbstractConnection`; builds `EgClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `EgRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (EG v1 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.eventgrid.EventGridUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
 
+**GeminiDB for NoSQL (DynamoDB-Compatible API)**
+
+- `io.kestra.plugin.huawei.geminidb.PutItem` — Upserts an item (`item` map) into a table; Huawei Cloud GeminiDB equivalent of `io.kestra.plugin.aws.dynamodb.PutItem`; `VoidOutput`
+- `io.kestra.plugin.huawei.geminidb.GetItem` — Retrieves a single item by `key`; returns an empty `row` map (not an error) when the key doesn't match any item
+- `io.kestra.plugin.huawei.geminidb.DeleteItem` — Deletes a single item by `key`; no condition expression, `VoidOutput` (matches `io.kestra.plugin.aws.dynamodb.DeleteItem`, which also doesn't request `ReturnValues`)
+- `io.kestra.plugin.huawei.geminidb.Query` — Queries via `keyConditionExpression` + `expressionAttributeValues`, optional `filterExpression`; bounded `limit` (1-1000, default 100); `fetchType` (`STORE` default/`FETCH`/`FETCH_ONE`/`NONE`) → `FetchOutput`. Reads a single response page — does not follow `LastEvaluatedKey` — and logs an INFO message when the response was truncated
+- `io.kestra.plugin.huawei.geminidb.Scan` — Scans a table with optional `filterExpression` + `expressionAttributeValues`; same bounded `limit`/`fetchType`/truncation-logging behavior as `Query`
+- `io.kestra.plugin.huawei.geminidb.AbstractGeminiDb` — Base class extending `AbstractConnection`; builds a `DynamoDbClient` (AWS SDK v2) via `.endpointOverride(URI)` pointed at the mandatory `endpoint` property (a per-instance connection address — GeminiDB has no region-derived host, unlike every other Huawei service in this plugin) and `StaticCredentialsProvider` (AK/SK, or `AwsSessionCredentials` when `securityToken` is set); `region` is required by the SDK's SigV4 signer but is signing-only and defaults to a placeholder (`cn-north-1`) — it has no effect on request routing; also holds the ported AWS-`AttributeValue`⇄`Object` conversion helpers and the shared `fetchOutputs`/`warnIfTruncated` logic used by `Query`/`Scan`
+
 ### Inline Temporary Credentials via `pluginDefaults`
 
 The preferred way to use short-lived credentials is the `temporaryCredentials` nested block on any OBS (or future) task. Set it once via `pluginDefaults` and every task in the namespace obtains fresh STS credentials without manual output wiring:
@@ -200,7 +211,16 @@ docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv rocketmq-broker
 DMS_ROCKETMQ_TESTS=true DMS_ROCKETMQ_NAME_SERVER=localhost:9876 ./gradlew test
 ```
 
-All tests are guarded by `@EnabledIfEnvironmentVariable` so they are skipped unless the matching gate variable is set.
+All tests above are guarded by `@EnabledIfEnvironmentVariable` so they are skipped unless the matching gate variable is set.
+
+**GeminiDB tests** run against DynamoDB Local (GeminiDB's DynamoDB-compatible data-plane API has no Huawei-specific test double, but DynamoDB Local speaks the exact same wire protocol) and require **no env gate** — they always run as part of the default-path suite:
+
+```bash
+docker compose -f docker-compose-ci.yml up -d dynamodb-local
+./gradlew test
+```
+
+Point at a real GeminiDB instance instead by setting `GEMINIDB_TEST_ENDPOINT` (plus `GEMINIDB_TEST_ACCESS_KEY`, `GEMINIDB_TEST_SECRET_KEY`, `GEMINIDB_TEST_REGION`). A separate `GEMINIDB_TESTS=true` gate is reserved for any future live-cloud-only test; none exists yet since DynamoDB Local already exercises the same code path.
 
 To run OBS tests against a live Huawei Cloud OBS endpoint instead of MinIO, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`, and optionally `OBS_TEST_BUCKET` to reuse a pre-created bucket).
 
@@ -299,6 +319,14 @@ plugin-huawei/
 │   │   ├── EventGridUtils.java
 │   │   ├── PutEvents.java
 │   │   └── package-info.java
+│   ├── geminidb/
+│   │   ├── AbstractGeminiDb.java
+│   │   ├── PutItem.java
+│   │   ├── GetItem.java
+│   │   ├── DeleteItem.java
+│   │   ├── Query.java
+│   │   ├── Scan.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -355,6 +383,14 @@ plugin-huawei/
 │   ├── eventgrid/
 │   │   ├── EventGridUtilsTest.java
 │   │   └── PutEventsTest.java
+│   ├── geminidb/
+│   │   ├── AbstractGeminiDbTest.java
+│   │   ├── GeminiDbValidationTest.java
+│   │   ├── PutItemTest.java
+│   │   ├── GetItemTest.java
+│   │   ├── DeleteItemTest.java
+│   │   ├── QueryTest.java
+│   │   └── ScanTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -416,6 +452,12 @@ plugin-huawei/
 - ⚠️ EventGrid's EU/sovereign host is unverified: the SDK's `EgRegion` enum has no EU entry (so an unknown region always falls back to suffix-derivation, `eg.<region>.myhuaweicloud.com`), while Huawei's own EU documentation shows a different host (`events.eu-west-101.myhuaweicloud.eu`). Use `endpointOverride`/`endpointSuffix` as the escape hatch until this is verified against a live EU-sovereign account
 - `PutEvents` has no per-request batch cap enforced client-side — EventGrid's documented limit (if any) is unknown, so the task always sends the full `events` list in a single `putEvents` call and surfaces any size-related API error verbatim rather than guessing a safe chunk size
 - EventGrid integration test gate: `EVENTGRID_TESTS=true`; WireMock-based unit tests run unconditionally
+- GeminiDB for NoSQL ships a DynamoDB-Compatible API (wire-compatible with Amazon DynamoDB over HTTPS with SigV4 AK/SK signing — Huawei's own docs connect via boto3 with an explicit `endpoint_url`), so the plugin uses the **AWS SDK v2** (`software.amazon.awssdk:dynamodb` + `url-connection-client` for the sync HTTP transport) as the wire-compatible client, not any Huawei-branded SDK. The `huaweicloud-sdk-nosql` SDK is control-plane only (instance CRUD) and has no item-level data-plane API, so it is not used at all
+- Both `software.amazon.awssdk:dynamodb` and `url-connection-client` are declared **without an explicit version**: the `io.kestra:platform` BOM (already `enforcedPlatform`'d in this project) imports `software.amazon.awssdk:bom`, so the AWS SDK version is aligned automatically — same mechanism `plugin-aws` relies on
+- GeminiDB instances are addressed by a **per-instance connection address** (`endpoint`, mandatory `Property<String>`), never a region-derived host — this is the one Huawei service in this plugin where `region` has no bearing on routing. `region` is still required by the SDK's SigV4 signer and defaults to a placeholder (`cn-north-1`) purely for signing; document it as such wherever it's exposed
+- `AbstractGeminiDb.objectFrom(Object)` falls back to `toString()` for any type it doesn't special-case (notably numbers), so numeric attributes are written as DynamoDB `S` (string), not `N` — an inherited limitation from the upstream `io.kestra.plugin.aws.dynamodb.AbstractDynamoDb` this class is ported from, not a new gap
+- `Query`/`Scan` read a single response page and do **not** paginate across `LastEvaluatedKey`; `warnIfTruncated` logs an INFO message whenever the response is truncated so large result sets aren't silently cut short — bounded `limit` (1-1000, default 100, enforced at render time via `renderedLimit()` rather than `@Min`/`@Max` — `Property<>` has no Hibernate ValueExtractor) caps how much is read per page
+- GeminiDB test gate: `GEMINIDB_TESTS=true` is reserved for a future live-cloud-only test, but none exists yet — the default-path tests run **unconditionally** against `amazon/dynamodb-local` (started via `docker-compose-ci.yml`, unconditionally in `.github/setup-unit.sh`, no credential-based branching like the OBS/MinIO fallback) since DynamoDB Local speaks the identical wire protocol GeminiDB exposes
 
 ## References
 
