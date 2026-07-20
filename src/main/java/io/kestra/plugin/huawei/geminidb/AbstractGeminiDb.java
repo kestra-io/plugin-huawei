@@ -44,6 +44,9 @@ import java.util.Map;
 @NoArgsConstructor
 public abstract class AbstractGeminiDb extends AbstractConnection {
 
+    protected static final int MIN_LIMIT = 1;
+    protected static final int MAX_LIMIT = 1000;
+
     // SigV4 requires a region string to compute the signature, but GeminiDB routes purely by
     // `endpoint` — the region has no effect on where the request is sent, only on the signature.
     private static final String DEFAULT_SIGNING_REGION = "cn-north-1";
@@ -116,6 +119,18 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         return runContext.render(this.tableName).as(String.class)
             .orElseThrow(() -> new IllegalStateException(
                 "'tableName' rendered to an empty value — check the property and any templated expression it contains."));
+    }
+
+    // `limit` can't carry @Min/@Max directly: Hibernate Validator has no ValueExtractor for
+    // Property<>, so those annotations blow up flow-save-time bean validation with HV000030. The
+    // bound is enforced here instead, at render time.
+    protected int renderedLimit(final RunContext runContext, final Property<Integer> limit) throws Exception {
+        int value = runContext.render(limit).as(Integer.class).orElse(100);
+        if (value < MIN_LIMIT || value > MAX_LIMIT) {
+            throw new IllegalArgumentException(
+                "'limit' must be between " + MIN_LIMIT + " and " + MAX_LIMIT + " (was " + value + ").");
+        }
+        return value;
     }
 
     protected Map<String, Object> objectMapFrom(Map<String, AttributeValue> fields) {

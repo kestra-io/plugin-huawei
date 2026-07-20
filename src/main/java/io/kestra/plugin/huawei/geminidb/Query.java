@@ -11,8 +11,6 @@ import io.kestra.core.models.tasks.common.FetchOutput;
 import io.kestra.core.models.tasks.common.FetchType;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -125,8 +123,6 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
             "to 100. Does not paginate across `LastEvaluatedKey` — see the task description."
     )
     @Builder.Default
-    @Min(1)
-    @Max(1000)
     @PluginProperty(group = "processing")
     private Property<Integer> limit = Property.ofValue(100);
 
@@ -142,13 +138,14 @@ public class Query extends AbstractGeminiDb implements RunnableTask<FetchOutput>
 
     @Override
     public FetchOutput run(RunContext runContext) throws Exception {
+        int rLimit = renderedLimit(runContext, this.limit);
         try (var dynamoDb = client(runContext)) {
             var queryBuilder = QueryRequest.builder()
                 .tableName(renderedTableName(runContext))
                 .keyConditionExpression(runContext.render(this.keyConditionExpression).as(String.class)
                     .orElseThrow(() -> new IllegalArgumentException("'keyConditionExpression' must be set")))
                 .expressionAttributeValues(valueMapFrom(runContext.render(this.expressionAttributeValues).asMap(String.class, Object.class)))
-                .limit(runContext.render(this.limit).as(Integer.class).orElse(100));
+                .limit(rLimit);
 
             var rFilterExpression = runContext.render(this.filterExpression).as(String.class).orElse(null);
             if (rFilterExpression != null) {

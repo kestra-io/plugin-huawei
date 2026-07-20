@@ -11,8 +11,6 @@ import io.kestra.core.models.tasks.common.FetchOutput;
 import io.kestra.core.models.tasks.common.FetchType;
 import io.kestra.core.runners.RunContext;
 import io.swagger.v3.oas.annotations.media.Schema;
-import jakarta.validation.constraints.Max;
-import jakarta.validation.constraints.Min;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -111,8 +109,6 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
             "to 100. Does not paginate across `LastEvaluatedKey` — see the task description."
     )
     @Builder.Default
-    @Min(1)
-    @Max(1000)
     @PluginProperty(group = "processing")
     private Property<Integer> limit = Property.ofValue(100);
 
@@ -128,10 +124,11 @@ public class Scan extends AbstractGeminiDb implements RunnableTask<FetchOutput> 
 
     @Override
     public FetchOutput run(RunContext runContext) throws Exception {
+        int rLimit = renderedLimit(runContext, this.limit);
         try (var dynamoDb = client(runContext)) {
             var scanBuilder = ScanRequest.builder()
                 .tableName(renderedTableName(runContext))
-                .limit(runContext.render(this.limit).as(Integer.class).orElse(100));
+                .limit(rLimit);
 
             var rFilterExpression = runContext.render(this.filterExpression).as(String.class).orElse(null);
             if (rFilterExpression != null) {
