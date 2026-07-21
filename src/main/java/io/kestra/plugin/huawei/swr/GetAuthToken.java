@@ -83,7 +83,7 @@ public class GetAuthToken extends AbstractSwr implements RunnableTask<GetAuthTok
         description = "The Huawei Cloud project name to issue the credential for. Optional; defaults to `region` " +
             "when omitted, which matches the project name for standard (non-enterprise multi-project) accounts."
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "connection")
     private Property<String> projectName;
 
     @Override
@@ -164,9 +164,12 @@ public class GetAuthToken extends AbstractSwr implements RunnableTask<GetAuthTok
             if (matcher.find()) {
                 return new Credential(matcher.group(1), matcher.group(2), matcher.group(3));
             }
+            // Deliberately does not echo `xSwrDockerlogin` in the message: it embeds the plaintext
+            // password ("docker login -u ... -p <password> <registry>"), which would otherwise leak
+            // into the Kestra UI/logs via this exception.
             throw new IllegalArgumentException(
-                "SWR createSecret returned an 'X-Swr-Dockerlogin' header that could not be parsed " +
-                "('" + xSwrDockerlogin + "') — expected format 'docker login -u <user> -p <password> <registry>'.");
+                "SWR createSecret returned an 'X-Swr-Dockerlogin' header that could not be parsed — " +
+                "expected format 'docker login -u <user> -p <password> <registry>'.");
         }
 
         throw new IllegalArgumentException(

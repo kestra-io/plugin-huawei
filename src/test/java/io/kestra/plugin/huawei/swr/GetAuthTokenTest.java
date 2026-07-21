@@ -24,6 +24,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -227,6 +228,105 @@ class GetAuthTokenTest {
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), is(containsString("AK/SK")));
+    }
+
+    @Test
+    void getAuthToken_blankAuthValue_throwsActionableError() {
+        wireMock.stubFor(WireMock.post(urlMatching(".*/v2/manage/utils/secret.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"auths": {"%s": {"auth": ""}}}
+                    """.formatted(REGISTRY_HOST))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetAuthToken.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .region(Property.ofValue("eu-west-101"))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("no 'auth' value")));
+        assertThat(ex.getMessage(), is(containsString(REGISTRY_HOST)));
+    }
+
+    @Test
+    void getAuthToken_authValueNotBase64_throwsActionableError() {
+        wireMock.stubFor(WireMock.post(urlMatching(".*/v2/manage/utils/secret.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"auths": {"%s": {"auth": "not-valid-base64!!!"}}}
+                    """.formatted(REGISTRY_HOST))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetAuthToken.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .region(Property.ofValue("eu-west-101"))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("base64-decoded")));
+        assertThat(ex.getMessage(), is(containsString(REGISTRY_HOST)));
+    }
+
+    @Test
+    void getAuthToken_decodedAuthWithoutSeparator_throwsActionableError() {
+        wireMock.stubFor(WireMock.post(urlMatching(".*/v2/manage/utils/secret.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"auths": {"%s": {"auth": "%s"}}}
+                    """.formatted(REGISTRY_HOST, Base64.getEncoder().encodeToString("nocolonhere".getBytes())))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetAuthToken.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .region(Property.ofValue("eu-west-101"))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("no ':' separating")));
+        assertThat(ex.getMessage(), is(containsString(REGISTRY_HOST)));
+    }
+
+    @Test
+    void getAuthToken_authsEmptyAndDockerloginHeaderUnparseable_throwsActionableErrorWithoutLeakingSecret() {
+        var unparseableHeader = "totally not a docker login command";
+        wireMock.stubFor(WireMock.post(urlMatching(".*/v2/manage/utils/secret.*"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withHeader("X-Swr-Dockerlogin", unparseableHeader)
+                .withBody("{}")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetAuthToken.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .region(Property.ofValue("eu-west-101"))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), is(containsString("X-Swr-Dockerlogin")));
+        assertThat(ex.getMessage(), is(containsString("could not be parsed")));
+        // Guards the security fix: the raw header (which embeds the plaintext password in a real
+        // response) must never be echoed into the exception message.
+        assertThat(ex.getMessage(), is(not(containsString(unparseableHeader))));
     }
 
     @Test
