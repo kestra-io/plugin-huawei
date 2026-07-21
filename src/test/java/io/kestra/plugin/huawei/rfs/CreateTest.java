@@ -235,6 +235,68 @@ class CreateTest {
     }
 
     @Test
+    void create_deploymentFailed_surfacesEventDetailFromStackEvents() {
+        var scenario = "failDetailFlow";
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))
+            .inScenario(scenario).whenScenarioStateIs(Scenario.STARTED)
+            .willReturn(aResponse().withStatus(404).withHeader("Content-Type", "application/json")
+                .withBody("{\"error_code\": \"AOS.0001\", \"error_msg\": \"stack not found\"}"))
+            .willSetStateTo("created"));
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))
+            .inScenario(scenario).whenScenarioStateIs("created")
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody(metadataBody("DEPLOYMENT_FAILED"))));
+        stubCreateStack();
+        // RFS reports the underlying Terraform error as a LOG-type event, not an ERROR.
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/events.*"))
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"stack_events": [
+                      {"event_type": "LOG", "event_message": "Creating required resource now"},
+                      {"event_type": "LOG", "event_message": "Failed to init workflow due to bad template. Provider huaweicloud not found in any of the search locations", "resource_name": "this"}
+                    ]}
+                    """)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("DEPLOYMENT_FAILED"));
+        assertThat(ex.getMessage(), containsString("Failure details from RFS"));
+        assertThat(ex.getMessage(), containsString("Failed to init workflow due to bad template"));
+        // The non-failure LOG line ("Creating required resource now") is filtered out.
+        org.hamcrest.MatcherAssert.assertThat(ex.getMessage().contains("Creating required resource now"), is(false));
+
+        wireMock.verify(getRequestedFor(urlMatching(".*/stacks/" + STACK_NAME + "/events.*")));
+    }
+
+    @Test
+    void create_deploymentFailed_eventsUnavailable_fallsBackToConsoleHint() {
+        var scenario = "failNoEventsFlow";
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))
+            .inScenario(scenario).whenScenarioStateIs(Scenario.STARTED)
+            .willReturn(aResponse().withStatus(404).withHeader("Content-Type", "application/json")
+                .withBody("{\"error_code\": \"AOS.0001\", \"error_msg\": \"stack not found\"}"))
+            .willSetStateTo("created"));
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))
+            .inScenario(scenario).whenScenarioStateIs("created")
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody(metadataBody("DEPLOYMENT_FAILED"))));
+        stubCreateStack();
+        // events endpoint denied (e.g. missing permission) — must not mask the deployment failure.
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/events.*"))
+            .willReturn(aResponse().withStatus(403).withHeader("Content-Type", "application/json")
+                .withBody("{\"error_code\": \"AOS.9999\", \"error_msg\": \"forbidden\"}")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("DEPLOYMENT_FAILED"));
+        assertThat(ex.getMessage(), containsString("RFS console"));
+    }
+
+    @Test
     void create_timeout_throwsActionableError() {
         var scenario = "timeoutFlow";
         wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))

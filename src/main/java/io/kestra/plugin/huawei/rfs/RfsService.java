@@ -10,7 +10,9 @@ import com.huaweicloud.sdk.aos.v1.model.DeployStackRequestBody;
 import com.huaweicloud.sdk.aos.v1.model.DeployStackResponse;
 import com.huaweicloud.sdk.aos.v1.model.GetStackMetadataRequest;
 import com.huaweicloud.sdk.aos.v1.model.GetStackMetadataResponse;
+import com.huaweicloud.sdk.aos.v1.model.ListStackEventsRequest;
 import com.huaweicloud.sdk.aos.v1.model.ListStackOutputsRequest;
+import com.huaweicloud.sdk.aos.v1.model.StackEvent;
 import com.huaweicloud.sdk.aos.v1.model.VarsStructure;
 import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
@@ -19,8 +21,10 @@ import org.slf4j.Logger;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Reusable RFS stack operations shared by {@link Create} and {@link Delete}: existence probing,
@@ -197,6 +201,82 @@ final class RfsService {
         return outputs;
     }
 
+    /** How many stack events to fetch/scan when building a failure explanation. */
+    private static final int FAILURE_EVENTS_LIMIT = 50;
+    /** Cap on how many event lines to include in the thrown message, newest-relevant first. */
+    private static final int MAX_REPORTED_EVENTS = 10;
+    private static final int MAX_EVENT_MESSAGE_CHARS = 500;
+    /** Substrings that mark a LOG-type event as carrying a failure cause (RFS often reports the real
+     *  Terraform error — e.g. "Failed to init workflow due to bad template" — as a LOG, not an ERROR). */
+    private static final List<String> FAILURE_KEYWORDS =
+        List.of("fail", "error", "not found", "denied", "unable", "cannot", "invalid", "conflict", "exist");
+
+    /**
+     * Best-effort human-readable explanation of why a deployment failed, built from {@code listStackEvents}.
+     * Returns the relevant ERROR/{@code *_FAILED} events plus any LOG events whose message mentions a
+     * failure keyword, so the caller can surface the real cause without a console round-trip. Returns
+     * {@code null} if nothing useful could be retrieved. Never throws — surfacing the cause must never
+     * mask the original failure (e.g. if the AK/SK lacks {@code listStackEvents} permission).
+     */
+    static String describeFailure(AosClient client, String stackName, String deploymentId, Logger logger) {
+        try {
+            var request = new ListStackEventsRequest()
+                .withStackName(stackName)
+                .withClientRequestId(UUID.randomUUID().toString())
+                .withLimit(FAILURE_EVENTS_LIMIT);
+            if (deploymentId != null) {
+                request.withDeploymentId(deploymentId);
+            }
+            var events = client.listStackEvents(request).getStackEvents();
+            if (events == null || events.isEmpty()) {
+                return null;
+            }
+            var relevant = events.stream()
+                .filter(RfsService::isRelevantFailureEvent)
+                .map(RfsService::formatEvent)
+                .filter(m -> m != null && !m.isBlank())
+                .distinct()
+                .limit(MAX_REPORTED_EVENTS)
+                .collect(Collectors.joining("\n  - "));
+            return relevant.isBlank() ? null : "  - " + relevant;
+        } catch (SdkException e) {
+            logger.debug("Could not fetch RFS deployment events for stack '{}' to explain the failure: {}",
+                stackName, e.getMessage());
+            return null;
+        }
+    }
+
+    private static boolean isRelevantFailureEvent(StackEvent event) {
+        var type = event.getEventType();
+        if (type == StackEvent.EventTypeEnum.ERROR
+            || type == StackEvent.EventTypeEnum.CREATION_FAILED
+            || type == StackEvent.EventTypeEnum.DELETION_FAILED
+            || type == StackEvent.EventTypeEnum.UPDATE_FAILED) {
+            return true;
+        }
+        // RFS frequently reports the underlying Terraform error as a LOG event, so scan its message.
+        var message = event.getEventMessage();
+        if (message == null) {
+            return false;
+        }
+        var lower = message.toLowerCase(Locale.ROOT);
+        return FAILURE_KEYWORDS.stream().anyMatch(lower::contains);
+    }
+
+    private static String formatEvent(StackEvent event) {
+        var message = event.getEventMessage();
+        if (message == null || message.isBlank()) {
+            return null;
+        }
+        var trimmed = message.strip();
+        if (trimmed.length() > MAX_EVENT_MESSAGE_CHARS) {
+            trimmed = trimmed.substring(0, MAX_EVENT_MESSAGE_CHARS) + "…";
+        }
+        var resource = event.getResourceName() != null && !event.getResourceName().isBlank()
+            ? " (" + event.getResourceName() + ")" : "";
+        return "[" + event.getEventType() + "]" + resource + " " + trimmed;
+    }
+
     static boolean isInProgress(GetStackMetadataResponse.StatusEnum status) {
         return status == GetStackMetadataResponse.StatusEnum.DEPLOYMENT_IN_PROGRESS
             || status == GetStackMetadataResponse.StatusEnum.ROLLBACK_IN_PROGRESS
@@ -246,10 +326,12 @@ final class RfsService {
 
         while (current != null) {
             if (current.getStatus() == GetStackMetadataResponse.StatusEnum.DELETION_FAILED) {
+                var detail = describeFailure(client, stackName, null, logger);
                 throw new IllegalStateException(
                     "RFS stack '" + stackName + "' deletion failed" +
                     (current.getStatusMessage() != null ? ": " + current.getStatusMessage() : "") +
-                    " — the stack may have deletion protection enabled, or its resources may still be in use.");
+                    " — the stack may have deletion protection enabled, or its resources may still be in use." +
+                    (detail != null ? "\nFailure details from RFS:\n" + detail : ""));
             }
             if (System.currentTimeMillis() > deadline) {
                 throw new IllegalStateException(

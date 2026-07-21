@@ -237,10 +237,13 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
         var terminal = RfsService.pollUntilDeployTerminal(client, rStackName, rInterval, rMaxDuration, logger);
 
         if (terminal.getStatus() != GetStackMetadataResponse.StatusEnum.DEPLOYMENT_COMPLETE) {
+            var detail = RfsService.describeFailure(client, rStackName, deploymentId, logger);
             throw new IllegalStateException(
                 "RFS stack '" + rStackName + "' deployment '" + deploymentId + "' finished with status '" + terminal.getStatus() + "'" +
-                (terminal.getStatusMessage() != null ? ": " + terminal.getStatusMessage() : "") +
-                " — check the RFS console deployment history for details.");
+                (terminal.getStatusMessage() != null ? ": " + terminal.getStatusMessage() : "") + "." +
+                (detail != null
+                    ? "\nFailure details from RFS:\n" + detail
+                    : " Check the RFS console deployment history for details."));
         }
 
         logger.info("RFS stack '{}' deployment '{}' completed successfully.", rStackName, deploymentId);
