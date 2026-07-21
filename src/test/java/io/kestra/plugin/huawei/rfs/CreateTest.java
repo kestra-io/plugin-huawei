@@ -259,6 +259,23 @@ class CreateTest {
         assertThat(ex.getMessage(), containsString("terminal"));
     }
 
+    @Test
+    void create_existingStackInProgress_throwsWithoutDeploying() {
+        wireMock.stubFor(get(urlMatching(".*/stacks/" + STACK_NAME + "/metadata"))
+            .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody(metadataBody("DEPLOYMENT_IN_PROGRESS"))));
+        stubDeployStack();
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var task = baseTask().build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString(STACK_NAME));
+        assertThat(ex.getMessage(), containsString("DEPLOYMENT_IN_PROGRESS"));
+
+        wireMock.verify(0, postRequestedFor(urlMatching(".*/stacks/" + STACK_NAME + "/deployments")));
+    }
+
     // ── Validation ───────────────────────────────────────────────────────────────
 
     @Test

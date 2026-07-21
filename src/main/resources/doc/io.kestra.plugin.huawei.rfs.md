@@ -37,6 +37,7 @@ Overrides the default endpoint derived from `region` and `endpointSuffix`. Use f
 - **RFS has no `DELETION_COMPLETE` status**: a successfully deleted stack simply stops existing — `Delete` polls until the next `getStackMetadata` call returns HTTP 404.
 - **`Delete` is idempotent by default**: deleting an already-absent stack is a no-op logged at `INFO` level. Set `errorOnMissing: true` to fail instead.
 - **Sensitive outputs are masked by RFS itself**: `listStackOutputs` returns the literal string `<sensitive>` for any Terraform output marked sensitive, never the real value.
+- **`temporaryCredentials` can expire mid-wait on long deployments**: with `wait: true`, `maxDuration` can span hours for a large apply, but the client and its credentials are built once at the start of the task and reused for every poll. If `temporaryCredentials.durationSeconds` is shorter than the deployment, a mid-poll `getStackMetadata` fails on token expiry. Use long-lived AK/SK for long-running stacks, or set `durationSeconds` comfortably above the expected deployment time.
 
 ## Tasks
 

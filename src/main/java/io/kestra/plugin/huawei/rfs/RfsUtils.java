@@ -41,7 +41,7 @@ public final class RfsUtils {
         }
     }
 
-    private static boolean isNotBlank(String s) {
+    static boolean isNotBlank(String s) {
         return s != null && !s.isBlank();
     }
 

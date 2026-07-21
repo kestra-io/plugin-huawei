@@ -31,6 +31,10 @@ import java.time.Duration;
 
         By default (`errorOnMissing: false`), deleting a stack that does not exist is a no-op logged
         at `INFO` level, making this task safe to run idempotently.
+
+        This task intentionally does not override `kill()`: it is itself the explicit teardown, so
+        killing the Kestra execution only stops the client-side polling — the deletion already
+        submitted keeps running on Huawei's side.
         """
 )
 @Plugin(

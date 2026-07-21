@@ -40,6 +40,10 @@ import java.util.Map;
         deployment reaches a terminal state. On success (`DEPLOYMENT_COMPLETE`), the stack's declared
         outputs are fetched and returned; sensitive outputs come back from RFS as the literal string
         `<sensitive>`, never the real value.
+
+        This task intentionally does not override `kill()`: an RFS stack is long-lived infrastructure,
+        so killing the Kestra execution only stops the client-side polling — the deployment keeps
+        running on Huawei's side. Use the `Delete` task to explicitly tear a stack down.
         """
 )
 @Plugin(
@@ -137,14 +141,14 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
         title = "Inline Terraform tfvars content",
         description = "Raw `.tfvars`-formatted content. At most one of `vars`, `varsBody`, or `varsUri` may be set."
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "main")
     private Property<String> varsBody;
 
     @Schema(
         title = "OBS URI of a Terraform tfvars file",
         description = "An `obs://bucket/key` URI RFS downloads a `.tfvars` file from. At most one of `vars`, `varsBody`, or `varsUri` may be set."
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "main")
     private Property<String> varsUri;
 
     @Schema(
@@ -207,6 +211,12 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
             stackId = response.getStackId();
             deploymentId = response.getDeploymentId();
         } else {
+            if (RfsService.isInProgress(existing.getStatus())) {
+                throw new IllegalStateException(
+                    "RFS stack '" + rStackName + "' is currently in a non-terminal state (" + existing.getStatus() + ") — " +
+                    "another create, deploy, or delete is still running. Wait for it to reach a terminal state " +
+                    "(e.g. DEPLOYMENT_COMPLETE) before deploying an update, or check the RFS console.");
+            }
             logger.info("RFS stack '{}' already exists (status={}) — deploying an update.", rStackName, existing.getStatus());
             stackId = existing.getStackId();
             var response = RfsService.deploy(client, rStackName, rTemplateBody, rTemplateUri, varsStructure, rVarsBody, rVarsUri);
@@ -247,7 +257,7 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
     }
 
     private static void validateExactlyOneTemplateSource(String rTemplateBody, String rTemplateUri) {
-        var count = (isNotBlank(rTemplateBody) ? 1 : 0) + (isNotBlank(rTemplateUri) ? 1 : 0);
+        var count = (RfsUtils.isNotBlank(rTemplateBody) ? 1 : 0) + (RfsUtils.isNotBlank(rTemplateUri) ? 1 : 0);
         if (count != 1) {
             throw new IllegalArgumentException(
                 "Exactly one of 'templateBody' or 'templateUri' must be set (found " + count + ") — " +
@@ -257,7 +267,7 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
     }
 
     private static void validateAtMostOneVarsSource(Map<String, String> rVars, String rVarsBody, String rVarsUri) {
-        var count = (rVars != null && !rVars.isEmpty() ? 1 : 0) + (isNotBlank(rVarsBody) ? 1 : 0) + (isNotBlank(rVarsUri) ? 1 : 0);
+        var count = (rVars != null && !rVars.isEmpty() ? 1 : 0) + (RfsUtils.isNotBlank(rVarsBody) ? 1 : 0) + (RfsUtils.isNotBlank(rVarsUri) ? 1 : 0);
         if (count > 1) {
             throw new IllegalArgumentException(
                 "At most one of 'vars', 'varsBody', or 'varsUri' may be set (found " + count + ") — " +
@@ -277,10 +287,6 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
         return rVars.entrySet().stream()
             .map(e -> new VarsStructure().withVarKey(e.getKey()).withVarValue(e.getValue()))
             .toList();
-    }
-
-    private static boolean isNotBlank(String s) {
-        return s != null && !s.isBlank();
     }
 
     @Builder

@@ -146,7 +146,12 @@ final class RfsService {
     /** Page size and safety cap for {@link #listOutputs}: 100 pages × 100 = 10,000 outputs bounds a
      *  pathological or misbehaving-marker response without ever truncating a realistic stack. */
     private static final int OUTPUT_PAGE_SIZE = 100;
-    static final int MAX_OUTPUT_PAGES = 100;
+    private static final int MAX_OUTPUT_PAGES = 100;
+
+    /** Bounded retries for the first poll right after {@code createStack}: a 404 there is almost
+     *  always an eventual-consistency propagation delay rather than a genuinely missing stack, so
+     *  give it a few grace attempts (at {@code interval}) before failing. */
+    private static final int POST_CREATE_PROPAGATION_RETRIES = 3;
 
     /** Paginates through every declared output via {@code marker}, keyed by output name. Bounded at
      *  {@link #MAX_OUTPUT_PAGES} pages; if that cap is hit the truncation is logged rather than
@@ -208,7 +213,9 @@ final class RfsService {
         AosClient client, String stackName, Duration interval, Duration maxDuration, Logger logger
     ) throws InterruptedException {
         var deadline = System.currentTimeMillis() + maxDuration.toMillis();
-        var current = probeOrThrow(client, stackName);
+        // First poll right after createStack: tolerate a brief propagation 404 with bounded retries
+        // before treating the stack as genuinely missing.
+        var current = probeAfterSubmit(client, stackName, interval, logger);
 
         while (isInProgress(current.getStatus())) {
             if (System.currentTimeMillis() > deadline) {
@@ -217,12 +224,8 @@ final class RfsService {
                     " — current status: " + current.getStatus() +
                     ". Increase 'maxDuration', or check the RFS console for a stuck deployment.");
             }
-            try {
-                Thread.sleep(interval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
+            sleepOrThrow(interval);
+            // A 404 here means the stack vanished after being visible — genuinely exceptional.
             current = probeOrThrow(client, stackName);
             logger.debug("RFS stack '{}' status={}", stackName, current.getStatus());
         }
@@ -254,16 +257,37 @@ final class RfsService {
                     " — current status: " + current.getStatus() +
                     ". Increase 'maxDuration', or check the RFS console for a stuck deletion.");
             }
-            try {
-                Thread.sleep(interval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
+            sleepOrThrow(interval);
             current = probe(client, stackName);
             if (current != null) {
                 logger.debug("RFS stack '{}' status={}", stackName, current.getStatus());
             }
+        }
+    }
+
+    /**
+     * First poll after a create/deploy submission: retries a propagation 404 up to
+     * {@link #POST_CREATE_PROPAGATION_RETRIES} times (at {@code interval}) before failing, since a
+     * stack that was just accepted for creation may not yet be visible via {@code getStackMetadata}.
+     */
+    private static GetStackMetadataResponse probeAfterSubmit(
+        AosClient client, String stackName, Duration interval, Logger logger
+    ) throws InterruptedException {
+        for (int attempt = 1; ; attempt++) {
+            var result = probe(client, stackName);
+            if (result != null) {
+                return result;
+            }
+            if (attempt >= POST_CREATE_PROPAGATION_RETRIES) {
+                throw new IllegalStateException(
+                    "RFS stack '" + stackName + "' is still not visible via getStackMetadata after " +
+                    POST_CREATE_PROPAGATION_RETRIES + " attempts following its submission — it may not have " +
+                    "propagated yet, or the create/deploy request may have been rejected. Retry, or check the RFS console.");
+            }
+            logger.debug(
+                "RFS stack '{}' not visible yet (attempt {}/{}) — waiting {} for creation to propagate.",
+                stackName, attempt, POST_CREATE_PROPAGATION_RETRIES, interval);
+            sleepOrThrow(interval);
         }
     }
 
@@ -276,5 +300,15 @@ final class RfsService {
                 "may have been deleted concurrently by another process. Retry, or check the RFS console.");
         }
         return result;
+    }
+
+    /** Sleeps for {@code interval}, restoring the interrupt flag and rethrowing on interruption. */
+    private static void sleepOrThrow(Duration interval) throws InterruptedException {
+        try {
+            Thread.sleep(interval.toMillis());
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw ie;
+        }
     }
 }
