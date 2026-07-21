@@ -147,14 +147,17 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
     @PluginProperty(group = "advanced")
     private Property<String> varsUri;
 
-    @Schema(title = "Stack description")
+    @Schema(
+        title = "Stack description",
+        description = "Free-text description stored on the stack. Applied only when the stack is first created; ignored when this task deploys an update to an already-existing stack (RFS's deploy API carries no description field)."
+    )
     @PluginProperty(group = "main")
     private Property<String> stackDescription;
 
     @Builder.Default
     @Schema(
         title = "Enable deletion protection",
-        description = "When `true`, the stack cannot be deleted until protection is disabled. Defaults to `false`."
+        description = "When `true`, the stack cannot be deleted until protection is disabled. Defaults to `false`. Applied only when the stack is first created; ignored when this task deploys an update to an already-existing stack."
     )
     @PluginProperty(group = "reliability")
     private Property<Boolean> enableDeletionProtection = Property.ofValue(false);
@@ -162,7 +165,7 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
     @Builder.Default
     @Schema(
         title = "Enable automatic rollback on deployment failure",
-        description = "When `true` (the default), RFS automatically rolls back to the last known-good state if the deployment fails."
+        description = "When `true` (the default), RFS automatically rolls back to the last known-good state if the deployment fails. Applied only when the stack is first created; ignored when this task deploys an update to an already-existing stack."
     )
     @PluginProperty(group = "reliability")
     private Property<Boolean> enableAutoRollback = Property.ofValue(true);
@@ -232,7 +235,7 @@ public class Create extends AbstractRfs implements RunnableTask<Create.Output> {
 
         logger.info("RFS stack '{}' deployment '{}' completed successfully.", rStackName, deploymentId);
 
-        var outputs = RfsService.listOutputs(client, rStackName);
+        var outputs = RfsService.listOutputs(client, rStackName, logger);
 
         return Output.builder()
             .stackId(stackId)

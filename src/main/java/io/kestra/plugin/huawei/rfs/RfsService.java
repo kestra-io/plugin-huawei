@@ -143,16 +143,24 @@ final class RfsService {
         }
     }
 
-    /** Paginates through every declared output via {@code marker}, keyed by output name. */
-    static Map<String, String> listOutputs(AosClient client, String stackName) {
+    /** Page size and safety cap for {@link #listOutputs}: 100 pages × 100 = 10,000 outputs bounds a
+     *  pathological or misbehaving-marker response without ever truncating a realistic stack. */
+    private static final int OUTPUT_PAGE_SIZE = 100;
+    static final int MAX_OUTPUT_PAGES = 100;
+
+    /** Paginates through every declared output via {@code marker}, keyed by output name. Bounded at
+     *  {@link #MAX_OUTPUT_PAGES} pages; if that cap is hit the truncation is logged rather than
+     *  silently swallowed. */
+    static Map<String, String> listOutputs(AosClient client, String stackName, Logger logger) {
         var outputs = new LinkedHashMap<String, String>();
         String marker = null;
+        int page = 0;
 
         while (true) {
             var request = new ListStackOutputsRequest()
                 .withStackName(stackName)
                 .withClientRequestId(UUID.randomUUID().toString())
-                .withLimit(100);
+                .withLimit(OUTPUT_PAGE_SIZE);
             if (marker != null) {
                 request.withMarker(marker);
             }
@@ -171,6 +179,13 @@ final class RfsService {
                     "RFS SDK error listing outputs for stack '" + stackName + "': " + e.getMessage(), e);
             }
             if (marker == null || marker.isBlank()) {
+                break;
+            }
+            if (++page >= MAX_OUTPUT_PAGES) {
+                logger.warn(
+                    "RFS stack '{}' returned more than {} pages of outputs ({} collected so far); " +
+                    "stopping pagination — the 'outputs' map is truncated.",
+                    stackName, MAX_OUTPUT_PAGES, outputs.size());
                 break;
             }
         }
@@ -256,8 +271,9 @@ final class RfsService {
         var result = probe(client, stackName);
         if (result == null) {
             throw new IllegalStateException(
-                "RFS stack '" + stackName + "' disappeared while polling for deployment completion — " +
-                "it may have been deleted concurrently by another process.");
+                "RFS stack '" + stackName + "' is not visible via getStackMetadata while polling for " +
+                "deployment completion — it may not have propagated yet immediately after creation, or it " +
+                "may have been deleted concurrently by another process. Retry, or check the RFS console.");
         }
         return result;
     }
