@@ -5,7 +5,6 @@ import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.mrs.v2.model.ChargeInfo;
 import com.huaweicloud.sdk.mrs.v2.model.CreateClusterReqV2;
 import com.huaweicloud.sdk.mrs.v2.model.CreateClusterRequest;
-import com.huaweicloud.sdk.mrs.v2.model.JobExecution;
 import com.huaweicloud.sdk.mrs.v2.model.NodeGroupV2;
 import com.huaweicloud.sdk.mrs.v2.model.RunJobFlowCommand;
 import com.huaweicloud.sdk.mrs.v2.model.RunJobFlowRequest;
@@ -67,7 +66,7 @@ import java.util.function.Consumer;
 @Plugin(
     examples = {
         @Example(
-            title = "Create a 3-node analysis cluster and submit a Spark job.",
+            title = "Create a 5-node analysis cluster (2 masters + 3 core) and submit a Spark job.",
             full = true,
             code = """
                 id: mrs_create_cluster_and_submit_job
@@ -80,22 +79,33 @@ import java.util.function.Consumer;
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: eu-west-101
                     projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
-                    clusterName: kestra-etl-cluster
-                    clusterVersion: "MRS 3.2.0-LTS.3"
+                    clusterName: kestra-qa-cluster
+                    clusterVersion: "MRS 3.5.0-LTS" # current LTS -> in-stock, current-gen node flavors
                     clusterType: ANALYSIS
-                    availabilityZone: eu-west-101a
+                    availabilityZone: eu-west-101a # AZ id, not the region itself
                     vpcName: vpc-default
                     subnetName: subnet-default
                     components:
                       - Hadoop
-                      - Spark2x
+                      - Spark # "Spark" on 3.5.x, NOT "Spark2x"
+                      - Hive
                     nodeGroups:
                       - groupName: master_node_default_group
-                        nodeNum: 1
-                        nodeSize: c6.2xlarge.4
-                      - groupName: core_node_default_group
-                        nodeNum: 2
-                        nodeSize: c6.2xlarge.4
+                        nodeNum: 2 # master group must have >= 2 nodes
+                        nodeSize: c6.4xlarge.4.linux.bigdata # note the .linux.bigdata suffix
+                        rootVolumeType: SAS
+                        rootVolumeSize: 480
+                        dataVolumeType: SAS
+                        dataVolumeSize: 600 # data disk must be >= 480 GB
+                        dataVolumeCount: 1
+                      - groupName: core_node_analysis_group # "analysis" core group for ANALYSIS clusters
+                        nodeNum: 3
+                        nodeSize: c6.4xlarge.4.linux.bigdata
+                        rootVolumeType: SAS
+                        rootVolumeSize: 480
+                        dataVolumeType: SAS
+                        dataVolumeSize: 600
+                        dataVolumeCount: 1
                     loginMode: PASSWORD
                     nodeRootPassword: "{{ secret('MRS_NODE_ROOT_PASSWORD') }}"
                     managerAdminPassword: "{{ secret('MRS_MANAGER_ADMIN_PASSWORD') }}"
@@ -295,7 +305,7 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
         var stepJobNames = new ArrayList<String>(rSteps.size());
         var stepConfigs = new ArrayList<StepConfig>(rSteps.size());
         for (var i = 0; i < rSteps.size(); i++) {
-            var jobExecution = toJobExecution(runContext, rSteps.get(i), i);
+            var jobExecution = MrsService.toJobExecution(runContext, rSteps.get(i), "steps[" + i + "]");
             stepJobNames.add(jobExecution.getJobName());
             stepConfigs.add(new StepConfig().withJobExecution(jobExecution));
         }
@@ -463,24 +473,6 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
             .withRootVolume(new Volume().withType(rRootVolumeType).withSize(rRootVolumeSize))
             .withDataVolume(new Volume().withType(rDataVolumeType).withSize(rDataVolumeSize))
             .withDataVolumeCount(rDataVolumeCount);
-    }
-
-    private static JobExecution toJobExecution(RunContext runContext, JobConfig config, int index) throws Exception {
-        var rJobType = runContext.render(config.getJobType()).as(JobType.class)
-            .orElseThrow(() -> new IllegalArgumentException("steps[" + index + "].jobType is required"));
-        var rJobName = runContext.render(config.getJobName()).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("steps[" + index + "].jobName is required"));
-        var rArguments = runContext.render(config.getArguments()).asList(String.class);
-        var rProperties = runContext.render(config.getProperties()).asMap(String.class, String.class);
-
-        var jobExecution = new JobExecution().withJobType(rJobType.getValue()).withJobName(rJobName);
-        if (!rArguments.isEmpty()) {
-            jobExecution.withArguments(rArguments);
-        }
-        if (!rProperties.isEmpty()) {
-            jobExecution.withProperties(rProperties);
-        }
-        return jobExecution;
     }
 
     @Builder

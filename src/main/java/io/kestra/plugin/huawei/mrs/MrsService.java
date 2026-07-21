@@ -5,13 +5,17 @@ import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.mrs.v1.MrsClient;
 import com.huaweicloud.sdk.mrs.v1.model.Cluster;
 import com.huaweicloud.sdk.mrs.v1.model.ShowClusterDetailsRequest;
+import com.huaweicloud.sdk.mrs.v2.model.JobExecution;
 import com.huaweicloud.sdk.mrs.v2.model.JobQueryBean;
 import com.huaweicloud.sdk.mrs.v2.model.ShowJobExeListNewRequest;
 import com.huaweicloud.sdk.mrs.v2.model.ShowSingleJobExeRequest;
 import com.huaweicloud.sdk.mrs.v2.model.StopJobRequest;
+import io.kestra.core.runners.RunContext;
+import io.kestra.plugin.huawei.mrs.models.JobConfig;
 import org.slf4j.Logger;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -47,6 +51,30 @@ final class MrsService {
     private static final Set<String> JOB_RESULT_FAILURE_VALUES = Set.of("FAILED", "KILLED");
 
     private MrsService() {
+    }
+
+    /**
+     * Builds a {@link JobExecution} request body from a rendered {@link JobConfig}, shared by
+     * {@link CreateClusterAndSubmitJob} (one call per {@code steps} entry) and {@link SubmitJob} (its
+     * single {@code job}) so the same jobType/jobName/arguments/properties mapping isn't duplicated
+     * per task.
+     */
+    static JobExecution toJobExecution(RunContext runContext, JobConfig config, String fieldPrefix) throws Exception {
+        var rJobType = runContext.render(config.getJobType()).as(JobType.class)
+            .orElseThrow(() -> new IllegalArgumentException(fieldPrefix + ".jobType is required"));
+        var rJobName = runContext.render(config.getJobName()).as(String.class)
+            .orElseThrow(() -> new IllegalArgumentException(fieldPrefix + ".jobName is required"));
+        var rArguments = runContext.render(config.getArguments()).asList(String.class);
+        var rProperties = runContext.render(config.getProperties()).asMap(String.class, String.class);
+
+        var jobExecution = new JobExecution().withJobType(rJobType.getValue()).withJobName(rJobName);
+        if (!rArguments.isEmpty()) {
+            jobExecution.withArguments(rArguments);
+        }
+        if (!rProperties.isEmpty()) {
+            jobExecution.withProperties(rProperties);
+        }
+        return jobExecution;
     }
 
     /**
@@ -139,16 +167,31 @@ final class MrsService {
             return List.of();
         }
         if (jobs == null) {
-            return List.of();
+            jobs = List.of();
         }
-        return stepJobNames.stream()
-            .map(name -> jobs.stream()
+
+        var unresolved = new ArrayList<String>();
+        var resolved = new ArrayList<String>(stepJobNames.size());
+        for (var name : stepJobNames) {
+            var jobId = jobs.stream()
                 .filter(j -> name.equals(j.getJobName()))
                 .map(JobQueryBean::getJobId)
                 .findFirst()
-                .orElse(null))
-            .filter(Objects::nonNull)
-            .toList();
+                .orElse(null);
+            if (jobId != null) {
+                resolved.add(jobId);
+            } else {
+                unresolved.add(name);
+            }
+        }
+
+        if (!unresolved.isEmpty()) {
+            logger.warn(
+                "Could not resolve job IDs for {}/{} MRS step(s) on cluster '{}': {}",
+                unresolved.size(), stepJobNames.size(), clusterId, unresolved);
+        }
+
+        return resolved;
     }
 
     /**

@@ -27,6 +27,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -263,7 +264,7 @@ class SubmitJobTest {
 
         var output = task.run(runContext);
 
-        assertThat(output.getJobId(), org.hamcrest.Matchers.notNullValue());
+        assertThat(output.getJobId(), notNullValue());
         assertThat(output.getJobState(), equalTo("FINISHED"));
     }
 }

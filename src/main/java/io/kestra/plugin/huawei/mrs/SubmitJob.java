@@ -3,7 +3,6 @@ package io.kestra.plugin.huawei.mrs;
 import com.huaweicloud.sdk.core.exception.SdkException;
 import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.mrs.v2.model.CreateExecuteJobRequest;
-import com.huaweicloud.sdk.mrs.v2.model.JobExecution;
 import io.kestra.core.models.annotations.Example;
 import io.kestra.core.models.annotations.Plugin;
 import io.kestra.core.models.annotations.PluginProperty;
@@ -125,23 +124,12 @@ public class SubmitJob extends AbstractMrs implements RunnableTask<SubmitJob.Out
             .orElseThrow(() -> new IllegalArgumentException("clusterId is required"));
         var rJob = runContext.render(job).as(JobConfig.class)
             .orElseThrow(() -> new IllegalArgumentException("job is required"));
-        var rJobType = runContext.render(rJob.getJobType()).as(JobType.class)
-            .orElseThrow(() -> new IllegalArgumentException("job.jobType is required"));
-        var rJobName = runContext.render(rJob.getJobName()).as(String.class)
-            .orElseThrow(() -> new IllegalArgumentException("job.jobName is required"));
-        var rArguments = runContext.render(rJob.getArguments()).asList(String.class);
-        var rProperties = runContext.render(rJob.getProperties()).asMap(String.class, String.class);
         var rWait = runContext.render(wait).as(Boolean.class).orElse(true);
         var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofHours(1));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(5));
 
-        var jobExecution = new JobExecution().withJobType(rJobType.getValue()).withJobName(rJobName);
-        if (!rArguments.isEmpty()) {
-            jobExecution.withArguments(rArguments);
-        }
-        if (!rProperties.isEmpty()) {
-            jobExecution.withProperties(rProperties);
-        }
+        var jobExecution = MrsService.toJobExecution(runContext, rJob, "job");
+        var rJobName = jobExecution.getJobName();
 
         var client = client(runContext);
 
