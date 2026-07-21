@@ -22,7 +22,7 @@ class UploadTest extends AbstractObsTest {
     void upload_happyPath_objectAppearsInBucket() throws Exception {
         var content = "hello from kestra obs upload test";
         var bytes = content.getBytes(StandardCharsets.UTF_8);
-        var key = "upload-test/" + IdUtils.create() + "/data.txt";
+        var key = key(IdUtils.create() + "/data.txt");
 
         // Stage file into Kestra internal storage
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -56,7 +56,7 @@ class UploadTest extends AbstractObsTest {
     void upload_noContentType_succeeds() throws Exception {
         var content = "binary-like content";
         var bytes = content.getBytes(StandardCharsets.UTF_8);
-        var key = "upload-test/" + IdUtils.create() + "/noct.bin";
+        var key = key(IdUtils.create() + "/noct.bin");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         URI storageUri;

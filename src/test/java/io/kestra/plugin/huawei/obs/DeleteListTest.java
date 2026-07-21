@@ -18,8 +18,8 @@ class DeleteListTest extends AbstractObsTest {
     @Test
     void deleteList_byPrefix_deletesOnlyMatchingObjects() throws Exception {
         var runId = IdUtils.create();
-        var matchPrefix = "delete-list-test/" + runId + "/match/";
-        var noMatchPrefix = "delete-list-test/" + runId + "/keep/";
+        var matchPrefix = key(runId + "/match/");
+        var noMatchPrefix = key(runId + "/keep/");
 
         // Seed 3 objects under the prefix we'll delete and 2 that must survive
         seedObject(matchPrefix + "a.csv", "a", "text/csv");
@@ -54,7 +54,7 @@ class DeleteListTest extends AbstractObsTest {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(DeleteList.builder())
             .bucket(Property.ofValue(testBucket))
-            .prefix(Property.ofValue("delete-list-test/" + IdUtils.create() + "/nonexistent/"))
+            .prefix(Property.ofValue(key(IdUtils.create() + "/nonexistent/")))
             .errorOnEmpty(Property.ofValue(true))
             .build();
 
@@ -66,7 +66,7 @@ class DeleteListTest extends AbstractObsTest {
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(DeleteList.builder())
             .bucket(Property.ofValue(testBucket))
-            .prefix(Property.ofValue("delete-list-test/" + IdUtils.create() + "/nonexistent/"))
+            .prefix(Property.ofValue(key(IdUtils.create() + "/nonexistent/")))
             .build();
 
         var output = task.run(runContext);
