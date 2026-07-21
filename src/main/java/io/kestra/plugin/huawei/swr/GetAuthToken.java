@@ -66,7 +66,7 @@ import java.util.regex.Pattern;
                     taskRunner:
                       type: io.kestra.plugin.core.runner.Process
                     commands:
-                      - docker login -u {{ outputs.get_auth_token.username }} -p {{ outputs.get_auth_token.password.value }} {{ outputs.get_auth_token.registry }}
+                      - echo "{{ outputs.get_auth_token.password }}" | docker login -u {{ outputs.get_auth_token.username }} --password-stdin {{ outputs.get_auth_token.registry }}
                 """
         )
     }
