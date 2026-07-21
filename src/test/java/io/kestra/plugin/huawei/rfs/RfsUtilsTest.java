@@ -11,13 +11,27 @@ class RfsUtilsTest {
     @Test
     void region_derivesComTldEndpoint() {
         var endpoint = RfsUtils.rfsEndpoint(null, "cn-north-4", null);
-        assertThat(endpoint, equalTo("https://aos.cn-north-4.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://rfs.cn-north-4.myhuaweicloud.com"));
     }
 
     @Test
     void region_withEuSuffix_derivesEuEndpoint() {
         var endpoint = RfsUtils.rfsEndpoint(null, "eu-west-101", "myhuaweicloud.eu");
-        assertThat(endpoint, equalTo("https://aos.eu-west-101.myhuaweicloud.eu"));
+        assertThat(endpoint, equalTo("https://rfs.eu-west-101.myhuaweicloud.eu"));
+    }
+
+    @Test
+    void sovereignRegion_withoutSuffix_derivesEuEndpoint() {
+        // eu-west-101's SDK-baked endpoint is broken, so with no explicit suffix the sovereign default (.eu) applies.
+        var endpoint = RfsUtils.rfsEndpoint(null, "eu-west-101", null);
+        assertThat(endpoint, equalTo("https://rfs.eu-west-101.myhuaweicloud.eu"));
+    }
+
+    @Test
+    void isSovereignRegion_detectsEuWest101() {
+        assertThat(RfsUtils.isSovereignRegion("eu-west-101"), equalTo(true));
+        assertThat(RfsUtils.isSovereignRegion("cn-north-4"), equalTo(false));
+        assertThat(RfsUtils.isSovereignRegion(null), equalTo(false));
     }
 
     @Test
@@ -35,7 +49,7 @@ class RfsUtilsTest {
     @Test
     void blankEndpointOverride_fallsBackToRegion() {
         var endpoint = RfsUtils.rfsEndpoint("   ", "ap-southeast-1", null);
-        assertThat(endpoint, equalTo("https://aos.ap-southeast-1.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://rfs.ap-southeast-1.myhuaweicloud.com"));
     }
 
     @Test

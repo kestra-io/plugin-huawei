@@ -75,13 +75,21 @@ public abstract class AbstractRfs extends AbstractConnection implements RfsConne
         if (rOverride != null && !rOverride.isBlank()) {
             builder.withEndpoint(RfsUtils.stripTrailingSlash(rOverride.trim()));
         } else if (rRegion != null && !rRegion.isBlank()) {
-            // An explicit endpointSuffix forces suffix-derived resolution even for regions present in the SDK
-            // enum: the enum hard-codes the `.myhuaweicloud.com` domain, which is wrong for sovereign clouds
-            // (e.g. `myhuaweicloud.eu`). Without a suffix, prefer the SDK enum and fall back to derivation only
-            // for regions not yet in it (e.g. newly added regions).
-            if (rSuffix != null && !rSuffix.isBlank()) {
+            // Force our own `rfs.<region>.<suffix>` derivation (via withEndpoint) when either an explicit
+            // endpointSuffix is set, or the region is a sovereign region whose SDK-baked endpoint is wrong:
+            // AosRegion hard-codes eu-west-101 to `aos.myhuaweicloud.eu`, which lacks the region segment and
+            // does not resolve. Deriving bypasses the SDK's project-id auto-discovery, so projectId is required.
+            if ((rSuffix != null && !rSuffix.isBlank()) || RfsUtils.isSovereignRegion(rRegion)) {
+                if (config.projectId() == null || config.projectId().isBlank()) {
+                    throw new IllegalArgumentException(
+                        "RFS requires `projectId` for region '" + rRegion + "' (its endpoint is resolved via a " +
+                        "custom or sovereign-region host that bypasses the SDK's project auto-discovery) — set the " +
+                        "'projectId' property to your Huawei Cloud project ID (console → 'My Credentials' → 'API Credentials').");
+                }
                 builder.withEndpoint(RfsUtils.rfsEndpoint(null, rRegion, rSuffix));
             } else {
+                // Standard region: prefer the SDK enum (enables project-id auto-discovery), falling back to
+                // derivation only for regions not yet in it (e.g. newly added regions).
                 try {
                     builder.withRegion(AosRegion.valueOf(rRegion));
                 } catch (IllegalArgumentException e) {

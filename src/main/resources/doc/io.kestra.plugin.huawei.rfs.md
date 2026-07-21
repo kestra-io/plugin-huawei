@@ -22,7 +22,7 @@ pluginDefaults:
 
 ### `endpointSuffix`
 
-Controls the top-level domain used when deriving the RFS endpoint from `region`. Defaults to `myhuaweicloud.com`. Set to `myhuaweicloud.eu` for the Huawei Cloud European sovereign cloud (`eu-west-101`).
+Controls the top-level domain used when deriving the RFS endpoint (`https://rfs.<region>.<suffix>`) from `region`. Defaults to `myhuaweicloud.com`. The EU sovereign region `eu-west-101` is handled automatically (it derives `rfs.eu-west-101.myhuaweicloud.eu` with no configuration), so you only need this for other non-standard partitions.
 
 ### `endpointOverride`
 
