@@ -161,7 +161,7 @@ class CreateClusterAndSubmitJobTest {
     }
 
     @Test
-    void resolveStepJobIds_multiplePages_collectsAcrossPages() {
+    void resolveStepJobIds_multiplePages_collectsAcrossPages() throws Exception {
         // 150 jobs spread over two pages of 100/50 — a target job sits in each page so the test fails
         // if only the first page (MRS's default, un-paginated response) were fetched.
         var page1 = new StringBuilder();
@@ -198,9 +198,51 @@ class CreateClusterAndSubmitJobTest {
             .build();
         var logger = LoggerFactory.getLogger(CreateClusterAndSubmitJobTest.class);
 
-        var jobIds = MrsService.resolveStepJobIds(v2Client, CLUSTER_ID, List.of("job-5", "job-120"), 0L, logger);
+        var jobIds = MrsService.resolveStepJobIds(
+            v2Client, CLUSTER_ID, List.of("job-5", "job-120"), 0L,
+            Duration.ofMillis(50), Duration.ofSeconds(30), logger);
 
         assertThat(jobIds, containsInAnyOrder("id-5", "id-120"));
+    }
+
+    @Test
+    void resolveStepJobIds_notYetRegistered_retriesUntilJobsAppear() throws Exception {
+        // MRS registers step jobs some time AFTER the cluster reaches `running` (observed ~50s later in
+        // live QA) — the first lookup must come back empty and the poll must retry until it finds them.
+        wireMock.stubFor(get(urlPathMatching(".*/clusters/" + CLUSTER_ID + "/job-executions"))
+            .withQueryParam("offset", WireMock.equalTo("1"))
+            .inScenario("job-registration-delay")
+            .whenScenarioStateIs(Scenario.STARTED)
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"total_record\": 0, \"job_list\": []}"))
+            .willSetStateTo("jobs-registered"));
+        wireMock.stubFor(get(urlPathMatching(".*/clusters/" + CLUSTER_ID + "/job-executions"))
+            .withQueryParam("offset", WireMock.equalTo("1"))
+            .inScenario("job-registration-delay")
+            .whenScenarioStateIs("jobs-registered")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("""
+                    {"total_record": 2, "job_list": [
+                        {"job_id": "id-a", "job_name": "job-a"},
+                        {"job_id": "id-b", "job_name": "job-b"}
+                    ]}
+                    """)));
+
+        var v2Client = com.huaweicloud.sdk.mrs.v2.MrsClient.newBuilder()
+            .withCredential(new BasicCredentials().withAk(FAKE_AK).withSk(FAKE_SK).withProjectId(PROJECT_ID))
+            .withEndpoint(wireMockUrl())
+            .build();
+        var logger = LoggerFactory.getLogger(CreateClusterAndSubmitJobTest.class);
+
+        var jobIds = MrsService.resolveStepJobIds(
+            v2Client, CLUSTER_ID, List.of("job-a", "job-b"), 0L,
+            Duration.ofMillis(50), Duration.ofSeconds(10), logger);
+
+        assertThat(jobIds, containsInAnyOrder("id-a", "id-b"));
     }
 
     @Test

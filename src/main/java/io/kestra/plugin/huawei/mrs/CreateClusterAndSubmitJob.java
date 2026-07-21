@@ -390,7 +390,8 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
 
         var jobIds = stepJobNames.isEmpty()
             ? List.<String>of()
-            : MrsService.resolveStepJobIds(client, clusterId, stepJobNames, requestStart, logger);
+            : MrsService.resolveStepJobIds(
+                client, clusterId, stepJobNames, requestStart, rInterval, MrsService.JOB_ID_RESOLUTION_TIMEOUT, logger);
 
         return Output.builder().clusterId(clusterId).clusterState(cluster.getClusterState()).jobIds(jobIds).build();
     }

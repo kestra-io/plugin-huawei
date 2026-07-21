@@ -54,6 +54,11 @@ final class MrsService {
     static final int JOB_LIST_PAGE_SIZE = 100;
     private static final int MAX_JOB_LIST_PAGES = 50;
 
+    // MRS registers the step jobs submitted at cluster-creation time some seconds AFTER the cluster
+    // itself reaches `running` — observed ~50s later in live QA on eu-west-101 — so a single lookup
+    // right after `running` is a race that reliably returns an empty job list.
+    static final Duration JOB_ID_RESOLUTION_TIMEOUT = Duration.ofMinutes(5);
+
     private MrsService() {
     }
 
@@ -148,28 +153,80 @@ final class MrsService {
      * Best-effort resolution of the job IDs MRS assigned to the steps submitted at cluster creation
      * time. `RunJobFlow` only returns the new `clusterId`, so step job IDs must be looked up
      * separately once the cluster (and therefore its job-execution list) exists. Matches are made by
-     * job name and a submission-time watermark; a step whose job is not yet visible is left absent
-     * from the result rather than failing the task, since cluster creation itself already succeeded.
+     * job name and a submission-time watermark; a step whose job is still not visible once {@code
+     * timeout} elapses is left absent from the result rather than failing the task, since cluster
+     * creation itself already succeeded.
+     *
+     * <p>MRS registers the step jobs some time AFTER the cluster itself reaches `running` — observed
+     * ~50s later in live QA on eu-west-101 — so a single lookup right after `running` is a race that
+     * reliably returns an empty job list. This method therefore polls {@link #fetchJobList} every
+     * {@code interval} until every step name resolves to a job ID or {@code timeout} elapses.
      *
      * <p>{@code submittedTimeBegin} is passed through as epoch milliseconds, matching the other
      * {@code Long} timestamp fields on {@link JobQueryBean} ({@code startedTime}/{@code submittedTime}/
-     * {@code finishedTime}); this unit is not verified against a live cluster. If MRS actually expects
-     * epoch seconds here, the watermark filter would simply never match and this call would keep
-     * returning an empty job list — already handled as a best-effort no-op, not an error.
-     *
-     * <p>The job list is paginated {@link #JOB_LIST_PAGE_SIZE} entries at a time via {@code withLimit}
-     * (page size) and {@code withOffset}, which is a 1-based PAGE INDEX, not a record offset — confirmed
-     * against a live MRS cluster in eu-west-101 with 3 jobs and {@code limit=2}: {@code offset=1} returned
-     * records 1-2, {@code offset=2} returned record 3 (a disjoint next page, not an overlapping window),
-     * and {@code offset=3} returned an empty list ({@code total_record=3}); {@code offset=0} is rejected
-     * outright with {@code MRS.0002 "the offset is invalid"}. Pagination therefore starts at
-     * {@code offset=1} and advances the page index by 1 each iteration. Pages are still deduped by
-     * {@code jobId} as they are collected, which keeps the result correct (no double-counting) and the
-     * loop terminating via the empty-page check, the {@code totalRecord} check, or the
-     * {@link #MAX_JOB_LIST_PAGES} safety cap.
+     * {@code finishedTime}) — confirmed against a live cluster, where a 13-digit millis watermark
+     * correctly matched the step jobs.
      */
     static List<String> resolveStepJobIds(
-        com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, List<String> stepJobNames, long submittedTimeBegin, Logger logger
+        com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, List<String> stepJobNames, long submittedTimeBegin,
+        Duration interval, Duration timeout, Logger logger
+    ) throws InterruptedException {
+        var deadline = System.currentTimeMillis() + timeout.toMillis();
+        var unresolved = new ArrayList<String>();
+        var resolved = new ArrayList<String>(stepJobNames.size());
+
+        while (true) {
+            var jobs = fetchJobList(v2Client, clusterId, submittedTimeBegin, logger);
+
+            unresolved.clear();
+            resolved.clear();
+            for (var name : stepJobNames) {
+                var jobId = jobs.stream()
+                    .filter(j -> name.equals(j.getJobName()))
+                    .map(JobQueryBean::getJobId)
+                    .findFirst()
+                    .orElse(null);
+                if (jobId != null) {
+                    resolved.add(jobId);
+                } else {
+                    unresolved.add(name);
+                }
+            }
+
+            if (unresolved.isEmpty()) {
+                break;
+            }
+            var remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) {
+                break;
+            }
+            Thread.sleep(Math.min(interval.toMillis(), remaining));
+        }
+
+        if (!unresolved.isEmpty()) {
+            logger.warn(
+                "Could not resolve job IDs for {}/{} MRS step(s) on cluster '{}': {}",
+                unresolved.size(), stepJobNames.size(), clusterId, unresolved);
+        }
+
+        return resolved;
+    }
+
+    /**
+     * Fetches the full deduped job-execution list for a cluster, filtered by the {@code
+     * submittedTimeBegin} watermark, paginating {@link #JOB_LIST_PAGE_SIZE} entries at a time via
+     * {@code withLimit} (page size) and {@code withOffset}, which is a 1-based PAGE INDEX, not a
+     * record offset — confirmed against a live MRS cluster in eu-west-101 with 3 jobs and {@code
+     * limit=2}: {@code offset=1} returned records 1-2, {@code offset=2} returned record 3 (a disjoint
+     * next page, not an overlapping window), and {@code offset=3} returned an empty list ({@code
+     * total_record=3}); {@code offset=0} is rejected outright with {@code MRS.0002 "the offset is
+     * invalid"}. Pagination therefore starts at {@code offset=1} and advances the page index by 1
+     * each iteration. Pages are deduped by {@code jobId} as they are collected, which keeps the
+     * result correct (no double-counting) and the loop terminating via the empty-page check, the
+     * {@code totalRecord} check, or the {@link #MAX_JOB_LIST_PAGES} safety cap.
+     */
+    private static List<JobQueryBean> fetchJobList(
+        com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, long submittedTimeBegin, Logger logger
     ) {
         var seenJobIds = new LinkedHashSet<String>();
         var jobs = new ArrayList<JobQueryBean>();
@@ -219,28 +276,7 @@ final class MrsService {
             }
         }
 
-        var unresolved = new ArrayList<String>();
-        var resolved = new ArrayList<String>(stepJobNames.size());
-        for (var name : stepJobNames) {
-            var jobId = jobs.stream()
-                .filter(j -> name.equals(j.getJobName()))
-                .map(JobQueryBean::getJobId)
-                .findFirst()
-                .orElse(null);
-            if (jobId != null) {
-                resolved.add(jobId);
-            } else {
-                unresolved.add(name);
-            }
-        }
-
-        if (!unresolved.isEmpty()) {
-            logger.warn(
-                "Could not resolve job IDs for {}/{} MRS step(s) on cluster '{}': {}",
-                unresolved.size(), stepJobNames.size(), clusterId, unresolved);
-        }
-
-        return resolved;
+        return jobs;
     }
 
     /**
