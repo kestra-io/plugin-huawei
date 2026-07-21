@@ -15,6 +15,7 @@ Tasks and triggers for Huawei Cloud services, spanning object storage, identity 
 - **SMN** (`io.kestra.plugin.huawei.smn`): publish notification messages to a topic.
 - **DLI** (`io.kestra.plugin.huawei.dli`): run SQL queries against data in OBS or federated sources, the Huawei equivalent of AWS Athena.
 - **DIS** (`io.kestra.plugin.huawei.dis`): write and consume records on a data stream, and trigger flows on new records, the Huawei equivalent of AWS Kinesis Data Streams.
+- **GeminiDB for NoSQL** (`io.kestra.plugin.huawei.geminidb`): put, get, delete, query, and scan items against a GeminiDB instance's DynamoDB-Compatible data-plane API.
 
 ## Authentication
 
@@ -34,3 +35,5 @@ pluginDefaults:
 ## Region
 
 All tasks require a `region` (for example `eu-west-101`). Endpoints are derived from the region unless an explicit endpoint override is set.
+
+**Exception: GeminiDB.** GeminiDB for NoSQL routes by a mandatory, per-instance `endpoint` connection address instead — there is no region-derived host. Its `region` is used only for AWS SigV4 request signing and has no effect on routing; see the [GeminiDB plugin doc](io.kestra.plugin.huawei.geminidb.md) for details.

@@ -94,3 +94,15 @@ if docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv 2>&1; then
 else
   echo "RocketMQ namesrv container failed to start — DMS RocketMQ tests will be skipped."
 fi
+
+# GeminiDB (DynamoDB-compatible API) — DynamoDB Local backs the always-on default-path tests (no
+# env gate: they run unconditionally, see AGENTS.md). Live-GeminiDB tests remain opt-in via
+# GEMINIDB_TESTS=true and are not started here.
+echo "Starting DynamoDB Local for GeminiDB integration tests..."
+if docker compose -f docker-compose-ci.yml up -d dynamodb-local 2>&1; then
+  if ! wait_healthy dynamodb-local 24 5; then
+    echo "DynamoDB Local did not become healthy — GeminiDB unit tests may fail."
+  fi
+else
+  echo "DynamoDB Local container failed to start — GeminiDB unit tests may fail."
+fi

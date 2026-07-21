@@ -63,3 +63,17 @@ services:
     depends_on:
       rocketmq-namesrv:
         condition: service_healthy
+
+  # GeminiDB for NoSQL ships a DynamoDB-compatible data-plane API; DynamoDB Local stands in for it
+  # in unit tests since GeminiDB tasks talk to it over the exact same AWS SDK v2 wire protocol.
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    command: ["-jar", "DynamoDBLocal.jar", "-inMemory", "-sharedDb"]
+    ports:
+      - "8000:8000"
+    healthcheck:
+      # The image has no curl/wget/nc; its shell supports /dev/tcp for a plain TCP probe.
+      test: ["CMD-SHELL", "sh -c 'echo > /dev/tcp/localhost/8000'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
