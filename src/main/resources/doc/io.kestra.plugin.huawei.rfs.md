@@ -32,6 +32,17 @@ Overrides the default endpoint derived from `region` and `endpointSuffix`. Use f
 
 - **`projectId` is required with a custom endpoint**: RFS's v1 APIs embed the project ID in the request path (`/v1/{project_id}/stacks/...`). The SDK auto-discovers the project only when resolving the endpoint from its region enum; a custom endpoint (`endpointOverride` or `endpointSuffix`) bypasses that, so `Create`/`Delete` fail fast requiring `projectId` whenever a custom endpoint is set.
 - **RFS deploys Terraform/HCL, not CloudFormation-style templates**: `Create` requires exactly one template source (`templateBody` inline, or `templateUri` on OBS) and allows at most one variables source (`vars` map, `varsBody` inline tfvars, or `varsUri` on OBS).
+- **Use RFS's provider mirror, not the public Terraform registry**: RFS runs `terraform init` in a sandbox that cannot reach `registry.terraform.io`. Declare the HuaweiCloud provider from RFS's internal mirror `huawei.com/provider/huaweicloud` with a version constraint — `source = "huaweicloud/huaweicloud"` fails at init with `Failed to query available provider packages` / provider `was not found in any of the search`, which RFS surfaces as `ROLLBACK_COMPLETE`:
+  ```hcl
+  terraform {
+    required_providers {
+      huaweicloud = {
+        source  = "huawei.com/provider/huaweicloud"
+        version = ">= 1.70.1"
+      }
+    }
+  }
+  ```
 - **Create/deploy are asynchronous, and there is no SDK waiter**: `createStack`/`deployStack` return immediately with a `deploymentId`; `Create` polls `getStackMetadata` itself when `wait` is `true` (default).
 - **Only `DEPLOYMENT_COMPLETE` counts as a successful deploy**: `CREATION_COMPLETE` means the stack shell was created but never actually deployed (unexpected in normal use, since `Create` always supplies a template), and `ROLLBACK_COMPLETE` means the deploy failed and was rolled back to the previous good state. Both, along with `DEPLOYMENT_FAILED`/`ROLLBACK_FAILED`, fail the task. On failure the task best-effort fetches the stack's deployment events (`listStackEvents`) and appends the underlying error (e.g. a Terraform `init`/`apply` failure) to the exception message, so you rarely need to open the RFS console. If the AK/SK lacks permission to read events, the task falls back to pointing you at the console.
 - **RFS has no `DELETION_COMPLETE` status**: a successfully deleted stack simply stops existing — `Delete` polls until the next `getStackMetadata` call returns HTTP 404.

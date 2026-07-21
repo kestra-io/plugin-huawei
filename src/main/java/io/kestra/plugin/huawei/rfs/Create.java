@@ -67,7 +67,8 @@ import java.util.Map;
                       terraform {
                         required_providers {
                           huaweicloud = {
-                            source = "huaweicloud/huaweicloud"
+                            source  = "huawei.com/provider/huaweicloud"
+                            version = ">= 1.70.1"
                           }
                         }
                       }
