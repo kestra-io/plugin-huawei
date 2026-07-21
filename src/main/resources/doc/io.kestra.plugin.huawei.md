@@ -14,6 +14,7 @@ Tasks and triggers for Huawei Cloud services, spanning object storage, identity 
 - **KooCLI** (`io.kestra.plugin.huawei.koocli`): run arbitrary Huawei Cloud CLI (`hcloud`) commands in a container.
 - **SMN** (`io.kestra.plugin.huawei.smn`): publish notification messages to a topic.
 - **DLI** (`io.kestra.plugin.huawei.dli`): run SQL queries against data in OBS or federated sources, the Huawei equivalent of AWS Athena.
+- **DIS** (`io.kestra.plugin.huawei.dis`): write and consume records on a data stream, and trigger flows on new records, the Huawei equivalent of AWS Kinesis Data Streams.
 - **GeminiDB for NoSQL** (`io.kestra.plugin.huawei.geminidb`): put, get, delete, query, and scan items against a GeminiDB instance's DynamoDB-Compatible data-plane API.
 
 ## Authentication
