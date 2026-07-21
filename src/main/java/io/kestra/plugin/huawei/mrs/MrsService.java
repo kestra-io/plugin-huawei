@@ -157,38 +157,38 @@ final class MrsService {
      * epoch seconds here, the watermark filter would simply never match and this call would keep
      * returning an empty job list — already handled as a best-effort no-op, not an error.
      *
-     * <p>The job list is paginated {@link #JOB_LIST_PAGE_SIZE} entries at a time via {@code withOffset},
-     * passed as a 1-based record offset — verified against a live MRS cluster in eu-west-101, where
-     * {@code offset=0} is rejected outright with {@code MRS.0002 "the offset is invalid"}. The first
-     * page therefore uses {@code offset=1} and each subsequent page advances by the page size. Pages
-     * are deduped by {@code jobId} as they are collected, which keeps the result correct (no
-     * double-counting) and the loop terminating (via the empty-page check, the {@code totalRecord}
-     * check, or the {@link #MAX_JOB_LIST_PAGES} safety cap) even if MRS instead treats {@code offset}
-     * as a 1-based page index and returns overlapping pages — and since this method only matches jobs
-     * against {@code submittedTimeBegin} (the cluster-creation watermark), the steps submitted at
-     * creation time in practice all fit within the first page anyway.
+     * <p>The job list is paginated {@link #JOB_LIST_PAGE_SIZE} entries at a time via {@code withLimit}
+     * (page size) and {@code withOffset}, which is a 1-based PAGE INDEX, not a record offset — confirmed
+     * against a live MRS cluster in eu-west-101 with 3 jobs and {@code limit=2}: {@code offset=1} returned
+     * records 1-2, {@code offset=2} returned record 3 (a disjoint next page, not an overlapping window),
+     * and {@code offset=3} returned an empty list ({@code total_record=3}); {@code offset=0} is rejected
+     * outright with {@code MRS.0002 "the offset is invalid"}. Pagination therefore starts at
+     * {@code offset=1} and advances the page index by 1 each iteration. Pages are still deduped by
+     * {@code jobId} as they are collected, which keeps the result correct (no double-counting) and the
+     * loop terminating via the empty-page check, the {@code totalRecord} check, or the
+     * {@link #MAX_JOB_LIST_PAGES} safety cap.
      */
     static List<String> resolveStepJobIds(
         com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, List<String> stepJobNames, long submittedTimeBegin, Logger logger
     ) {
         var seenJobIds = new LinkedHashSet<String>();
         var jobs = new ArrayList<JobQueryBean>();
-        var offset = 1;
+        var page = 1;
         Integer totalRecord = null;
 
-        for (var page = 0; page < MAX_JOB_LIST_PAGES; page++) {
+        for (var iteration = 0; iteration < MAX_JOB_LIST_PAGES; iteration++) {
             List<JobQueryBean> pageJobs;
             try {
                 var response = v2Client.showJobExeListNew(new ShowJobExeListNewRequest()
                     .withClusterId(clusterId)
                     .withSubmittedTimeBegin(submittedTimeBegin)
                     .withLimit(String.valueOf(JOB_LIST_PAGE_SIZE))
-                    .withOffset(String.valueOf(offset))
+                    .withOffset(String.valueOf(page))
                 );
                 pageJobs = response.getJobList();
                 totalRecord = response.getTotalRecord();
             } catch (SdkException e) {
-                if (page == 0) {
+                if (iteration == 0) {
                     logger.warn("Could not resolve job IDs for cluster '{}' steps: {}", clusterId, e.getMessage());
                     return List.of();
                 }
@@ -210,9 +210,9 @@ final class MrsService {
             if (totalRecord != null && jobs.size() >= totalRecord) {
                 break;
             }
-            offset += JOB_LIST_PAGE_SIZE;
+            page += 1;
 
-            if (page == MAX_JOB_LIST_PAGES - 1) {
+            if (iteration == MAX_JOB_LIST_PAGES - 1) {
                 logger.warn(
                     "MRS job list for cluster '{}' was truncated at {} pages ({} job(s) collected) — " +
                     "some steps may not resolve to a job ID.", clusterId, MAX_JOB_LIST_PAGES, jobs.size());

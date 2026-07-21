@@ -186,7 +186,7 @@ class CreateClusterAndSubmitJobTest {
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"total_record\": 150, \"job_list\": [" + page1 + "]}")));
         wireMock.stubFor(get(urlPathMatching(".*/clusters/" + CLUSTER_ID + "/job-executions"))
-            .withQueryParam("offset", WireMock.equalTo("101"))
+            .withQueryParam("offset", WireMock.equalTo("2"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
