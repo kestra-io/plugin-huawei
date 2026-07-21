@@ -16,6 +16,7 @@ import org.slf4j.Logger;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -49,6 +50,9 @@ final class MrsService {
     private static final Set<String> JOB_TERMINAL_STATES = Set.of("FINISHED", "FAILED", "KILLED");
     private static final Set<String> JOB_FAILURE_STATES = Set.of("FAILED", "KILLED");
     private static final Set<String> JOB_RESULT_FAILURE_VALUES = Set.of("FAILED", "KILLED");
+
+    static final int JOB_LIST_PAGE_SIZE = 100;
+    private static final int MAX_JOB_LIST_PAGES = 50;
 
     private MrsService() {
     }
@@ -152,22 +156,67 @@ final class MrsService {
      * {@code finishedTime}); this unit is not verified against a live cluster. If MRS actually expects
      * epoch seconds here, the watermark filter would simply never match and this call would keep
      * returning an empty job list — already handled as a best-effort no-op, not an error.
+     *
+     * <p>The job list is paginated {@link #JOB_LIST_PAGE_SIZE} entries at a time via {@code withOffset},
+     * passed as a 1-based record offset — verified against a live MRS cluster in eu-west-101, where
+     * {@code offset=0} is rejected outright with {@code MRS.0002 "the offset is invalid"}. The first
+     * page therefore uses {@code offset=1} and each subsequent page advances by the page size. Pages
+     * are deduped by {@code jobId} as they are collected, which keeps the result correct (no
+     * double-counting) and the loop terminating (via the empty-page check, the {@code totalRecord}
+     * check, or the {@link #MAX_JOB_LIST_PAGES} safety cap) even if MRS instead treats {@code offset}
+     * as a 1-based page index and returns overlapping pages — and since this method only matches jobs
+     * against {@code submittedTimeBegin} (the cluster-creation watermark), the steps submitted at
+     * creation time in practice all fit within the first page anyway.
      */
     static List<String> resolveStepJobIds(
         com.huaweicloud.sdk.mrs.v2.MrsClient v2Client, String clusterId, List<String> stepJobNames, long submittedTimeBegin, Logger logger
     ) {
-        List<JobQueryBean> jobs;
-        try {
-            jobs = v2Client.showJobExeListNew(new ShowJobExeListNewRequest()
-                .withClusterId(clusterId)
-                .withSubmittedTimeBegin(submittedTimeBegin)
-            ).getJobList();
-        } catch (SdkException e) {
-            logger.warn("Could not resolve job IDs for cluster '{}' steps: {}", clusterId, e.getMessage());
-            return List.of();
-        }
-        if (jobs == null) {
-            jobs = List.of();
+        var seenJobIds = new LinkedHashSet<String>();
+        var jobs = new ArrayList<JobQueryBean>();
+        var offset = 1;
+        Integer totalRecord = null;
+
+        for (var page = 0; page < MAX_JOB_LIST_PAGES; page++) {
+            List<JobQueryBean> pageJobs;
+            try {
+                var response = v2Client.showJobExeListNew(new ShowJobExeListNewRequest()
+                    .withClusterId(clusterId)
+                    .withSubmittedTimeBegin(submittedTimeBegin)
+                    .withLimit(String.valueOf(JOB_LIST_PAGE_SIZE))
+                    .withOffset(String.valueOf(offset))
+                );
+                pageJobs = response.getJobList();
+                totalRecord = response.getTotalRecord();
+            } catch (SdkException e) {
+                if (page == 0) {
+                    logger.warn("Could not resolve job IDs for cluster '{}' steps: {}", clusterId, e.getMessage());
+                    return List.of();
+                }
+                logger.warn(
+                    "Could not fetch further job list pages for cluster '{}' steps, keeping the {} job(s) already " +
+                    "collected: {}", clusterId, jobs.size(), e.getMessage());
+                break;
+            }
+
+            if (pageJobs == null || pageJobs.isEmpty()) {
+                break;
+            }
+            for (var job : pageJobs) {
+                if (seenJobIds.add(job.getJobId())) {
+                    jobs.add(job);
+                }
+            }
+
+            if (totalRecord != null && jobs.size() >= totalRecord) {
+                break;
+            }
+            offset += JOB_LIST_PAGE_SIZE;
+
+            if (page == MAX_JOB_LIST_PAGES - 1) {
+                logger.warn(
+                    "MRS job list for cluster '{}' was truncated at {} pages ({} job(s) collected) — " +
+                    "some steps may not resolve to a job ID.", clusterId, MAX_JOB_LIST_PAGES, jobs.size());
+            }
         }
 
         var unresolved = new ArrayList<String>();

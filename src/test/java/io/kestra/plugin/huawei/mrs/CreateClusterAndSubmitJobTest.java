@@ -4,6 +4,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
+import com.huaweicloud.sdk.core.auth.BasicCredentials;
 import io.kestra.core.junit.annotations.KestraTest;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContextFactory;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
+import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -24,7 +26,9 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlMatching;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
@@ -154,6 +158,49 @@ class CreateClusterAndSubmitJobTest {
         assertThat(output.getClusterId(), equalTo(CLUSTER_ID));
         assertThat(output.getClusterState(), equalTo("running"));
         assertThat(output.getJobIds(), hasItem("job-001"));
+    }
+
+    @Test
+    void resolveStepJobIds_multiplePages_collectsAcrossPages() {
+        // 150 jobs spread over two pages of 100/50 — a target job sits in each page so the test fails
+        // if only the first page (MRS's default, un-paginated response) were fetched.
+        var page1 = new StringBuilder();
+        for (var i = 0; i < 100; i++) {
+            if (i > 0) {
+                page1.append(",");
+            }
+            page1.append("{\"job_id\": \"id-").append(i).append("\", \"job_name\": \"job-").append(i).append("\"}");
+        }
+        var page2 = new StringBuilder();
+        for (var i = 100; i < 150; i++) {
+            if (i > 100) {
+                page2.append(",");
+            }
+            page2.append("{\"job_id\": \"id-").append(i).append("\", \"job_name\": \"job-").append(i).append("\"}");
+        }
+
+        wireMock.stubFor(get(urlPathMatching(".*/clusters/" + CLUSTER_ID + "/job-executions"))
+            .withQueryParam("offset", WireMock.equalTo("1"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"total_record\": 150, \"job_list\": [" + page1 + "]}")));
+        wireMock.stubFor(get(urlPathMatching(".*/clusters/" + CLUSTER_ID + "/job-executions"))
+            .withQueryParam("offset", WireMock.equalTo("101"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"total_record\": 150, \"job_list\": [" + page2 + "]}")));
+
+        var v2Client = com.huaweicloud.sdk.mrs.v2.MrsClient.newBuilder()
+            .withCredential(new BasicCredentials().withAk(FAKE_AK).withSk(FAKE_SK).withProjectId(PROJECT_ID))
+            .withEndpoint(wireMockUrl())
+            .build();
+        var logger = LoggerFactory.getLogger(CreateClusterAndSubmitJobTest.class);
+
+        var jobIds = MrsService.resolveStepJobIds(v2Client, CLUSTER_ID, List.of("job-5", "job-120"), 0L, logger);
+
+        assertThat(jobIds, containsInAnyOrder("id-5", "id-120"));
     }
 
     @Test
