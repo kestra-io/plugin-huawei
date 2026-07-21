@@ -30,6 +30,8 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.smn` — SMN (Simple Message Notification) task (`AbstractSmn`, `SmnConnectionInterface`, `SmnUtils`, `Publish`)
 - `io.kestra.plugin.huawei.dli` — DLI (Data Lake Insight) task (`AbstractDli`, `DliConnectionInterface`, `DliUtils`, `DliService`, `Query`)
 - `io.kestra.plugin.huawei.eventgrid` — EventGrid (EG) task (`AbstractEventGrid`, `EventGridConnectionInterface`, `EventGridUtils`, `PutEvents`)
+- `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `ConsumeOptionsInterface`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
+- `io.kestra.plugin.huawei.dis.models` — DIS output models (`Record`)
 - `io.kestra.plugin.huawei.mrs` — MRS (MapReduce Service) tasks (`AbstractMrs`, `MrsConnectionInterface`, `MrsUtils`, `MrsService`, `ClusterType`, `LoginMode`, `SafeMode`, `JobType`, `CreateClusterAndSubmitJob`, `SubmitJob`, `DeleteCluster`)
 - `io.kestra.plugin.huawei.mrs.models` — MRS input models (`JobConfig`, `NodeGroupConfig`)
 - `io.kestra.plugin.huawei.geminidb` — GeminiDB for NoSQL (DynamoDB-Compatible API) tasks (`AbstractGeminiDb`, `PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`)
@@ -124,6 +126,20 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.eventgrid.PutEvents` — Huawei Cloud equivalent of `io.kestra.plugin.aws.eventbridge.PutEvents`; publishes one or more CloudEvents-1.0 events to an EventGrid custom channel via `putEvents`; `events` accepts either an inline list or a `kestra://` internal storage URI of ION-serialized events; auto-generates `id` (random UUID) and defaults `specversion` to `1.0` when omitted; writes per-event `index`/`eventId`/`errorCode`/`errorMsg` results to internal storage as ION; throws when `failOnUnsuccessfulEvents` (default `true`) and at least one event is rejected, otherwise reports `WARNING` on partial failure; always sends the whole `events` list in a single request (EG's per-request batch cap is undocumented, so no chunking is attempted)
 - `io.kestra.plugin.huawei.eventgrid.AbstractEventGrid` — Base class extending `AbstractConnection`; builds `EgClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `EgRegion.valueOf(region)` → region-derived fallback; fails fast requiring `projectId` whenever a custom endpoint is used (EG v1 APIs embed `{project_id}` in the request path)
 - `io.kestra.plugin.huawei.eventgrid.EventGridUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+
+**DIS (Data Ingestion Service)**
+
+- `io.kestra.plugin.huawei.dis.PutRecords` — Writes a batch of records to a stream via `sendRecords` (wraps `PutRecordsRequest`), the Huawei Cloud equivalent of `io.kestra.plugin.aws.kinesis.PutRecords`; accepts inline maps or a `kestra://` ION file via `io.kestra.core.models.property.Data`/`Data.From`; each record needs `data` and either `partitionKey` or `partitionId` (+ optional `explicitHashKey`); chunks batches to DIS's 500-record/5 MB-per-request limits and fails fast on any single record over 1 MB; DIS can reject individual records within an HTTP 200 response, so `failedRecordCount` and the `uri` output (per-record results) surface partial failures, and `failOnUnsuccessfulRecords` (default `true`) fails the task on any rejection
+- `io.kestra.plugin.huawei.dis.Consume` — One-shot task reading every partition of a stream (or a single `partitionId`) via `consumeRecords`/`showCursor`; loops round-robin across partitions until `maxRecords`/`maxDuration` or a full round returns zero records (caught up); always starts from `startingPosition` (`TRIM_HORIZON` default/`LATEST`/`AT_TIMESTAMP`) since it has no persisted state across executions; writes ND-decoded records to ION at `uri`
+- `io.kestra.plugin.huawei.dis.Trigger extends AbstractDisTrigger` — Polling trigger delegating to `Consume`'s shared `poll(...)` helper; persists a per-partition sequence-number watermark in the flow's namespace KV Store (key `dis_trigger_watermark_<flowId.length()>_<flowId>_<triggerId>`) so overlapping polls never re-deliver a record
+- `io.kestra.plugin.huawei.dis.RealtimeTrigger extends AbstractDisTrigger` — Persistent poll loop across every partition; fires one execution per record; persists the same KV Store watermark after each non-empty batch so a restart resumes near where it left off instead of re-reading the whole stream; `kill()`/`stop()` via `AtomicBoolean` + `CountDownLatch`
+- `io.kestra.plugin.huawei.dis.AbstractDis` — Base class extending `AbstractConnection`; delegates client construction to `DisService.buildClient(...)` (suffix-first endpoint ordering, mirrors `AbstractDli`/`AbstractSmn`; fails fast requiring `projectId` on a custom endpoint — DIS v2 APIs embed `{project_id}` in the request path)
+- `io.kestra.plugin.huawei.dis.AbstractDisTrigger` — Connection-aware base for both DIS triggers; holds the shared connection/endpoint properties and the same `client(RunContext)` factory (via `DisService.buildClient`) so `Trigger` and `RealtimeTrigger` inherit them instead of re-declaring each one
+- `io.kestra.plugin.huawei.dis.DisService` — Package-private static helpers: `buildClient(...)` (shared by both base classes), `listPartitionIds(...)` (paginated via `hasMorePartitions`), `cursorFor(...)` (resolves a partition cursor from `startingPosition`/`startingTimestamp`, or resumes `AFTER_SEQUENCE_NUMBER` when a watermark is supplied)
+- `io.kestra.plugin.huawei.dis.DisWatermark` — Package-private KV Store helpers shared by `Trigger` and `RealtimeTrigger`: builds the length-prefixed watermark key and reads/writes the per-partition sequence-number map
+- `io.kestra.plugin.huawei.dis.DisUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.dis.SerdeType` — `STRING`/`JSON`/`BINARY` serialization for the record `data` payload, applied before/after DIS's own base64 wire encoding
+- `io.kestra.plugin.huawei.dis.StartingPosition` — `TRIM_HORIZON`/`LATEST`/`AT_TIMESTAMP`, mirroring DIS's `ShowCursorRequest.CursorTypeEnum` subset relevant to a first read
 
 **MRS (MapReduce Service)**
 
@@ -332,6 +348,23 @@ plugin-huawei/
 │   │   ├── EventGridUtils.java
 │   │   ├── PutEvents.java
 │   │   └── package-info.java
+│   ├── dis/
+│   │   ├── AbstractDis.java
+│   │   ├── AbstractDisTrigger.java
+│   │   ├── ConsumeOptionsInterface.java
+│   │   ├── DisConnectionInterface.java
+│   │   ├── DisService.java
+│   │   ├── DisUtils.java
+│   │   ├── DisWatermark.java
+│   │   ├── SerdeType.java
+│   │   ├── StartingPosition.java
+│   │   ├── PutRecords.java
+│   │   ├── Consume.java
+│   │   ├── Trigger.java
+│   │   ├── RealtimeTrigger.java
+│   │   ├── package-info.java
+│   │   └── models/
+│   │       └── Record.java
 │   ├── geminidb/
 │   │   ├── AbstractGeminiDb.java
 │   │   ├── PutItem.java
@@ -412,6 +445,12 @@ plugin-huawei/
 │   ├── eventgrid/
 │   │   ├── EventGridUtilsTest.java
 │   │   └── PutEventsTest.java
+│   ├── dis/
+│   │   ├── DisUtilsTest.java
+│   │   ├── PutRecordsTest.java
+│   │   ├── ConsumeTest.java
+│   │   ├── TriggerTest.java
+│   │   └── RealtimeTriggerTest.java
 │   ├── geminidb/
 │   │   ├── AbstractGeminiDbTest.java
 │   │   ├── GeminiDbValidationTest.java
@@ -486,11 +525,17 @@ plugin-huawei/
 - ⚠️ EventGrid's EU/sovereign host is unverified: the SDK's `EgRegion` enum has no EU entry (so an unknown region always falls back to suffix-derivation, `eg.<region>.myhuaweicloud.com`), while Huawei's own EU documentation shows a different host (`events.eu-west-101.myhuaweicloud.eu`). Use `endpointOverride`/`endpointSuffix` as the escape hatch until this is verified against a live EU-sovereign account
 - `PutEvents` has no per-request batch cap enforced client-side — EventGrid's documented limit (if any) is unknown, so the task always sends the full `events` list in a single `putEvents` call and surfaces any size-related API error verbatim rather than guessing a safe chunk size
 - EventGrid integration test gate: `EVENTGRID_TESTS=true`; WireMock-based unit tests run unconditionally
+- DIS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-dis` (version managed by `huaweicloud-sdk-bom`); the stream API lives in `com.huaweicloud.sdk.dis.v2` (`DisClient`); `DisRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- DIS v2 APIs embed the project ID in the request path (`/v2/{project_id}/...`), same failure mode as CES/SMN/DLI: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractDis.client()`/`AbstractDisTrigger.client()` (both delegating to `DisService.buildClient(...)`) fail fast requiring `projectId` whenever a custom endpoint is set
+- DIS has no dedicated `putRecords`/`getRecords`/`getPartitionCursor` methods on `DisClient` despite the model classes (`PutRecordsRequest`, etc.) being named that way: writes go through `sendRecords` (wrapping `PutRecordsRequest`/`PutRecordsResultEntry`), partition-cursor resolution through `showCursor` (`ShowCursorRequest.CursorTypeEnum`: `TRIM_HORIZON`/`LATEST`/`AT_TIMESTAMP`/`AT_SEQUENCE_NUMBER`/`AFTER_SEQUENCE_NUMBER`), reads through `consumeRecords`, and partition enumeration through `showStream` (paginated via `hasMorePartitions`/`startPartitionId`)
+- `PutRecords` can receive an HTTP 200 from `sendRecords` while still rejecting individual records (`failedRecordCount` > 0 in the body) — `failOnUnsuccessfulRecords` (default `true`) fails the task in that case; per-record results (including `errorCode`/`errorMessage`) are written to ION at `uri` rather than returned inline, since a batch can be arbitrarily large
+- `Trigger` and `RealtimeTrigger` deliberately avoid DIS's server-side app/checkpoint API (`CreateApp`/`CommitCheckpoint`/`ShowCheckpoint`/`ShowConsumerState`) in favor of client-side partition cursors plus a watermark (last delivered sequence number per partition) persisted in the flow's namespace KV Store, mirroring `ces.Trigger`'s watermark approach; the KV key is length-prefixed (`dis_trigger_watermark_<flowId.length()>_<flowId>_<triggerId>`) to avoid `flowId`/`triggerId` concatenation collisions
+- DIS integration test gate: `DIS_TESTS=true` (real DIS stream; requires `DIS_STREAM_NAME` and `DIS_REGION` env vars); WireMock-based unit tests run unconditionally
 - MRS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-mrs` (version managed by `huaweicloud-sdk-bom`); MRS V2 (`com.huaweicloud.sdk.mrs.v2.MrsClient`) is the vendor-recommended API for cluster+job creation (`createCluster` for cluster-only, `runJobFlow` for cluster+steps in one request — `runJobFlow` rejects an empty `steps` field, so `CreateClusterAndSubmitJob` routes by whether `steps` is set) and job submission/status/cancellation (`createExecuteJob`/`showSingleJobExe`/`stopJob`/`showJobExeListNew`), but has **no cluster-detail or delete-cluster endpoint** — those only exist on the older V1 API (`com.huaweicloud.sdk.mrs.v1.MrsClient`, `showClusterDetails`/`deleteCluster`). `AbstractMrs` therefore builds both client versions from a shared generic `buildClient` helper; both resolve to the identical host (`mrs.<region>.myhuaweicloud.com`)
 - MRS APIs embed the project ID in the request path (e.g. `/v2/{project_id}/run-job-flow`, `/v2/{project_id}/clusters`, `/v1.1/{project_id}/clusters/{cluster_id}`), same failure mode as CES/DLI/SMN/EventGrid: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractMrs`'s client builders fail fast requiring `projectId` whenever a custom endpoint is set
 - MRS's V1 `Cluster` response model uses **camelCase** JSON keys (`clusterId`, `clusterState`, …) — unlike every V2 model in the same SDK jar, which uses snake_case (`cluster_id`, `job_state`, …). Confirmed by inspecting the SDK's embedded `HttpRequestDef`/`@JsonProperty` metadata directly; get this wrong in a WireMock stub and the test silently gets an all-null `Cluster` back instead of a deserialization error
 - ⚠️ `ClusterType`/`LoginMode`/`SafeMode`/`JobType` enum wire values (`ANALYSIS`/`STREAMING`/`MIXED`/`CUSTOM`, `PASSWORD`/`PUBLICKEY`, `SIMPLE`/`KERBEROS`, `MapReduce`/`SparkSubmit`/`HiveScript`/`HiveSql`/`DistCp`/`SparkScript`/`SparkSql`/`Flink`) are based on Huawei's public MRS V2 API documentation, not verified against a live cluster creation — same caveat as the EventGrid EU endpoint above. Use `endpointOverride` against a WireMock/real endpoint to confirm before relying on an unusual combination in production
-- `CreateClusterAndSubmitJob`'s response (`createCluster` or `runJobFlow`) only returns the new `clusterId` — no job IDs for any submitted `steps`. When `wait=true`, job IDs are resolved best-effort afterward via `showJobExeListNew`, matching by job name and a request-start-time watermark; when `wait=false`, `jobIds` is always empty since the cluster and its steps are still being provisioned asynchronously
+- `CreateClusterAndSubmitJob`'s response (`createCluster` or `runJobFlow`) only returns the new `clusterId` — no job IDs for any submitted `steps`. When `wait=true`, job IDs are resolved best-effort afterward via `showJobExeListNew` (paginated: `offset` is a 1-based page index, `limit` the page size — live-verified in eu-west-101, where `offset=0` is rejected with `MRS.0002`; the `submitted_time_begin` watermark is epoch millis), matching by job name; because MRS registers the steps in the job-executions list ~50s *after* the cluster reaches `running`, `resolveStepJobIds` **polls** (up to `JOB_ID_RESOLUTION_TIMEOUT`, 5 min) until every step resolves rather than doing a single immediate lookup. When `wait=false`, `jobIds` is always empty since the cluster and its steps are still being provisioned asynchronously
 - `CreateClusterAndSubmitJob` does not override `kill()`: the cluster it creates is a long-lived infrastructure resource, not an ephemeral job owned by the task, so a killed Kestra execution does not delete it (mirrors the reasoning that keeps `DeleteCluster` a separate, explicit task). `SubmitJob` does override `kill()` (via `stopJob`) since the job execution it submits is a Kestra-owned cancellable unit of work
 - MRS billing is hardcoded to pay-per-use (`ChargeInfo.chargeMode=postPaid`) in `CreateClusterAndSubmitJob` — prepaid clusters are out of scope, since job-triggered clusters are on-demand by nature
 - MRS integration test gate: `MRS_TESTS=true` (real MRS; requires `MRS_REGION`, a pre-existing running cluster via `MRS_TEST_CLUSTER_ID`, plus the shared `HUAWEI_ACCESS_KEY`/`HUAWEI_SECRET_ACCESS_KEY`/`HUAWEI_PROJECT_ID`) — only exercises `SubmitJob` against that pre-existing cluster, since cluster creation/deletion is too slow and costly to run on every gated CI pass; WireMock-based unit tests (covering all three tasks) run unconditionally

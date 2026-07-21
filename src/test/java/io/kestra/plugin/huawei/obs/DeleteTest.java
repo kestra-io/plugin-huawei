@@ -16,7 +16,7 @@ class DeleteTest extends AbstractObsTest {
 
     @Test
     void delete_existingObject_isRemovedFromBucket() throws Exception {
-        var key = "delete-test/" + IdUtils.create() + "/file.txt";
+        var key = key(IdUtils.create() + "/file.txt");
         seedObject(key, "to be deleted", "text/plain");
 
         assertThat(rawClient.doesObjectExist(testBucket, key), is(true));
@@ -38,7 +38,7 @@ class DeleteTest extends AbstractObsTest {
     void delete_nonExistentKey_doesNotThrow() throws Exception {
         // On MinIO (and non-versioned OBS), deleting a key that doesn't exist is a no-op — the SDK
         // returns HTTP 204 with no error. deleteMarker is false.
-        var key = "delete-test/" + IdUtils.create() + "/ghost.txt";
+        var key = key(IdUtils.create() + "/ghost.txt");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(Delete.builder())

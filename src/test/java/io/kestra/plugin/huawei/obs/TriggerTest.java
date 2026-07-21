@@ -28,7 +28,7 @@ class TriggerTest extends AbstractObsTest {
     @Test
     void evaluate_withMatchingObjects_returnsExecutionAndDeletesSources() throws Exception {
         var runId = IdUtils.create();
-        var prefix = "trigger-test/" + runId + "/";
+        var prefix = key(runId + "/");
         seedObject(prefix + "event1.json", "{}", "application/json");
         seedObject(prefix + "event2.json", "{}", "application/json");
 
@@ -63,7 +63,7 @@ class TriggerTest extends AbstractObsTest {
             .id(IdUtils.create())
             .type(Trigger.class.getName())
             .bucket(Property.ofValue(testBucket))
-            .prefix(Property.ofValue("trigger-test/" + IdUtils.create() + "/nonexistent/"))
+            .prefix(Property.ofValue(key(IdUtils.create() + "/nonexistent/")))
             .action(Property.ofValue(Trigger.Action.DELETE))
             .build();
 
@@ -80,8 +80,8 @@ class TriggerTest extends AbstractObsTest {
     @Test
     void evaluate_withMoveAction_objectsAreRelocated() throws Exception {
         var runId = IdUtils.create();
-        var srcPrefix = "trigger-test/" + runId + "/src/";
-        var dstPrefix = "trigger-test/" + runId + "/dst/";
+        var srcPrefix = key(runId + "/src/");
+        var dstPrefix = key(runId + "/dst/");
         seedObject(srcPrefix + "data.csv", "col1,col2", "text/csv");
 
         var trigger = applyObsConfig(Trigger.builder())

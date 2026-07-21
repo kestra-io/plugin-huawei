@@ -20,8 +20,8 @@ class ListTest extends AbstractObsTest {
 
     @BeforeAll
     void seedObjects() {
-        // Use a unique prefix per test run so concurrent runs don't interfere
-        prefix = "list-test/" + IdUtils.create() + "/";
+        // Rooted under the class's per-run prefix so the @AfterAll sweep reclaims these fixtures.
+        prefix = key(IdUtils.create() + "/");
         seedObject(prefix + "a/file1.csv", "csv1", "text/csv");
         seedObject(prefix + "a/file2.csv", "csv2", "text/csv");
         seedObject(prefix + "b/data.json", "{}", "application/json");

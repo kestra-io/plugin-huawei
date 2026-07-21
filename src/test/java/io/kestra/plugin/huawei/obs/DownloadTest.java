@@ -18,7 +18,7 @@ class DownloadTest extends AbstractObsTest {
     @Test
     void download_happyPath_contentRoundTrips() throws Exception {
         var content = "content seeded for download test";
-        var key = "download-test/" + IdUtils.create() + "/file.txt";
+        var key = key(IdUtils.create() + "/file.txt");
         seedObject(key, content, "text/plain");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -43,7 +43,7 @@ class DownloadTest extends AbstractObsTest {
     @Test
     void download_storageUriIsAccessible() throws Exception {
         var content = "download uri accessibility test";
-        var key = "download-test/" + IdUtils.create() + "/uri-check.txt";
+        var key = key(IdUtils.create() + "/uri-check.txt");
         seedObject(key, content, "application/octet-stream");
 
         var runContext = runContextFactory.of(Collections.emptyMap());
