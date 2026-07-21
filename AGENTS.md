@@ -33,6 +33,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `ConsumeOptionsInterface`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
 - `io.kestra.plugin.huawei.dis.models` — DIS output models (`Record`)
 - `io.kestra.plugin.huawei.geminidb` — GeminiDB for NoSQL (DynamoDB-Compatible API) tasks (`AbstractGeminiDb`, `PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`)
+- `io.kestra.plugin.huawei.rfs` — RFS (Resource Formation Service) tasks (`AbstractRfs`, `RfsConnectionInterface`, `RfsUtils`, `RfsService`, `Create`, `Delete`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -147,6 +148,15 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.geminidb.Query` — Queries via `keyConditionExpression` + `expressionAttributeValues`, optional `filterExpression`; bounded `limit` (1-1000, default 100); `fetchType` (`STORE` default/`FETCH`/`FETCH_ONE`/`NONE`) → `FetchOutput`. Reads a single response page — does not follow `LastEvaluatedKey` — and logs an INFO message when the response was truncated
 - `io.kestra.plugin.huawei.geminidb.Scan` — Scans a table with optional `filterExpression` + `expressionAttributeValues`; same bounded `limit`/`fetchType`/truncation-logging behavior as `Query`
 - `io.kestra.plugin.huawei.geminidb.AbstractGeminiDb` — Base class extending `AbstractConnection`; builds a `DynamoDbClient` (AWS SDK v2) via `.endpointOverride(URI)` pointed at the mandatory `endpoint` property (a per-instance connection address — GeminiDB has no region-derived host, unlike every other Huawei service in this plugin) and `StaticCredentialsProvider` (AK/SK, or `AwsSessionCredentials` when `securityToken` is set); `region` is required by the SDK's SigV4 signer but is signing-only and defaults to a placeholder (`cn-north-1`) — it has no effect on request routing; also holds the ported AWS-`AttributeValue`⇄`Object` conversion helpers and the shared `fetchOutputs`/`warnIfTruncated` logic used by `Query`/`Scan`
+
+**RFS (Resource Formation Service)**
+
+- `io.kestra.plugin.huawei.rfs.Create` — Creates an RFS stack if it doesn't exist, otherwise deploys an update; the Huawei Cloud equivalent of `io.kestra.plugin.aws.cloudformation.Create`, adapted to RFS's Terraform/HCL model. Requires exactly one template source (`templateBody` inline / `templateUri` on OBS) and allows at most one variables source (`vars` map / `varsBody` inline tfvars / `varsUri` on OBS); probes existence via `getStackMetadata` (404 ⇒ absent), then calls `createStack` (first deploy) or `deployStack` (update, requiring a `Client-Request-Id` UUID header) — both are asynchronous and return a `deploymentId`. When `wait` is `true` (default), polls `getStackMetadata` until terminal; only `DEPLOYMENT_COMPLETE` counts as success — `CREATION_COMPLETE` (shell created but never deployed), `ROLLBACK_COMPLETE`, `DEPLOYMENT_FAILED`, and `ROLLBACK_FAILED` all throw. On success, fetches `listStackOutputs` (paginated) and returns them as a `Map<String, String>`; RFS returns sensitive outputs as the literal string `<sensitive>`
+- `io.kestra.plugin.huawei.rfs.Delete` — Deletes an RFS stack; idempotent by default (`errorOnMissing=false`) if the stack is already absent (HTTP 404 on probe). When `wait` is `true` (default), polls `getStackMetadata` until the stack disappears (RFS has no `DELETION_COMPLETE` status — a deleted stack simply 404s) or reaches `DELETION_FAILED`, which throws
+- `io.kestra.plugin.huawei.rfs.AbstractRfs` — Base class extending `AbstractConnection`; builds an `AosClient` using the CES-style suffix-first endpoint ordering (`endpointOverride` → explicit `endpointSuffix` → `AosRegion.valueOf(region)` → region-derived fallback); fails fast requiring `projectId` whenever a custom endpoint is used (RFS v1 APIs embed `{project_id}` in the request path); holds the shared `stackName`/`wait`/`maxDuration`/`interval` properties used by both `Create` and `Delete`
+- `io.kestra.plugin.huawei.rfs.RfsConnectionInterface` — Mirrors `DliConnectionInterface`: `endpointOverride`/`endpointSuffix` connection properties
+- `io.kestra.plugin.huawei.rfs.RfsUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.rfs.RfsService` — Package-private static helpers: `probe`/`create`/`deploy`/`delete`/`listOutputs`, and the two terminal-state poll loops (`pollUntilDeployTerminal`, `pollUntilDeleted`) shared by `Create` and `Delete`
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -363,6 +373,14 @@ plugin-huawei/
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
+│   ├── rfs/
+│   │   ├── AbstractRfs.java
+│   │   ├── RfsConnectionInterface.java
+│   │   ├── RfsUtils.java
+│   │   ├── RfsService.java
+│   │   ├── Create.java
+│   │   ├── Delete.java
+│   │   └── package-info.java
 │   └── obs/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
@@ -434,6 +452,10 @@ plugin-huawei/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
 │   │   └── GetTemporaryCredentialsTest.java
+│   ├── rfs/
+│   │   ├── RfsUtilsTest.java
+│   │   ├── CreateTest.java
+│   │   └── DeleteTest.java
 │   └── obs/
 │       ├── AbstractObsTest.java
 │       ├── CopyTest.java
@@ -503,6 +525,12 @@ plugin-huawei/
 - `AbstractGeminiDb.objectFrom(Object)` falls back to `toString()` for any type it doesn't special-case (notably numbers), so numeric attributes are written as DynamoDB `S` (string), not `N` — an inherited limitation from the upstream `io.kestra.plugin.aws.dynamodb.AbstractDynamoDb` this class is ported from, not a new gap
 - `Query`/`Scan` read a single response page and do **not** paginate across `LastEvaluatedKey`; `warnIfTruncated` logs an INFO message whenever the response is truncated so large result sets aren't silently cut short — bounded `limit` (1-1000, default 100, enforced at render time via `renderedLimit()` rather than `@Min`/`@Max` — `Property<>` has no Hibernate ValueExtractor) caps how much is read per page
 - GeminiDB test gate: `GEMINIDB_TESTS=true` is reserved for a future live-cloud-only test, but none exists yet — the default-path tests run **unconditionally** against `amazon/dynamodb-local` (started via `docker-compose-ci.yml`, unconditionally in `.github/setup-unit.sh`, no credential-based branching like the OBS/MinIO fallback) since DynamoDB Local speaks the identical wire protocol GeminiDB exposes
+- RFS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-aos` (version managed by `huaweicloud-sdk-bom`; RFS's SDK artifact uses the internal service name AOS); the stack API lives in `com.huaweicloud.sdk.aos.v1` (`AosClient`); `AosRegion.valueOf(region)` for known regions (includes `EU_WEST_101` → `aos.myhuaweicloud.eu`) with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- RFS v1 APIs embed the project ID in the request path (`/v1/{project_id}/stacks/...`), same failure mode as CES/SMN/DLI/EventGrid/DIS: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractRfs.client()` fails fast requiring `projectId` whenever a custom endpoint is set
+- RFS models Terraform/HCL templates and variables as separate inputs from CloudFormation-style JSON/YAML: `Create` requires exactly one of `templateBody`/`templateUri` and allows at most one of `vars`/`varsBody`/`varsUri`. There is no `templateId`/`templateVersion` (private template) field on `CreateStackRequestBody`/`DeployStackRequestBody` despite that being considered during design — the RFS v1 SDK only supports inline or OBS-hosted templates on these two endpoints, so private-template references are out of scope
+- `createStack` (HTTP 201) and `deployStack` (HTTP 202) are both asynchronous and require a `Client-Request-Id` header (`java.util.UUID.randomUUID()`); there is no SDK waiter, so `Create`/`Delete` poll `getStackMetadata` directly. Non-terminal statuses are `DEPLOYMENT_IN_PROGRESS`/`ROLLBACK_IN_PROGRESS`/`DELETION_IN_PROGRESS`; terminal statuses are the `*_COMPLETE`/`*_FAILED` values. Only `DEPLOYMENT_COMPLETE` counts as a successful deploy — `CREATION_COMPLETE` means the stack shell was created but never deployed (an anomaly, since `Create` always supplies a template) and `ROLLBACK_COMPLETE` means the deploy failed and was rolled back, so both are treated as failures alongside `DEPLOYMENT_FAILED`/`ROLLBACK_FAILED`
+- RFS has no `DELETION_COMPLETE` status: a stack that finished deleting simply stops existing, surfaced as an HTTP 404 on the next `getStackMetadata` call. `Delete` polls until 404 (success) or `DELETION_FAILED` (throws)
+- RFS integration test gate: none defined yet — all RFS tests (`RfsUtilsTest`, `CreateTest`, `DeleteTest`) are WireMock-based and run unconditionally; no live-cloud-only test exists for this service yet
 
 ## References
 
