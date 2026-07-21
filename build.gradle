@@ -126,6 +126,12 @@ dependencies {
         exclude group: "org.slf4j"
     }
 
+    // SWR (Software Repository for Container) SDK — issues short-lived registry auth tokens via
+    // the SWR V2 API (createSecret), the Huawei Cloud equivalent of ECR's GetAuthorizationToken.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-swr") {
+        exclude group: "org.slf4j"
+    }
+
     // GeminiDB for NoSQL ships a DynamoDB-compatible data-plane API (no Huawei SDK covers item
     // operations), so the AWS SDK v2 is used as the wire-compatible transport, pointed at the
     // GeminiDB instance via endpointOverride. Versions are aligned by the io.kestra:platform BOM,

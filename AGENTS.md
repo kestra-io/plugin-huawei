@@ -33,6 +33,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.dis` — DIS (Data Ingestion Service) tasks/triggers (`AbstractDis`, `AbstractDisTrigger`, `ConsumeOptionsInterface`, `DisConnectionInterface`, `DisUtils`, `DisService`, `DisWatermark`, `SerdeType`, `StartingPosition`, `PutRecords`, `Consume`, `Trigger`, `RealtimeTrigger`)
 - `io.kestra.plugin.huawei.dis.models` — DIS output models (`Record`)
 - `io.kestra.plugin.huawei.geminidb` — GeminiDB for NoSQL (DynamoDB-Compatible API) tasks (`AbstractGeminiDb`, `PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`)
+- `io.kestra.plugin.huawei.swr` — SWR (Software Repository for Container) task (`AbstractSwr`, `SwrConnectionInterface`, `SwrUtils`, `GetAuthToken`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -147,6 +148,12 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.geminidb.Query` — Queries via `keyConditionExpression` + `expressionAttributeValues`, optional `filterExpression`; bounded `limit` (1-1000, default 100); `fetchType` (`STORE` default/`FETCH`/`FETCH_ONE`/`NONE`) → `FetchOutput`. Reads a single response page — does not follow `LastEvaluatedKey` — and logs an INFO message when the response was truncated
 - `io.kestra.plugin.huawei.geminidb.Scan` — Scans a table with optional `filterExpression` + `expressionAttributeValues`; same bounded `limit`/`fetchType`/truncation-logging behavior as `Query`
 - `io.kestra.plugin.huawei.geminidb.AbstractGeminiDb` — Base class extending `AbstractConnection`; builds a `DynamoDbClient` (AWS SDK v2) via `.endpointOverride(URI)` pointed at the mandatory `endpoint` property (a per-instance connection address — GeminiDB has no region-derived host, unlike every other Huawei service in this plugin) and `StaticCredentialsProvider` (AK/SK, or `AwsSessionCredentials` when `securityToken` is set); `region` is required by the SDK's SigV4 signer but is signing-only and defaults to a placeholder (`cn-north-1`) — it has no effect on request routing; also holds the ported AWS-`AttributeValue`⇄`Object` conversion helpers and the shared `fetchOutputs`/`warnIfTruncated` logic used by `Query`/`Scan`
+
+**SWR (Software Repository for Container)**
+
+- `io.kestra.plugin.huawei.swr.GetAuthToken` — Huawei Cloud equivalent of `io.kestra.plugin.aws.ecr.GetAuthToken`; fetches a short-lived Docker/OCI registry credential via `createSecret`; prefers decoding `auths.<registry-host>.auth` (base64 `username:password`) over parsing the human-readable `X-Swr-Dockerlogin` header, falling back to the header only when `auths` is empty; returns `Output(username, password [EncryptedString], registry, expiry)`. Optional `projectName` (SWR `projectname` query param) defaults to `region`
+- `io.kestra.plugin.huawei.swr.AbstractSwr` — Base class extending `AbstractConnection`; builds `SwrClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SwrRegion.valueOf(region)` → region-derived fallback; fails fast requiring AK/SK completeness — **no** `projectId` fail-fast on a custom endpoint (see Local rules)
+- `io.kestra.plugin.huawei.swr.SwrUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); no `requireProjectIdForCustomEndpoint` (createSecret's path has no `{project_id}` segment)
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -360,6 +367,12 @@ plugin-huawei/
 │   │   ├── Query.java
 │   │   ├── Scan.java
 │   │   └── package-info.java
+│   ├── swr/
+│   │   ├── AbstractSwr.java
+│   │   ├── SwrConnectionInterface.java
+│   │   ├── SwrUtils.java
+│   │   ├── GetAuthToken.java
+│   │   └── package-info.java
 │   ├── iam/
 │   │   ├── GetTemporaryCredentials.java
 │   │   └── package-info.java
@@ -430,6 +443,9 @@ plugin-huawei/
 │   │   ├── DeleteItemTest.java
 │   │   ├── QueryTest.java
 │   │   └── ScanTest.java
+│   ├── swr/
+│   │   ├── SwrUtilsTest.java
+│   │   └── GetAuthTokenTest.java
 │   ├── iam/
 │   │   ├── ConnectionUtilsExchangeTest.java
 │   │   ├── TemporaryCredentialsConnectionTest.java
@@ -503,6 +519,11 @@ plugin-huawei/
 - `AbstractGeminiDb.objectFrom(Object)` falls back to `toString()` for any type it doesn't special-case (notably numbers), so numeric attributes are written as DynamoDB `S` (string), not `N` — an inherited limitation from the upstream `io.kestra.plugin.aws.dynamodb.AbstractDynamoDb` this class is ported from, not a new gap
 - `Query`/`Scan` read a single response page and do **not** paginate across `LastEvaluatedKey`; `warnIfTruncated` logs an INFO message whenever the response is truncated so large result sets aren't silently cut short — bounded `limit` (1-1000, default 100, enforced at render time via `renderedLimit()` rather than `@Min`/`@Max` — `Property<>` has no Hibernate ValueExtractor) caps how much is read per page
 - GeminiDB test gate: `GEMINIDB_TESTS=true` is reserved for a future live-cloud-only test, but none exists yet — the default-path tests run **unconditionally** against `amazon/dynamodb-local` (started via `docker-compose-ci.yml`, unconditionally in `.github/setup-unit.sh`, no credential-based branching like the OBS/MinIO fallback) since DynamoDB Local speaks the identical wire protocol GeminiDB exposes
+- SWR SDK: `com.huaweicloud.sdk:huaweicloud-sdk-swr` (version managed by `huaweicloud-sdk-bom`); the registry-credential API lives in `com.huaweicloud.sdk.swr.v2` (`SwrClient.createSecret`); `SwrRegion.valueOf(region)` for known regions with fallback to `withEndpoint` for unknown ones, using the CES-style suffix-first ordering so an explicit `endpointSuffix` always wins for sovereign clouds
+- ⚠️ **`GetAuthToken` has no `durationSeconds` property**, unlike AWS ECR's `GetAuthToken`: inspecting the actual `huaweicloud-sdk-swr` request model (`CreateSecretRequest`, verified via `javap` against the resolved 3.1.206 jar) shows it exposes only a `projectname` field — no duration/TTL parameter exists on SWR's `createSecret` API for the client to set. The issued credential's validity window is entirely SWR-controlled; `expiry` in the output reflects whatever SWR returns in `X-Swr-Expireat`. Do not add a `durationSeconds` property without first re-verifying against a newer SDK version that the field actually exists
+- **No `projectId` fail-fast on a custom endpoint** — unlike CES/SMN/DLI/EventGrid/DIS/MRS, SWR's `createSecret` path (`/v2/manage/utils/secret`) has no `{project_id}` segment (confirmed via the SDK's embedded `HttpRequestDef` metadata), so `AbstractSwr.client()` deliberately omits the `requireProjectIdForCustomEndpoint` guard those other services carry. Do not copy that guard into `AbstractSwr`/`SwrUtils`
+- `GetAuthToken` decodes `auths.<registry-host>.auth` (base64 `username:password`, per-registry map keyed by host) in preference to parsing the human-readable `X-Swr-Dockerlogin` response header — the map is structured data and only falls back to header-parsing when `auths` comes back empty. `password` is wrapped in `EncryptedString`, mirroring how AWS ECR's `GetAuthToken` encrypts its token
+- SWR unit tests are WireMock-based and run unconditionally; no live-cloud integration test gate exists yet for SWR
 
 ## References
 
