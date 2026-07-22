@@ -30,7 +30,7 @@ Overrides the default endpoint derived from `region` and `endpointSuffix`. Use f
 ## Gotchas
 
 - **No `projectId` requirement with a custom endpoint**: unlike CES, SMN, DLI, EventGrid, and DIS, SWR's `createSecret` API (`/v2/manage/utils/secret`) has no `{project_id}` segment in its request path, so `GetAuthToken` works with a custom endpoint even when `projectId` is unset.
-- **Fixed credential lifetime**: SWR's `createSecret` API has no request parameter to control how long the issued credential stays valid — unlike AWS ECR, the validity period is entirely SWR-controlled. `expiry` in the output reflects whatever SWR returns.
+- **Fixed credential lifetime**: SWR's `createSecret` API has no request parameter to control how long the issued credential stays valid — unlike AWS ECR, the validity period is entirely SWR-controlled. `expiry` in the output is the `X-Swr-Expireat` timestamp SWR returns (ISO-8601 UTC), parsed to an `Instant`.
 - **Registry host comes from the response, not from `region`**: `GetAuthToken` reads the registry host from the `auths` map key returned by SWR rather than reconstructing it, so it is correct even for sovereign clouds without needing `endpointSuffix` reasoning on the caller's side.
 
 ## Tasks

@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
+import java.time.Instant;
 import java.util.Base64;
 import java.util.Collections;
 
@@ -75,7 +76,7 @@ class GetAuthTokenTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withHeader("X-Swr-Dockerlogin", "docker login -u " + USERNAME + " -p " + PASSWORD + " " + REGISTRY_HOST)
-                .withHeader("X-Swr-Expireat", "2026-07-22T10:00:00Z")
+                .withHeader("X-Swr-Expireat", "2026-07-23T08:46:07.811000Z")
                 .withBody("""
                     {"auths": {"%s": {"auth": "%s"}}}
                     """.formatted(REGISTRY_HOST, encodedAuth()))));
@@ -99,7 +100,8 @@ class GetAuthTokenTest {
         assertThat(output.getUsername(), equalTo(USERNAME));
         assertThat(output.getPassword().getValue(), equalTo(PASSWORD));
         assertThat(output.getRegistry(), equalTo(REGISTRY_HOST));
-        assertThat(output.getExpiry(), equalTo("2026-07-22T10:00:00Z"));
+        // Real SWR returns microsecond precision (verified against a live account); Instant.parse handles it.
+        assertThat(output.getExpiry(), equalTo(Instant.parse("2026-07-23T08:46:07.811000Z")));
         wireMock.verify(postRequestedFor(urlMatching(".*/v2/manage/utils/secret.*")));
     }
 
@@ -176,7 +178,7 @@ class GetAuthTokenTest {
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withHeader("X-Swr-Dockerlogin", "docker login -u " + USERNAME + " -p " + PASSWORD + " " + REGISTRY_HOST)
-                .withHeader("X-Swr-Expireat", "2026-07-22T10:00:00Z")
+                .withHeader("X-Swr-Expireat", "2026-07-23T08:46:07.811000Z")
                 .withBody("{}")));
 
         var runContext = runContextFactory.of(Collections.emptyMap());

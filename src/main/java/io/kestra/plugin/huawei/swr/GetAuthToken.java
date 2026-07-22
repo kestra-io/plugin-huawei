@@ -19,6 +19,8 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Base64;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -103,15 +105,16 @@ public class GetAuthToken extends AbstractSwr implements RunnableTask<GetAuthTok
         try {
             var response = client.createSecret(request);
             var credential = extractCredential(response.getAuths(), response.getXSwrDockerlogin(), rRegion);
+            var expiry = parseExpiry(response.getXSwrExpireat(), logger);
 
             logger.info("Obtained SWR auth token for registry '{}', expiring at '{}'",
-                credential.registry(), response.getXSwrExpireat());
+                credential.registry(), expiry);
 
             return Output.builder()
                 .username(credential.username())
                 .password(EncryptedString.from(credential.password(), runContext))
                 .registry(credential.registry())
-                .expiry(response.getXSwrExpireat())
+                .expiry(expiry)
                 .build();
         } catch (ServiceResponseException e) {
             throw new IllegalStateException(
@@ -180,6 +183,26 @@ public class GetAuthToken extends AbstractSwr implements RunnableTask<GetAuthTok
     private record Credential(String username, String password, String registry) {
     }
 
+    /**
+     * Parses SWR's {@code X-Swr-Expireat} header into an {@link Instant}. The header is ISO-8601 UTC
+     * (verified against a live account, e.g. {@code 2026-07-23T08:46:07.811000Z}). The expiry is
+     * informational only — SWR alone controls the credential's lifetime — so an unparseable or absent
+     * value logs a warning and yields {@code null} rather than failing the task and discarding an
+     * otherwise-valid credential.
+     */
+    private static Instant parseExpiry(String xSwrExpireat, org.slf4j.Logger logger) {
+        if (xSwrExpireat == null || xSwrExpireat.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(xSwrExpireat.trim());
+        } catch (DateTimeParseException e) {
+            logger.warn("Could not parse SWR 'X-Swr-Expireat' value '{}' as an ISO-8601 instant; " +
+                "leaving 'expiry' unset.", xSwrExpireat);
+            return null;
+        }
+    }
+
     @Builder
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
@@ -193,7 +216,7 @@ public class GetAuthToken extends AbstractSwr implements RunnableTask<GetAuthTok
         @Schema(title = "Registry host", description = "Format: `swr.<region>.myhuaweicloud.com` (or the sovereign-cloud equivalent).")
         private final String registry;
 
-        @Schema(title = "Credential expiry timestamp", description = "As returned by SWR in the `X-Swr-Expireat` response header.")
-        private final String expiry;
+        @Schema(title = "Credential expiry timestamp", description = "When the credential expires, parsed from SWR's `X-Swr-Expireat` response header (ISO-8601 UTC). Null if SWR returns no expiry or an unparseable value.")
+        private final Instant expiry;
     }
 }
