@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.rfs
+name: "rfs"
+title: "Huawei RFS"
+description: "Tasks for Huawei Cloud RFS (Resource Formation Service): create, update, and delete Terraform/HCL-based resource stacks."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"

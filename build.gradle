@@ -126,6 +126,12 @@ dependencies {
         exclude group: "org.slf4j"
     }
 
+    // RFS (Resource Formation Service) SDK — internally named AOS; create/deploy/delete Terraform/HCL
+    // stacks via the RFS v1 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-aos") {
+        exclude group: "org.slf4j"
+    }
+
     // GeminiDB for NoSQL ships a DynamoDB-compatible data-plane API (no Huawei SDK covers item
     // operations), so the AWS SDK v2 is used as the wire-compatible transport, pointed at the
     // GeminiDB instance via endpointOverride. Versions are aligned by the io.kestra:platform BOM,
