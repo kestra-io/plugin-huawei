@@ -17,7 +17,7 @@ public interface SwrConnectionInterface extends AbstractConnectionInterface {
             Format: `https://swr.<region>.myhuaweicloud.com` (without trailing slash).
             """
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "connection")
     Property<String> getEndpointOverride();
 
     @Schema(
@@ -30,6 +30,6 @@ public interface SwrConnectionInterface extends AbstractConnectionInterface {
             Ignored when `endpointOverride` is set.
             """
     )
-    @PluginProperty(group = "advanced")
+    @PluginProperty(group = "connection")
     Property<String> getEndpointSuffix();
 }

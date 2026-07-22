@@ -23,7 +23,7 @@ public abstract class AbstractSwr extends AbstractConnection implements SwrConne
 
     protected Property<String> endpointSuffix;
 
-    // Unlike CES/SMN/EventGrid/DLI/MRS, SWR's createSecret API (`/v2/manage/utils/secret`) has no
+    // Unlike CES/SMN/EventGrid/DLI/DIS, SWR's createSecret API (`/v2/manage/utils/secret`) has no
     // `{project_id}` path segment, so a custom endpoint never bypasses project-id auto-discovery —
     // no projectId fail-fast guard here.
     protected SwrClient client(RunContext runContext) throws Exception {
