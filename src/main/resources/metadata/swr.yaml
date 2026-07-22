@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.swr
+name: "swr"
+title: "Huawei SWR"
+description: "Tasks for Huawei Cloud SWR: obtain short-lived Docker/OCI registry auth tokens."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
