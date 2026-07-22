@@ -251,13 +251,71 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
     @Override
     public Output run(RunContext runContext) throws Exception {
         var logger = runContext.logger();
+        var cfg = renderConfig(runContext);
 
+        var rNodeGroups = runContext.render(nodeGroups).asList(NodeGroupConfig.class);
+        if (rNodeGroups.isEmpty()) {
+            throw new IllegalArgumentException("nodeGroups is required and must not be empty");
+        }
+        var nodeGroupsV2 = new ArrayList<NodeGroupV2>(rNodeGroups.size());
+        for (var i = 0; i < rNodeGroups.size(); i++) {
+            nodeGroupsV2.add(toNodeGroupV2(runContext, rNodeGroups.get(i), i));
+        }
+
+        var rSteps = runContext.render(steps).asList(JobConfig.class);
+        var stepJobNames = new ArrayList<String>(rSteps.size());
+        var stepConfigs = new ArrayList<StepConfig>(rSteps.size());
+        for (var i = 0; i < rSteps.size(); i++) {
+            var jobExecution = MrsService.toJobExecution(runContext, rSteps.get(i), "steps[" + i + "]");
+            stepJobNames.add(jobExecution.getJobName());
+            stepConfigs.add(new StepConfig().withJobExecution(jobExecution));
+        }
+
+        var client = client(runContext);
+        var requestStart = System.currentTimeMillis();
+
+        // The V2 runJobFlow API requires a non-empty `steps` field, so a cluster-only creation (no
+        // steps) must go through the separate createCluster API instead, which has no `steps`/
+        // `deleteWhenNoSteps` field at all.
+        String clusterId;
+        try {
+            clusterId = stepConfigs.isEmpty()
+                ? client.createCluster(new CreateClusterRequest().withBody(buildClusterOnlyRequest(cfg, nodeGroupsV2))).getClusterId()
+                : client.runJobFlow(new RunJobFlowRequest().withBody(buildRunJobFlowRequest(cfg, nodeGroupsV2, stepConfigs))).getClusterId();
+        } catch (ServiceResponseException e) {
+            throw new IllegalStateException(
+                "Failed to create MRS cluster '" + cfg.clusterName() + "' (HTTP " + e.getHttpStatusCode() + "): " +
+                e.getErrorMsg() + " — verify the VPC/subnet/security group and node flavors are valid for region '" +
+                cfg.region() + "'.", e);
+        } catch (SdkException e) {
+            throw new IllegalStateException("Failed to create MRS cluster '" + cfg.clusterName() + "': " + e.getMessage(), e);
+        }
+
+        logger.info("Created MRS cluster '{}' (id={}), {} step(s) queued", cfg.clusterName(), clusterId, stepConfigs.size());
+
+        if (!cfg.waitForCluster()) {
+            return Output.builder().clusterId(clusterId).clusterState(null).jobIds(List.of()).build();
+        }
+
+        var cluster = MrsService.pollClusterUntilTerminal(clientV1(runContext), clusterId, cfg.interval(), cfg.maxDuration(), logger);
+        logger.info("MRS cluster '{}' reached state '{}'", clusterId, cluster.getClusterState());
+
+        var jobIds = stepJobNames.isEmpty()
+            ? List.<String>of()
+            : MrsService.resolveStepJobIds(
+                client, clusterId, stepJobNames, requestStart, cfg.interval(), MrsService.JOB_ID_RESOLUTION_TIMEOUT, logger);
+
+        return Output.builder().clusterId(clusterId).clusterState(cluster.getClusterState()).jobIds(jobIds).build();
+    }
+
+    private RenderedClusterConfig renderConfig(RunContext runContext) throws Exception {
         var rClusterName = runContext.render(clusterName).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException("clusterName is required"));
         var rClusterVersion = runContext.render(clusterVersion).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException("clusterVersion is required"));
         var rClusterType = runContext.render(clusterType).as(ClusterType.class)
             .orElseThrow(() -> new IllegalArgumentException("clusterType is required"));
+        var rRegion = runContext.render(region).as(String.class).orElse(null);
         var rComponents = runContext.render(components).asList(String.class);
         if (rComponents.isEmpty()) {
             throw new IllegalArgumentException("components is required and must not be empty");
@@ -292,142 +350,112 @@ public class CreateClusterAndSubmitJob extends AbstractMrs implements RunnableTa
         var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofMinutes(30));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(15));
 
-        var rNodeGroups = runContext.render(nodeGroups).asList(NodeGroupConfig.class);
-        if (rNodeGroups.isEmpty()) {
-            throw new IllegalArgumentException("nodeGroups is required and must not be empty");
-        }
-        var nodeGroupsV2 = new ArrayList<NodeGroupV2>(rNodeGroups.size());
-        for (var i = 0; i < rNodeGroups.size(); i++) {
-            nodeGroupsV2.add(toNodeGroupV2(runContext, rNodeGroups.get(i), i));
-        }
+        return new RenderedClusterConfig(
+            rClusterName, rClusterVersion, rClusterType, rRegion, rAvailabilityZone, rVpcName, rComponents,
+            rSubnetId, rSubnetName, rSecurityGroupsId, rSafeMode, rLoginMode, rManagerAdminPassword,
+            rNodeRootPassword, rNodeKeypairName, rDeleteWhenNoSteps, rEnterpriseProjectId, rLogUri,
+            rWait, rMaxDuration, rInterval);
+    }
 
-        var rSteps = runContext.render(steps).asList(JobConfig.class);
-        var stepJobNames = new ArrayList<String>(rSteps.size());
-        var stepConfigs = new ArrayList<StepConfig>(rSteps.size());
-        for (var i = 0; i < rSteps.size(); i++) {
-            var jobExecution = MrsService.toJobExecution(runContext, rSteps.get(i), "steps[" + i + "]");
-            stepJobNames.add(jobExecution.getJobName());
-            stepConfigs.add(new StepConfig().withJobExecution(jobExecution));
-        }
+    private static CreateClusterReqV2 buildClusterOnlyRequest(RenderedClusterConfig cfg, List<NodeGroupV2> nodeGroupsV2) {
+        var body = new CreateClusterReqV2()
+            .withClusterName(cfg.clusterName())
+            .withClusterVersion(cfg.clusterVersion())
+            .withClusterType(cfg.clusterType().name())
+            .withRegion(cfg.region())
+            .withAvailabilityZone(cfg.availabilityZone())
+            .withVpcName(cfg.vpcName())
+            .withComponents(String.join(",", cfg.components()))
+            .withNodeGroups(nodeGroupsV2)
+            .withSafeMode(cfg.safeMode().name())
+            .withLoginMode(cfg.loginMode().name())
+            .withManagerAdminPassword(cfg.managerAdminPassword())
+            // MRS clusters submitted through this task are always billed pay-per-use; prepaid
+            // billing is not exposed here since job-triggered clusters are, by nature, on-demand.
+            .withChargeInfo(new ChargeInfo().withChargeMode("postPaid"));
 
-        var rRegion = runContext.render(region).as(String.class).orElse(null);
-        var client = client(runContext);
-        var requestStart = System.currentTimeMillis();
+        applySharedOptionalFields(cfg, new ClusterFieldSetters(
+            body::withSubnetId, body::withSubnetName, body::withSecurityGroupsId,
+            body::withAutoCreateDefaultSecurityGroup, body::withNodeRootPassword,
+            body::withNodeKeypairName, body::withEnterpriseProjectId, body::withLogUri));
 
-        // The V2 runJobFlow API requires a non-empty `steps` field, so a cluster-only creation (no
-        // steps) must go through the separate createCluster API instead, which has no `steps`/
-        // `deleteWhenNoSteps` field at all.
-        String clusterId;
-        try {
-            if (stepConfigs.isEmpty()) {
-                var body = new CreateClusterReqV2()
-                    .withClusterName(rClusterName)
-                    .withClusterVersion(rClusterVersion)
-                    .withClusterType(rClusterType.name())
-                    .withRegion(rRegion)
-                    .withAvailabilityZone(rAvailabilityZone)
-                    .withVpcName(rVpcName)
-                    .withComponents(String.join(",", rComponents))
-                    .withNodeGroups(nodeGroupsV2)
-                    .withSafeMode(rSafeMode.name())
-                    .withLoginMode(rLoginMode.name())
-                    .withManagerAdminPassword(rManagerAdminPassword)
-                    // MRS clusters submitted through this task are always billed pay-per-use; prepaid
-                    // billing is not exposed here since job-triggered clusters are, by nature, on-demand.
-                    .withChargeInfo(new ChargeInfo().withChargeMode("postPaid"));
+        return body;
+    }
 
-                applySharedOptionalFields(rSubnetId, rSubnetName, rSecurityGroupsId, rLoginMode,
-                    rNodeRootPassword, rNodeKeypairName, rEnterpriseProjectId, rLogUri,
-                    body::withSubnetId, body::withSubnetName, body::withSecurityGroupsId,
-                    body::withAutoCreateDefaultSecurityGroup, body::withNodeRootPassword,
-                    body::withNodeKeypairName, body::withEnterpriseProjectId, body::withLogUri);
+    private static RunJobFlowCommand buildRunJobFlowRequest(
+        RenderedClusterConfig cfg, List<NodeGroupV2> nodeGroupsV2, List<StepConfig> stepConfigs
+    ) {
+        var body = new RunJobFlowCommand()
+            .withClusterName(cfg.clusterName())
+            .withClusterVersion(cfg.clusterVersion())
+            .withClusterType(cfg.clusterType().name())
+            .withRegion(cfg.region())
+            .withAvailabilityZone(cfg.availabilityZone())
+            .withVpcName(cfg.vpcName())
+            .withComponents(String.join(",", cfg.components()))
+            .withNodeGroups(nodeGroupsV2)
+            .withSafeMode(cfg.safeMode().name())
+            .withLoginMode(cfg.loginMode().name())
+            .withManagerAdminPassword(cfg.managerAdminPassword())
+            .withDeleteWhenNoSteps(cfg.deleteWhenNoSteps())
+            .withSteps(stepConfigs)
+            // MRS clusters submitted through this task are always billed pay-per-use; prepaid
+            // billing is not exposed here since job-triggered clusters are, by nature, on-demand.
+            .withChargeInfo(new ChargeInfo().withChargeMode("postPaid"));
 
-                clusterId = client.createCluster(new CreateClusterRequest().withBody(body)).getClusterId();
-            } else {
-                var body = new RunJobFlowCommand()
-                    .withClusterName(rClusterName)
-                    .withClusterVersion(rClusterVersion)
-                    .withClusterType(rClusterType.name())
-                    .withRegion(rRegion)
-                    .withAvailabilityZone(rAvailabilityZone)
-                    .withVpcName(rVpcName)
-                    .withComponents(String.join(",", rComponents))
-                    .withNodeGroups(nodeGroupsV2)
-                    .withSafeMode(rSafeMode.name())
-                    .withLoginMode(rLoginMode.name())
-                    .withManagerAdminPassword(rManagerAdminPassword)
-                    .withDeleteWhenNoSteps(rDeleteWhenNoSteps)
-                    .withSteps(stepConfigs)
-                    // MRS clusters submitted through this task are always billed pay-per-use; prepaid
-                    // billing is not exposed here since job-triggered clusters are, by nature, on-demand.
-                    .withChargeInfo(new ChargeInfo().withChargeMode("postPaid"));
+        applySharedOptionalFields(cfg, new ClusterFieldSetters(
+            body::withSubnetId, body::withSubnetName, body::withSecurityGroupsId,
+            body::withAutoCreateDefaultSecurityGroup, body::withNodeRootPassword,
+            body::withNodeKeypairName, body::withEnterpriseProjectId, body::withLogUri));
 
-                applySharedOptionalFields(rSubnetId, rSubnetName, rSecurityGroupsId, rLoginMode,
-                    rNodeRootPassword, rNodeKeypairName, rEnterpriseProjectId, rLogUri,
-                    body::withSubnetId, body::withSubnetName, body::withSecurityGroupsId,
-                    body::withAutoCreateDefaultSecurityGroup, body::withNodeRootPassword,
-                    body::withNodeKeypairName, body::withEnterpriseProjectId, body::withLogUri);
-
-                clusterId = client.runJobFlow(new RunJobFlowRequest().withBody(body)).getClusterId();
-            }
-        } catch (ServiceResponseException e) {
-            throw new IllegalStateException(
-                "Failed to create MRS cluster '" + rClusterName + "' (HTTP " + e.getHttpStatusCode() + "): " +
-                e.getErrorMsg() + " — verify the VPC/subnet/security group and node flavors are valid for region '" +
-                rRegion + "'.", e);
-        } catch (SdkException e) {
-            throw new IllegalStateException("Failed to create MRS cluster '" + rClusterName + "': " + e.getMessage(), e);
-        }
-
-        logger.info("Created MRS cluster '{}' (id={}), {} step(s) queued", rClusterName, clusterId, stepConfigs.size());
-
-        if (!rWait) {
-            return Output.builder().clusterId(clusterId).clusterState(null).jobIds(List.of()).build();
-        }
-
-        var cluster = MrsService.pollClusterUntilTerminal(clientV1(runContext), clusterId, rInterval, rMaxDuration, logger);
-        logger.info("MRS cluster '{}' reached state '{}'", clusterId, cluster.getClusterState());
-
-        var jobIds = stepJobNames.isEmpty()
-            ? List.<String>of()
-            : MrsService.resolveStepJobIds(
-                client, clusterId, stepJobNames, requestStart, rInterval, MrsService.JOB_ID_RESOLUTION_TIMEOUT, logger);
-
-        return Output.builder().clusterId(clusterId).clusterState(cluster.getClusterState()).jobIds(jobIds).build();
+        return body;
     }
 
     // `RunJobFlowCommand` and `CreateClusterReqV2` expose identical fluent setters for every field
     // below, but the SDK gives them no common supertype/interface — bridging via method references
     // keeps the conditional logic in one place instead of duplicating it per request body type.
-    private static void applySharedOptionalFields(
-        String rSubnetId, String rSubnetName, String rSecurityGroupsId, LoginMode rLoginMode,
-        String rNodeRootPassword, String rNodeKeypairName, String rEnterpriseProjectId, String rLogUri,
-        Consumer<String> subnetIdSetter, Consumer<String> subnetNameSetter, Consumer<String> securityGroupsIdSetter,
-        Consumer<Boolean> autoCreateDefaultSecurityGroupSetter, Consumer<String> nodeRootPasswordSetter,
-        Consumer<String> nodeKeypairNameSetter, Consumer<String> enterpriseProjectIdSetter, Consumer<String> logUriSetter
+    private static void applySharedOptionalFields(RenderedClusterConfig cfg, ClusterFieldSetters setters) {
+        if (cfg.subnetId() != null && !cfg.subnetId().isBlank()) {
+            setters.subnetId().accept(cfg.subnetId());
+        }
+        if (cfg.subnetName() != null && !cfg.subnetName().isBlank()) {
+            setters.subnetName().accept(cfg.subnetName());
+        }
+        if (cfg.securityGroupsId() != null && !cfg.securityGroupsId().isBlank()) {
+            setters.securityGroupsId().accept(cfg.securityGroupsId());
+        } else {
+            setters.autoCreateDefaultSecurityGroup().accept(true);
+        }
+        if (cfg.loginMode() == LoginMode.PASSWORD) {
+            setters.nodeRootPassword().accept(cfg.nodeRootPassword());
+        } else {
+            setters.nodeKeypairName().accept(cfg.nodeKeypairName());
+        }
+        if (cfg.enterpriseProjectId() != null && !cfg.enterpriseProjectId().isBlank()) {
+            setters.enterpriseProjectId().accept(cfg.enterpriseProjectId());
+        }
+        if (cfg.logUri() != null && !cfg.logUri().isBlank()) {
+            setters.logUri().accept(cfg.logUri());
+        }
+    }
+
+    private record RenderedClusterConfig(
+        String clusterName, String clusterVersion, ClusterType clusterType, String region,
+        String availabilityZone, String vpcName, List<String> components,
+        String subnetId, String subnetName, String securityGroupsId, SafeMode safeMode, LoginMode loginMode,
+        String managerAdminPassword, String nodeRootPassword, String nodeKeypairName, boolean deleteWhenNoSteps,
+        String enterpriseProjectId, String logUri, boolean waitForCluster, Duration maxDuration, Duration interval
     ) {
-        if (rSubnetId != null && !rSubnetId.isBlank()) {
-            subnetIdSetter.accept(rSubnetId);
-        }
-        if (rSubnetName != null && !rSubnetName.isBlank()) {
-            subnetNameSetter.accept(rSubnetName);
-        }
-        if (rSecurityGroupsId != null && !rSecurityGroupsId.isBlank()) {
-            securityGroupsIdSetter.accept(rSecurityGroupsId);
-        } else {
-            autoCreateDefaultSecurityGroupSetter.accept(true);
-        }
-        if (rLoginMode == LoginMode.PASSWORD) {
-            nodeRootPasswordSetter.accept(rNodeRootPassword);
-        } else {
-            nodeKeypairNameSetter.accept(rNodeKeypairName);
-        }
-        if (rEnterpriseProjectId != null && !rEnterpriseProjectId.isBlank()) {
-            enterpriseProjectIdSetter.accept(rEnterpriseProjectId);
-        }
-        if (rLogUri != null && !rLogUri.isBlank()) {
-            logUriSetter.accept(rLogUri);
-        }
+    }
+
+    // Field order mirrors CreateClusterReqV2/RunJobFlowCommand's own withX() declaration order;
+    // subnetId/subnetName, nodeRootPassword/nodeKeypairName, and enterpriseProjectId/logUri are each
+    // same-typed Consumer<String> neighbors kept in that same SDK setter order to avoid ambiguity.
+    private record ClusterFieldSetters(
+        Consumer<String> subnetId, Consumer<String> subnetName, Consumer<String> securityGroupsId,
+        Consumer<Boolean> autoCreateDefaultSecurityGroup, Consumer<String> nodeRootPassword,
+        Consumer<String> nodeKeypairName, Consumer<String> enterpriseProjectId, Consumer<String> logUri
+    ) {
     }
 
     // `nodeNum`/volume sizes/`dataVolumeCount` can't carry @Min/@Max directly on NodeGroupConfig:
