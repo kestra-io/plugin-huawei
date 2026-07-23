@@ -7,7 +7,7 @@ plugins {
     id "idea"
     id 'jacoco'
     id "com.adarshr.test-logger" version "4.0.0"
-    id "com.gradleup.shadow" version "9.5.1"
+    id "com.gradleup.shadow" version "9.6.0"
     id 'signing'
     id "com.github.ben-manes.versions" version "0.54.0"
     id 'net.researchgate.release' version '3.1.0'
@@ -85,7 +85,7 @@ dependencies {
 
     // Huawei Cloud Java SDK v3 — modular SDK for IAM and other Huawei Cloud services.
     // Version 3.1.152 is the earliest release that publishes a BOM artifact to Maven Central.
-    implementation enforcedPlatform("com.huaweicloud.sdk:huaweicloud-sdk-bom:3.1.206")
+    implementation enforcedPlatform("com.huaweicloud.sdk:huaweicloud-sdk-bom:3.1.207")
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-iam") {
         exclude group: "org.slf4j"
     }
@@ -128,6 +128,12 @@ dependencies {
 
     // MRS (MapReduce Service) SDK — create clusters, submit jobs, and delete clusters via the MRS v2 API.
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-mrs") {
+        exclude group: "org.slf4j"
+    }
+
+    // SWR (Software Repository for Container) SDK — issues short-lived registry auth tokens via
+    // the SWR V2 API (createSecret), the Huawei Cloud equivalent of ECR's GetAuthorizationToken.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-swr") {
         exclude group: "org.slf4j"
     }
 

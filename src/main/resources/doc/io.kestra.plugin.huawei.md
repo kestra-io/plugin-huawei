@@ -17,6 +17,7 @@ Tasks and triggers for Huawei Cloud services, spanning object storage, identity 
 - **DIS** (`io.kestra.plugin.huawei.dis`): write and consume records on a data stream, and trigger flows on new records, the Huawei equivalent of AWS Kinesis Data Streams.
 - **MRS** (`io.kestra.plugin.huawei.mrs`): create clusters, submit Hadoop/Spark/Hive/Flink job steps, and delete clusters, the Huawei equivalent of AWS EMR.
 - **GeminiDB for NoSQL** (`io.kestra.plugin.huawei.geminidb`): put, get, delete, query, and scan items against a GeminiDB instance's DynamoDB-Compatible data-plane API.
+- **SWR** (`io.kestra.plugin.huawei.swr`): fetch a short-lived Docker/OCI registry auth token, the Huawei equivalent of AWS ECR's `GetAuthToken`.
 
 ## Authentication
 
