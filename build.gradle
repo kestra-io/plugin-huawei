@@ -126,6 +126,11 @@ dependencies {
         exclude group: "org.slf4j"
     }
 
+    // MRS (MapReduce Service) SDK — create clusters, submit jobs, and delete clusters via the MRS v2 API.
+    implementation("com.huaweicloud.sdk:huaweicloud-sdk-mrs") {
+        exclude group: "org.slf4j"
+    }
+
     // SWR (Software Repository for Container) SDK — issues short-lived registry auth tokens via
     // the SWR V2 API (createSecret), the Huawei Cloud equivalent of ECR's GetAuthorizationToken.
     implementation("com.huaweicloud.sdk:huaweicloud-sdk-swr") {
