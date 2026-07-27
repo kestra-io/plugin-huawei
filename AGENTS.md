@@ -36,6 +36,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 - `io.kestra.plugin.huawei.mrs.models` — MRS input models (`JobConfig`, `NodeGroupConfig`)
 - `io.kestra.plugin.huawei.geminidb` — GeminiDB for NoSQL (DynamoDB-Compatible API) tasks (`AbstractGeminiDb`, `PutItem`, `GetItem`, `DeleteItem`, `Query`, `Scan`)
 - `io.kestra.plugin.huawei.swr` — SWR (Software Repository for Container) task (`AbstractSwr`, `SwrConnectionInterface`, `SwrUtils`, `GetAuthToken`)
+- `io.kestra.plugin.huawei.rfs` — RFS (Resource Formation Service) tasks (`AbstractRfs`, `RfsConnectionInterface`, `RfsUtils`, `RfsService`, `Create`, `Delete`)
 
 Infrastructure dependencies (Docker Compose services):
 
@@ -167,6 +168,15 @@ Infrastructure dependencies (Docker Compose services):
 - `io.kestra.plugin.huawei.swr.GetAuthToken` — Huawei Cloud equivalent of `io.kestra.plugin.aws.ecr.GetAuthToken`; fetches a short-lived Docker/OCI registry credential via `createSecret`; prefers decoding `auths.<registry-host>.auth` (base64 `username:password`) over parsing the human-readable `X-Swr-Dockerlogin` header, falling back to the header only when `auths` is empty; returns `Output(username, password [EncryptedString], registry, expiry)`. Optional `projectName` (SWR `projectname` query param) defaults to `region`
 - `io.kestra.plugin.huawei.swr.AbstractSwr` — Base class extending `AbstractConnection`; builds `SwrClient` using the CES-style suffix-first endpoint ordering: `endpointOverride` → explicit `endpointSuffix` (forces suffix-derived resolution even for regions in the SDK enum) → `SwrRegion.valueOf(region)` → region-derived fallback; fails fast requiring AK/SK completeness — **no** `projectId` fail-fast on a custom endpoint (see Local rules)
 - `io.kestra.plugin.huawei.swr.SwrUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws); no `requireProjectIdForCustomEndpoint` (createSecret's path has no `{project_id}` segment)
+
+**RFS (Resource Formation Service)**
+
+- `io.kestra.plugin.huawei.rfs.Create` — Creates an RFS stack if it doesn't exist, otherwise deploys an update; the Huawei Cloud equivalent of `io.kestra.plugin.aws.cloudformation.Create`, adapted to RFS's Terraform/HCL model. Requires exactly one template source (`templateBody` inline / `templateUri` on OBS) and allows at most one variables source (`vars` map / `varsBody` inline tfvars / `varsUri` on OBS); probes existence via `getStackMetadata` (404 ⇒ absent), then calls `createStack` (first deploy) or `deployStack` (update, requiring a `Client-Request-Id` UUID header) — both are asynchronous and return a `deploymentId`. When `wait` is `true` (default), polls `getStackMetadata` until terminal; only `DEPLOYMENT_COMPLETE` counts as success — `CREATION_COMPLETE` (shell created but never deployed), `ROLLBACK_COMPLETE`, `DEPLOYMENT_FAILED`, and `ROLLBACK_FAILED` all throw. On success, fetches `listStackOutputs` (paginated) and returns them as a `Map<String, String>`; RFS returns sensitive outputs as the literal string `<sensitive>`
+- `io.kestra.plugin.huawei.rfs.Delete` — Deletes an RFS stack; idempotent by default (`errorOnMissing=false`) if the stack is already absent (HTTP 404 on probe). When `wait` is `true` (default), polls `getStackMetadata` until the stack disappears (RFS has no `DELETION_COMPLETE` status — a deleted stack simply 404s) or reaches `DELETION_FAILED`, which throws
+- `io.kestra.plugin.huawei.rfs.AbstractRfs` — Base class extending `AbstractConnection`; builds an `AosClient` using the CES-style suffix-first endpoint ordering (`endpointOverride` → explicit `endpointSuffix` → `AosRegion.valueOf(region)` → region-derived fallback); fails fast requiring `projectId` whenever a custom endpoint is used (RFS v1 APIs embed `{project_id}` in the request path); holds the shared `stackName`/`wait`/`maxDuration`/`interval` properties used by both `Create` and `Delete`
+- `io.kestra.plugin.huawei.rfs.RfsConnectionInterface` — Mirrors `DliConnectionInterface`: `endpointOverride`/`endpointSuffix` connection properties
+- `io.kestra.plugin.huawei.rfs.RfsUtils` — Static endpoint resolution (`endpointOverride` → region+suffix-derived → throws) plus `requireProjectIdForCustomEndpoint` validation
+- `io.kestra.plugin.huawei.rfs.RfsService` — Package-private static helpers: `probe`/`create`/`deploy`/`delete`/`listOutputs`, and the two terminal-state poll loops (`pollUntilDeployTerminal`, `pollUntilDeleted`) shared by `Create` and `Delete`
 
 ### Inline Temporary Credentials via `pluginDefaults`
 
@@ -405,6 +415,14 @@ plugin-huawei/
 │   │   └── models/
 │   │       ├── JobConfig.java
 │   │       └── NodeGroupConfig.java
+│   ├── rfs/
+│   │   ├── AbstractRfs.java
+│   │   ├── RfsConnectionInterface.java
+│   │   ├── RfsUtils.java
+│   │   ├── RfsService.java
+│   │   ├── Create.java
+│   │   ├── Delete.java
+│   │   └── package-info.java
 │   └── obs/
 │       ├── AbstractObs.java
 │       ├── AbstractObsInterface.java
@@ -484,6 +502,10 @@ plugin-huawei/
 │   │   ├── CreateClusterAndSubmitJobTest.java
 │   │   ├── SubmitJobTest.java
 │   │   └── DeleteClusterTest.java
+│   ├── rfs/
+│   │   ├── RfsUtilsTest.java
+│   │   ├── CreateTest.java
+│   │   └── DeleteTest.java
 │   └── obs/
 │       ├── AbstractObsTest.java
 │       ├── CopyTest.java
@@ -566,6 +588,15 @@ plugin-huawei/
 - **No `projectId` fail-fast on a custom endpoint** — unlike CES/SMN/DLI/EventGrid/DIS, SWR's `createSecret` path (`/v2/manage/utils/secret`) has no `{project_id}` segment (confirmed via the SDK's embedded `HttpRequestDef` metadata), so `AbstractSwr.client()` deliberately omits the `requireProjectIdForCustomEndpoint` guard those other services carry. Do not copy that guard into `AbstractSwr`/`SwrUtils`
 - `GetAuthToken` decodes `auths.<registry-host>.auth` (base64 `username:password`, per-registry map keyed by host) in preference to parsing the human-readable `X-Swr-Dockerlogin` response header — the map is structured data and only falls back to header-parsing when `auths` comes back empty. `password` is wrapped in `EncryptedString`, mirroring how AWS ECR's `GetAuthToken` encrypts its token
 - SWR unit tests are WireMock-based and run unconditionally; no live-cloud integration test gate exists yet for SWR
+- RFS SDK: `com.huaweicloud.sdk:huaweicloud-sdk-aos` (version managed by `huaweicloud-sdk-bom`; RFS's SDK artifact uses the internal service name AOS); the stack API lives in `com.huaweicloud.sdk.aos.v1` (`AosClient`). The real API host is `rfs.<region>.<suffix>` for **every** region (`aos` is only the SDK artifact name); `RfsUtils.rfsEndpoint` derives with the `rfs.` prefix accordingly. `AbstractRfs.client()` uses `AosRegion.valueOf(region)` for standard regions (enables project-id auto-discovery), but **bypasses the SDK enum for sovereign regions** and derives the endpoint itself — because the AOS SDK hard-codes `EU_WEST_101` to `https://aos.myhuaweicloud.eu`, which lacks the region segment and does not resolve (DNS failure). `RfsUtils.SOVEREIGN_SUFFIXES` maps `eu-west-101` → `myhuaweicloud.eu`, so it derives the working `rfs.eu-west-101.myhuaweicloud.eu` with zero config; an explicit `endpointSuffix` still forces suffix-derived resolution for any region. Deriving bypasses the SDK's project auto-discovery, so `projectId` is required for sovereign regions (and any custom endpoint)
+- RFS v1 APIs embed the project ID in the request path (`/v1/{project_id}/stacks/...`), same failure mode as CES/SMN/DLI/EventGrid/DIS: a custom endpoint (`endpointOverride`/`endpointSuffix`) bypasses the SDK's automatic project discovery, so `AbstractRfs.client()` fails fast requiring `projectId` whenever a custom endpoint is set
+- RFS models Terraform/HCL templates and variables as separate inputs from CloudFormation-style JSON/YAML: `Create` requires exactly one of `templateBody`/`templateUri` and allows at most one of `vars`/`varsBody`/`varsUri`. There is no `templateId`/`templateVersion` (private template) field on `CreateStackRequestBody`/`DeployStackRequestBody` despite that being considered during design — the RFS v1 SDK only supports inline or OBS-hosted templates on these two endpoints, so private-template references are out of scope
+- `createStack` (HTTP 201) and `deployStack` (HTTP 202) are both asynchronous and require a `Client-Request-Id` header (`java.util.UUID.randomUUID()`); there is no SDK waiter, so `Create`/`Delete` poll `getStackMetadata` directly. Non-terminal statuses are `DEPLOYMENT_IN_PROGRESS`/`ROLLBACK_IN_PROGRESS`/`DELETION_IN_PROGRESS`; terminal statuses are the `*_COMPLETE`/`*_FAILED` values. Only `DEPLOYMENT_COMPLETE` counts as a successful deploy — `CREATION_COMPLETE` means the stack shell was created but never deployed (an anomaly, since `Create` always supplies a template) and `ROLLBACK_COMPLETE` means the deploy failed and was rolled back, so both are treated as failures alongside `DEPLOYMENT_FAILED`/`ROLLBACK_FAILED`
+- When `Create` finds an existing stack whose status `RfsService.isInProgress(...)` (another `Create`/`Delete` still running, or a prior `wait=false` deploy), it fails fast with an actionable `IllegalStateException` rather than firing `deployStack` onto a non-terminal stack (behavior against a mid-deletion stack is unverified). The first poll after a create/deploy submission tolerates a propagation 404 with bounded retries (`RfsService.POST_CREATE_PROPAGATION_RETRIES`, at `interval`) before failing; subsequent polls treat a 404 as the stack vanishing (genuinely exceptional). `RfsService.sleepOrThrow(...)` is the shared interruptible-sleep helper used by both poll loops
+- Long `wait=true` polls reuse the one client/credentials built at the start of `run()`, so `temporaryCredentials` whose `durationSeconds` is shorter than the deployment expire mid-poll (same limitation documented for OBS/DMS long-running tasks) — use long-lived AK/SK or a generous `durationSeconds` for long-running stacks; documented in the RFS doc's Gotchas. Neither `Create` nor `Delete` overrides `kill()` (a stack is long-lived infra; `Delete` is the explicit teardown, mirroring MRS `CreateClusterAndSubmitJob`) — documented in each task's class-level `@Schema`
+- RFS has no `DELETION_COMPLETE` status: a stack that finished deleting simply stops existing, surfaced as an HTTP 404 on the next `getStackMetadata` call. `Delete` polls until 404 (success) or `DELETION_FAILED` (throws)
+- On a failed deploy/delete, `RfsService.describeFailure(...)` best-effort calls `listStackEvents` (scoped to `deploymentId` for `Create`) and appends the real cause to the thrown message. RFS reports the underlying Terraform error (e.g. `init`/provider-resolution failures) as a **`LOG`-type** `StackEvent`, not `ERROR`, so `isRelevantFailureEvent` matches ERROR/`*_FAILED` types **plus** any LOG event whose message contains a failure keyword (`FAILURE_KEYWORDS`). It never throws — a missing `listStackEvents` permission just falls back to the "check the RFS console" hint. Bounded by `FAILURE_EVENTS_LIMIT`/`MAX_REPORTED_EVENTS`/`MAX_EVENT_MESSAGE_CHARS`
+- RFS integration test gate: none defined yet — all RFS tests (`RfsUtilsTest`, `CreateTest`, `DeleteTest`) are WireMock-based and run unconditionally; no live-cloud-only test exists for this service yet
 
 ## References
 
