@@ -1,0 +1,8 @@
+group: io.kestra.plugin.huawei.mrs
+name: "mrs"
+title: "Huawei MRS"
+description: "Tasks for Huawei Cloud MRS (MapReduce Service): create clusters, submit job steps, and delete clusters."
+body: ""
+videos: []
+createdBy: "Kestra Core Team"
+managedBy: "Kestra Core Team"
