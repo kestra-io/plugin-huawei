@@ -35,7 +35,7 @@ public abstract class AbstractMrs extends AbstractConnection implements MrsConne
     /**
      * V1 client — MRS v2 has no cluster-detail or delete-cluster endpoint, so cluster status polling
      * and deletion go through the v1 API instead. Both API versions resolve to the same host
-     * (`mrs.<region>.myhuaweicloud.com`), so endpoint resolution is identical; only the region-enum
+     * ({@code mrs.<region>.myhuaweicloud.com}), so endpoint resolution is identical; only the region-enum
      * class differs.
      */
     protected com.huaweicloud.sdk.mrs.v1.MrsClient clientV1(RunContext runContext) throws Exception {
