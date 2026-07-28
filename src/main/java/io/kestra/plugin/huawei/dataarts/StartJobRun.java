@@ -18,6 +18,7 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -517,14 +518,14 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         @Schema(title = "Jobs covered by the run")
         private final List<String> jobList;
 
-        @Schema(title = "Start of the covered business-date range (epoch milliseconds)")
-        private final Long startDate;
+        @Schema(title = "Start of the covered business-date range")
+        private final Instant startDate;
 
-        @Schema(title = "End of the covered business-date range (epoch milliseconds)")
-        private final Long endDate;
+        @Schema(title = "End of the covered business-date range")
+        private final Instant endDate;
 
-        @Schema(title = "Time the run was submitted (epoch milliseconds)")
-        private final Long submittedDate;
+        @Schema(title = "Time the run was submitted")
+        private final Instant submittedDate;
 
         @Schema(title = "Number of instances executed in parallel")
         private final Integer parallel;

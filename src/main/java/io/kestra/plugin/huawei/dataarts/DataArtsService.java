@@ -20,6 +20,7 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -383,12 +384,19 @@ public final class DataArtsService {
 
         // Sort newest first across all pages: the API does not guarantee stable ordering when
         // results span multiple pages, so a client-side sort is required for correctness.
-        result.sort((a, b) -> {
-            var ta = a.getPlanTime() != null ? a.getPlanTime() : (a.getStartTime() != null ? a.getStartTime() : 0L);
-            var tb = b.getPlanTime() != null ? b.getPlanTime() : (b.getStartTime() != null ? b.getStartTime() : 0L);
-            return Long.compare(tb, ta);
-        });
+        result.sort((a, b) -> orderingTime(b).compareTo(orderingTime(a)));
         return result;
+    }
+
+    /**
+     * Sort key for "newest instance first": plan time, falling back to actual start time, then to the
+     * epoch so an instance with neither sorts last rather than throwing.
+     */
+    private static Instant orderingTime(JobRun run) {
+        if (run.getPlanTime() != null) {
+            return run.getPlanTime();
+        }
+        return run.getStartTime() != null ? run.getStartTime() : Instant.EPOCH;
     }
 
     private static List<JobRun> fetchInstancePage(
@@ -475,9 +483,9 @@ public final class DataArtsService {
             .name(textOrNull(node, "name"))
             .jobList(jobList)
             .status(textOrNull(node, "status"))
-            .startDate(longOrNull(node, "start_date", "startDate"))
-            .endDate(longOrNull(node, "end_date", "endDate"))
-            .submittedDate(longOrNull(node, "submitted_date", "submittedDate"))
+            .startDate(instantOrNull(node, "start_date", "startDate"))
+            .endDate(instantOrNull(node, "end_date", "endDate"))
+            .submittedDate(instantOrNull(node, "submitted_date", "submittedDate"))
             .parallel(intOrNull(node, "parallel"))
             .type(intOrNull(node, "type"))
             .userName(textOrNull(node, "user_name", "userName"))
@@ -629,11 +637,11 @@ public final class DataArtsService {
             .instanceId(longOrNull(node, "instance_id", "instanceId"))
             .jobInstanceName(textOrNull(node, "job_instance_name", "jobInstanceName"))
             .status(textOrNull(node, "status"))
-            .planTime(longOrNull(node, "plan_time", "planTime"))
-            .startTime(longOrNull(node, "start_time", "startTime"))
-            .endTime(longOrNull(node, "end_time", "endTime"))
-            .executeTime(longOrNull(node, "execute_time", "executeTime"))
-            .submitTime(longOrNull(node, "submit_time", "submitTime"))
+            .planTime(instantOrNull(node, "plan_time", "planTime"))
+            .startTime(instantOrNull(node, "start_time", "startTime"))
+            .endTime(instantOrNull(node, "end_time", "endTime"))
+            .executeTime(durationOrNull(node, "execute_time", "executeTime"))
+            .submitTime(instantOrNull(node, "submit_time", "submitTime"))
             .jobId(longOrNull(node, "job_id", "jobId"))
             .build();
     }
@@ -652,6 +660,31 @@ public final class DataArtsService {
     private static Long longOrNull(JsonNode node, String... fields) {
         var n = firstPresent(node, fields);
         return n == null ? null : n.asLong();
+    }
+
+    /**
+     * Returns the first of {@code fields} that is present and non-null as an {@link Instant}, reading
+     * it as epoch milliseconds; null if none match.
+     *
+     * <p>DataArts reports every timestamp as a 13-digit epoch millisecond number. Exposing those raw
+     * made outputs unreadable ({@code endTime: 1785227336000}), so they are converted at the boundary
+     * and surface as ISO-8601 — matching how other Kestra plugins type timestamp outputs.
+     */
+    private static Instant instantOrNull(JsonNode node, String... fields) {
+        var millis = longOrNull(node, fields);
+        return millis == null ? null : Instant.ofEpochMilli(millis);
+    }
+
+    /**
+     * Reads a millisecond count as a {@link Duration}; null if absent.
+     *
+     * <p>Used for {@code execute_time}, which despite its name is an elapsed duration rather than a
+     * timestamp: a live instance reported {@code execute_time: 4000} alongside
+     * {@code end_time - start_time == 4000}, i.e. 4 seconds.
+     */
+    private static Duration durationOrNull(JsonNode node, String... fields) {
+        var millis = longOrNull(node, fields);
+        return millis == null ? null : Duration.ofMillis(millis);
     }
 
     /**

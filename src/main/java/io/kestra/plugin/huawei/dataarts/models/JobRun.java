@@ -5,6 +5,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Getter;
 
+import java.time.Duration;
+import java.time.Instant;
+
 @Builder
 @Getter
 @JsonIgnoreProperties(ignoreUnknown = true)
@@ -44,20 +47,26 @@ public class JobRun {
     )
     private final String status;
 
-    @Schema(title = "Scheduled plan time (epoch milliseconds)")
-    private final Long planTime;
+    @Schema(title = "Scheduled plan time")
+    private final Instant planTime;
 
-    @Schema(title = "Actual start time (epoch milliseconds)")
-    private final Long startTime;
+    @Schema(title = "Actual start time")
+    private final Instant startTime;
 
-    @Schema(title = "End time (epoch milliseconds); null if still running")
-    private final Long endTime;
+    @Schema(title = "End time; null if still running")
+    private final Instant endTime;
 
-    @Schema(title = "Execution time (epoch milliseconds)")
-    private final Long executeTime;
+    @Schema(
+        title = "How long the instance took to execute",
+        description = """
+            Elapsed run time, not a timestamp, despite the API naming the field `execute_time`:
+            a live instance reported `4000` alongside an `end_time` exactly 4000 ms after its
+            `start_time`."""
+    )
+    private final Duration executeTime;
 
-    @Schema(title = "Submission time (epoch milliseconds)")
-    private final Long submitTime;
+    @Schema(title = "Submission time")
+    private final Instant submitTime;
 
     @Schema(title = "ID of the job this instance belongs to")
     private final Long jobId;

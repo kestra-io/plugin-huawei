@@ -83,6 +83,7 @@ When you do want a real backfill, size `maxDuration` for the *total*: roughly `n
 When `wait: true`, the task polls until the run reaches a terminal state and fails the Kestra task unless the status is `success`.
 
 Outputs: `jobName`, `runName`, `status`, `jobList`, `startDate`, `endDate`, `submittedDate`, `parallel`, `userName`.
+The three date outputs are ISO-8601 instants (e.g. `2026-07-28T00:00:00Z`), converted from the epoch milliseconds DataArts returns.
 
 **Date format.** DataArts only parses one form, shown in its own API reference as `2023-08-21T00:00:00 +08`: an ISO date-time with a `T` separator, then a space, then a UTC offset. The task converts your value for you, accepting `yyyy-MM-dd`, `yyyy-MM-dd HH:mm:ss` and ISO date-times, and treating a time without an offset as UTC. A value that already ends in a UTC offset is sent through verbatim, so you can reach a form the task doesn't generate.
 
@@ -104,6 +105,8 @@ Optional: `instanceId` — when omitted, the most recently started instance for 
 
 Outputs: `jobName`, `instanceId`, `jobInstanceName`, `status`, `planTime`, `startTime`, `endTime`, `executeTime`, `submitTime`, `jobId`.
 
+`planTime`, `startTime`, `endTime` and `submitTime` are ISO-8601 instants, converted from the epoch milliseconds DataArts returns. `executeTime` is a **duration** (`PT4S`), not a timestamp, despite the API naming the field `execute_time` alongside the others — it reports how long the instance took, so `{{ outputs.get_run.executeTime }}` renders as e.g. `PT4S`.
+
 ### StopJobRun
 
 Cancels a running supplement-data run — one created by `StartJobRun` — via `POST /v2/{project_id}/factory/supplement-data/{instance_name}/stop`.
@@ -114,7 +117,7 @@ Required: `runName` (the `runName` output of `StartJobRun`), `projectId`.
 
 Optional: `wait` (default `true`), `maxDuration` (default 10 minutes), `interval` (default 3 s).
 
-Outputs: `runName`, `status`, `jobList`, `startDate`, `endDate`, `submittedDate`, `parallel`, `userName`.
+Outputs: `runName`, `status`, `jobList`, `startDate`, `endDate`, `submittedDate`, `parallel`, `userName` — dates as ISO-8601 instants.
 
 ## Supplement-data run statuses
 

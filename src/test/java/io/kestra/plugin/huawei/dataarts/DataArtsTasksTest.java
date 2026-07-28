@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.Collections;
@@ -176,7 +177,7 @@ class DataArtsTasksTest {
                   "plan_time": 1700000000000,
                   "start_time": 1700000001000,
                   "end_time": 1700000060000,
-                  "execute_time": 1700000059000,
+                  "execute_time": 59000,
                   "submit_time": 1700000000500,
                   "job_id": 366647
                 }
@@ -194,7 +195,7 @@ class DataArtsTasksTest {
               "plan_time": 1700000000000,
               "start_time": 1700000001000,
               "end_time": 1700000060000,
-              "execute_time": 1700000059000,
+              "execute_time": 59000,
               "submit_time": 1700000000500,
               "job_id": 366647
             }
@@ -230,9 +231,9 @@ class DataArtsTasksTest {
         // Explicitly cover every snake_case-mapped field: reading these as camelCase silently
         // produced nulls against the real API while the old camelCase fixtures stayed green.
         assertThat(output.getJobList(), contains(JOB_NAME));
-        assertThat(output.getStartDate(), equalTo(1700000000000L));
-        assertThat(output.getEndDate(), equalTo(1700086400000L));
-        assertThat(output.getSubmittedDate(), equalTo(1700000000500L));
+        assertThat(output.getStartDate(), equalTo(Instant.ofEpochMilli(1700000000000L)));
+        assertThat(output.getEndDate(), equalTo(Instant.ofEpochMilli(1700086400000L)));
+        assertThat(output.getSubmittedDate(), equalTo(Instant.ofEpochMilli(1700000000500L)));
         assertThat(output.getParallel(), equalTo(1));
         assertThat(output.getUserName(), equalTo("tester"));
 
@@ -718,11 +719,13 @@ class DataArtsTasksTest {
         assertThat(output.getJobName(), equalTo(JOB_NAME));
         assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
         assertThat(output.getStatus(), equalTo("success"));
-        assertThat(output.getPlanTime(), is(1700000000000L));
+        assertThat(output.getPlanTime(), is(Instant.ofEpochMilli(1700000000000L)));
         // Fields that silently mapped to null while the mapper read camelCase keys.
         assertThat(output.getJobInstanceName(), equalTo("job_instance_" + INSTANCE_ID));
-        assertThat(output.getExecuteTime(), equalTo(1700000059000L));
-        assertThat(output.getSubmitTime(), equalTo(1700000000500L));
+        // execute_time is an elapsed duration, not an epoch timestamp — 59 s here, matching
+        // end_time - start_time in the fixture.
+        assertThat(output.getExecuteTime(), equalTo(Duration.ofSeconds(59)));
+        assertThat(output.getSubmitTime(), equalTo(Instant.ofEpochMilli(1700000000500L)));
         assertThat(output.getJobId(), equalTo(366647L));
     }
 
