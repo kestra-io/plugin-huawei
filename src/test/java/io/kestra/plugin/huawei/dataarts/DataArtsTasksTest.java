@@ -362,8 +362,28 @@ class DataArtsTasksTest {
         assertThat(ex.getMessage(), containsString("Epoch milliseconds are not accepted"));
     }
 
+    /**
+     * An offset-bearing {@code startDate} is passed through verbatim, so it can clear the format
+     * check and still not begin with the {@code yyyy-MM-dd} the default {@code endDate} is derived
+     * from — the one case where the range end genuinely cannot be inferred.
+     */
     @Test
-    void startJobRun_unparseableStartDateWithoutEndDate_throwsActionableError() {
+    void startJobRun_offsetStartDateWithoutLeadingDateAndNoEndDate_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask()
+            .startDate(Property.ofValue("01/07/2026 00:00:00 +00"))
+            .wait(Property.ofValue(false))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("endDate is required"));
+        assertThat(ex.getMessage(), containsString("01/07/2026"));
+    }
+
+    /** A startDate in no recognised form fails on the format check, before endDate is derived. */
+    @Test
+    void startJobRun_unparseableStartDate_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = startTask()
@@ -372,8 +392,8 @@ class DataArtsTasksTest {
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
-        assertThat(ex.getMessage(), containsString("endDate is required"));
-        assertThat(ex.getMessage(), containsString("01/07/2026"));
+        assertThat(ex.getMessage(), containsString("startDate ('01/07/2026')"));
+        assertThat(ex.getMessage(), containsString("is not a date or date-time"));
     }
 
     /** A date-only {@code endDate} means through the end of that day, not midnight at its start. */
@@ -594,8 +614,10 @@ class DataArtsTasksTest {
             () -> startTask().wait(Property.ofValue(false)).build().run(runContext));
 
         assertThat(ex.getMessage(), containsString("DLF.3051"));
-        // The hint must point at the undocumented date format, the actual likely cause.
-        assertThat(ex.getMessage(), containsString("start_date"));
+        // The hint must point at the undocumented date format, the actual likely cause, and name
+        // the properties a flow author can act on rather than the snake_case wire keys.
+        assertThat(ex.getMessage(), containsString("startDate/endDate"));
+        assertThat(ex.getMessage(), containsString("yyyy-MM-ddTHH:mm:ss +00"));
     }
 
     @Test
