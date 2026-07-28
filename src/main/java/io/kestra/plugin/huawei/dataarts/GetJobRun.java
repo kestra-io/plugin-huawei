@@ -125,12 +125,14 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         return Output.builder()
             .jobName(run.getJobName())
             .instanceId(run.getInstanceId())
+            .jobInstanceName(run.getJobInstanceName())
             .status(run.getStatus())
             .planTime(run.getPlanTime())
             .startTime(run.getStartTime())
             .endTime(run.getEndTime())
-            .lastUpdateTime(run.getLastUpdateTime())
-            .errorMessage(run.getErrorMessage())
+            .executeTime(run.getExecuteTime())
+            .submitTime(run.getSubmitTime())
+            .jobId(run.getJobId())
             .build();
     }
 
@@ -144,6 +146,9 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         @Schema(title = "Job run instance ID")
         private final Long instanceId;
 
+        @Schema(title = "Job run instance name, as shown in the console's job monitoring list")
+        private final String jobInstanceName;
+
         @Schema(title = "Current status of the job run")
         private final String status;
 
@@ -156,10 +161,13 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         @Schema(title = "End time (epoch milliseconds); null if still running")
         private final Long endTime;
 
-        @Schema(title = "Last update time (epoch milliseconds)")
-        private final Long lastUpdateTime;
+        @Schema(title = "Execution time (epoch milliseconds)")
+        private final Long executeTime;
 
-        @Schema(title = "Error message when the job run failed; null otherwise")
-        private final String errorMessage;
+        @Schema(title = "Submission time (epoch milliseconds)")
+        private final Long submitTime;
+
+        @Schema(title = "ID of the job this instance belongs to")
+        private final Long jobId;
     }
 }

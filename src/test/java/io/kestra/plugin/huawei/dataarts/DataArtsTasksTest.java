@@ -15,8 +15,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Collections;
-import java.util.Map;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
@@ -26,6 +27,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -37,8 +39,8 @@ class DataArtsTasksTest {
 
     private static final String PROJECT_ID = "test-project-123";
     private static final String JOB_NAME = "my_etl_job";
-    private static final long OLD_INSTANCE_ID = 111111111L;
     private static final long INSTANCE_ID = 987654321L;
+    private static final String RUN_NAME = "kestra_test_run_0001";
     private static final String FAKE_AK = "FAKEACCESSKEY0001";
     private static final String FAKE_SK = "fakeSecretKey0001fakeSecretKey001";
     private static final String WORKSPACE_ID = "ws-abc-001";
@@ -77,12 +79,16 @@ class DataArtsTasksTest {
     // silently drifting from DataArtsService. These MUST mirror the real published
     // routes (/v2/{project_id}/factory/...) — a stub that mirrors whatever the code
     // happens to send validates nothing, which is how the dead /v1/ paths stayed
-    // green while every live call 404'd with APIGW.0101.
+    // green while every live call 404'd with APIGW.0101. Every route below is
+    // declared in the SDK's DataArtsStudioMeta HttpRequestDef metadata.
 
-    private static String startPath(String jobName) {
-        // StartJobRun triggers an on-demand run via "Executing a Job Immediately" (run-immediate),
-        // NOT "Starting a Job" (/start, which toggles a schedule and returns DLF.3051 on run-once jobs).
-        return "/v2/" + PROJECT_ID + "/factory/jobs/" + jobName + "/run-immediate";
+    /** Create (POST) and list/status (GET) share this path; the method disambiguates. */
+    private static String supplementDataPath() {
+        return "/v2/" + PROJECT_ID + "/factory/supplement-data";
+    }
+
+    private static String supplementStopPath(String runName) {
+        return "/v2/" + PROJECT_ID + "/factory/supplement-data/" + runName + "/stop";
     }
 
     private static String instancesDetailPath(String jobName) {
@@ -94,88 +100,116 @@ class DataArtsTasksTest {
     }
 
     /**
-     * Stop is still on the unpublished /v1/ route — see the {@code stopInstance} javadoc in
-     * {@link DataArtsService}. This helper mirrors that so StopJobRun tests keep passing, but it
-     * asserts nothing about the real API: no working stop route has been found yet.
-     */
-    private static String stopPath(String jobName, long instanceId) {
-        return "/v1/" + PROJECT_ID + "/jobs/" + jobName + "/instances/" + instanceId + "/stop";
-    }
-
-    /**
-     * Default stubs use a WireMock scenario so that:
-     * - pre-start listInstances (state=STARTED) → returns OLD_INSTANCE_ID (waterMark snapshot)
-     * - post-start listInstances (state=POST_START) → returns INSTANCE_ID (the new run)
-     * All other stubs are stateless.
+     * Default stubs: a supplement-data run named {@link #RUN_NAME} is created and immediately
+     * readable with status {@code SUCCESS}, plus job-instance stubs for GetJobRun.
+     *
+     * <p>The GET stub pins {@code page=0}. The API documents {@code page} as 0-based, so asking for
+     * {@code page=1} returns the <em>second</em> page — an empty {@code rows} array for a
+     * name-filtered query, indistinguishable from "no such run". That off-by-one made every live
+     * {@code StartJobRun} time out waiting for a run it had just created successfully, so requiring
+     * the query parameter here is what stops it recurring.
      */
     private void setupStubs() {
-        // Pre-start list (first call in StartJobRun.run before startJob).
-        // v2 puts the job name in the path, so no jobName query-param matcher is needed —
-        // the path itself disambiguates.
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(JOB_NAME)))
-            .inScenario("start-job")
-            .whenScenarioStateIs(Scenario.STARTED)
+        wireMock.stubFor(post(urlPathEqualTo(supplementDataPath()))
+            .willReturn(aResponse().withStatus(204)));
+
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME))
+            .withQueryParam("page", WireMock.equalTo("0"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
-                .withBody(instanceListBody(OLD_INSTANCE_ID, "success")))
-            .willSetStateTo("post-start"));
+                .withBody(supplementDataListBody(RUN_NAME, "SUCCESS"))));
 
-        // Start job POST — advances the scenario state
-        wireMock.stubFor(post(urlPathEqualTo(startPath(JOB_NAME)))
+        wireMock.stubFor(post(urlPathEqualTo(supplementStopPath(RUN_NAME)))
             .willReturn(aResponse().withStatus(204)));
 
-        // Post-start list (resolveNewestInstance after startJob)
         wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(JOB_NAME)))
-            .inScenario("start-job")
-            .whenScenarioStateIs("post-start")
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody(instanceListBody(INSTANCE_ID, "success"))));
 
-        // Get instance detail
         wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody(instanceDetailBody(INSTANCE_ID, "success"))));
+    }
 
-        // Stop instance
-        wireMock.stubFor(post(urlPathEqualTo(stopPath(JOB_NAME, INSTANCE_ID)))
-            .willReturn(aResponse().withStatus(204)));
+    // Field names below are snake_case because that is what the API returns on the wire — verified
+    // against the @JsonProperty names on the SDK's own JobInstance / SupplementDataRespRows models.
+    // These fixtures previously used camelCase, which matched the (wrong) keys the mapper read, so the
+    // tests passed while every real response mapped to nulls. Keep these spellings aligned with the SDK.
+
+    private String supplementDataListBody(String name, String status) {
+        return """
+            {
+              "total": 1,
+              "success": true,
+              "rows": [
+                {
+                  "name": "%s",
+                  "job_list": ["%s"],
+                  "status": "%s",
+                  "start_date": 1700000000000,
+                  "end_date": 1700086400000,
+                  "submitted_date": 1700000000500,
+                  "parallel": 1,
+                  "type": 1,
+                  "user_name": "tester"
+                }
+              ]
+            }
+            """.formatted(name, JOB_NAME, status);
     }
 
     private String instanceListBody(long id, String status) {
         return """
             {
+              "total": 1,
               "instances": [
                 {
-                  "instanceId": %d,
+                  "instance_id": %d,
+                  "job_instance_name": "job_instance_%d",
                   "status": "%s",
-                  "planTime": 1700000000000,
-                  "startTime": 1700000001000,
-                  "endTime": 1700000060000,
-                  "lastUpdateTime": 1700000060000,
-                  "errorMessage": null
+                  "plan_time": 1700000000000,
+                  "start_time": 1700000001000,
+                  "end_time": 1700000060000,
+                  "execute_time": 1700000059000,
+                  "submit_time": 1700000000500,
+                  "job_id": 366647
                 }
               ]
             }
-            """.formatted(id, status);
+            """.formatted(id, id, status);
     }
 
     private String instanceDetailBody(long id, String status) {
         return """
             {
-              "instanceId": %d,
+              "instance_id": %d,
+              "job_instance_name": "job_instance_%d",
               "status": "%s",
-              "planTime": 1700000000000,
-              "startTime": 1700000001000,
-              "endTime": 1700000060000,
-              "lastUpdateTime": 1700000060000,
-              "errorMessage": null
+              "plan_time": 1700000000000,
+              "start_time": 1700000001000,
+              "end_time": 1700000060000,
+              "execute_time": 1700000059000,
+              "submit_time": 1700000000500,
+              "job_id": 366647
             }
-            """.formatted(id, status);
+            """.formatted(id, id, status);
+    }
+
+    private StartJobRun.StartJobRunBuilder<?, ?> startTask() {
+        return StartJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .runName(Property.ofValue(RUN_NAME))
+            .interval(Property.ofValue(Duration.ofMillis(50)));
     }
 
     // ── StartJobRun ─────────────────────────────────────────────────────────────
@@ -184,31 +218,33 @@ class DataArtsTasksTest {
     void startJobRun_waitTrue_returnsSuccessfulOutput() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
+        var output = startTask()
             .wait(Property.ofValue(true))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
             .maxDuration(Property.ofValue(Duration.ofSeconds(30)))
-            .build();
-
-        var output = task.run(runContext);
+            .build()
+            .run(runContext);
 
         assertThat(output.getJobName(), equalTo(JOB_NAME));
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
-        assertThat(output.getStatus(), equalTo("success"));
-        assertThat(output.getPlanTime(), equalTo(1700000000000L));
-        assertThat(output.getStartTime(), equalTo(1700000001000L));
-        assertThat(output.getEndTime(), equalTo(1700000060000L));
-        assertThat(output.getErrorMessage(), org.hamcrest.Matchers.nullValue());
+        assertThat(output.getRunName(), equalTo(RUN_NAME));
+        assertThat(output.getStatus(), equalTo("SUCCESS"));
+        // Explicitly cover every snake_case-mapped field: reading these as camelCase silently
+        // produced nulls against the real API while the old camelCase fixtures stayed green.
+        assertThat(output.getJobList(), contains(JOB_NAME));
+        assertThat(output.getStartDate(), equalTo(1700000000000L));
+        assertThat(output.getEndDate(), equalTo(1700086400000L));
+        assertThat(output.getSubmittedDate(), equalTo(1700000000500L));
+        assertThat(output.getParallel(), equalTo(1));
+        assertThat(output.getUserName(), equalTo("tester"));
 
-        // Guard against Content-Type duplication: a doubled header arrives as
-        // "application/json, application/json" (comma-joined). The not(containing(","))
-        // matcher fails if the signer loop appends a second content-type value.
-        wireMock.verify(postRequestedFor(urlPathEqualTo(startPath(JOB_NAME)))
+        // Content-Type must be present exactly once. The gateway declares it required on the factory
+        // POST routes and rejects the call with APIGW.0106 without it, while a duplicate arrives
+        // comma-joined as "application/json, application/json" and breaks signature verification.
+        //
+        // The equalTo assertion is what makes this meaningful: a lone not(containing(",")) matcher
+        // also passes when the header is absent entirely, which is exactly how a missing Content-Type
+        // shipped despite this test.
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withHeader("Content-Type", WireMock.equalTo("application/json"))
             .withHeader("Content-Type", WireMock.not(WireMock.containing(","))));
     }
 
@@ -216,69 +252,176 @@ class DataArtsTasksTest {
     void startJobRun_waitFalse_returnsImmediately() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
-            .wait(Property.ofValue(false))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .build();
+        var output = startTask().wait(Property.ofValue(false)).build().run(runContext);
 
-        var output = task.run(runContext);
-
-        assertThat(output.getJobName(), equalTo(JOB_NAME));
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
-        // status is whatever the first instance query returned — no further polling
+        assertThat(output.getRunName(), equalTo(RUN_NAME));
         assertThat(output.getStatus(), notNullValue());
     }
 
+    /**
+     * The request body must use the snake_case keys the API expects. Sending camelCase here is the
+     * write-side equivalent of the read-side bug that made every output field null.
+     *
+     * <p>The dates must reach the wire in the {@code 2026-07-28T00:00:00 +00} form DataArts' API
+     * reference documents, and the default range must span a whole day rather than a single instant.
+     * Any other spelling is silently unparsed server-side and both ends collapse to the same instant,
+     * which surfaces as {@code DLF.30121} ("The end time should be at least 2 second later than the
+     * start time") — verified live for {@code yyyy-MM-dd}, {@code yyyy-MM-dd HH:mm:ss} and epoch
+     * millis alike, so this assertion is what keeps the task working at all.
+     */
     @Test
-    void startJobRun_withJobParams_succeeds() throws Exception {
+    void startJobRun_sendsSnakeCaseBody_withFullDayDefaultRange() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var today = LocalDate.now(ZoneOffset.UTC).toString();
+
+        startTask().wait(Property.ofValue(false)).build().run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"job_name\":\"" + JOB_NAME + "\""))
+            .withRequestBody(WireMock.containing("\"name\":\"" + RUN_NAME + "\""))
+            .withRequestBody(WireMock.containing("\"start_date\":\"" + today + "T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"" + today + "T23:59:59 +00\""))
+            .withRequestBody(WireMock.containing("\"is_day_granularity\":true"))
+            .withRequestBody(WireMock.containing("\"is_stop_when_fail\":true"))
+            .withRequestBody(WireMock.containing("\"parallel\":1")));
+    }
+
+    /**
+     * An explicit {@code startDate} with no {@code endDate} must still produce a non-zero range,
+     * in every accepted input form.
+     */
+    @Test
+    void startJobRun_startDateOnly_derivesEndOfThatDay() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
-            .jobParams(Property.ofValue(Map.of("env", "test", "date", "2024-01-01")))
+        startTask()
+            .startDate(Property.ofValue("2026-07-01"))
             .wait(Property.ofValue(false))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T23:59:59 +00\"")));
+    }
+
+    /** A space-separated date-time is a plausible thing to write, so it must convert too. */
+    @Test
+    void startJobRun_spaceSeparatedDateTime_isConvertedToTheWireForm() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01 06:30:00"))
+            .endDate(Property.ofValue("2026-07-01 18:45:15"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T06:30:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T18:45:15 +00\"")));
+    }
+
+    /**
+     * A value that already carries a UTC offset is the escape hatch for a wire form this task does
+     * not generate, so it must reach the API byte-for-byte — including a non-UTC offset.
+     */
+    @Test
+    void startJobRun_offsetBearingDates_arePassedThroughVerbatim() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01T00:00:00 +08"))
+            .endDate(Property.ofValue("2026-07-01T23:59:59 +08"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +08\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T23:59:59 +08\"")));
+    }
+
+    /**
+     * Epoch millis were tried live and rejected, so they must fail with an explanation rather than
+     * being forwarded to produce another opaque {@code DLF.30121}.
+     */
+    @Test
+    void startJobRun_epochMillis_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask()
+            .startDate(Property.ofValue("1785196800000"))
+            .endDate(Property.ofValue("1785283199000"))
+            .wait(Property.ofValue(false))
             .build();
 
-        var output = task.run(runContext);
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("startDate"));
+        assertThat(ex.getMessage(), containsString("Epoch milliseconds are not accepted"));
     }
 
     @Test
-    void startJobRun_triggersRunImmediate_notStartSchedule() throws Exception {
+    void startJobRun_unparseableStartDateWithoutEndDate_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
+        var task = startTask()
+            .startDate(Property.ofValue("01/07/2026"))
             .wait(Property.ofValue(false))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
             .build();
 
-        task.run(runContext);
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("endDate is required"));
+        assertThat(ex.getMessage(), containsString("01/07/2026"));
+    }
 
-        // Must hit "Executing a Job Immediately" (run-immediate), which produces a single waitable
-        // instance — NOT "Starting a Job" (/start), which toggles a schedule and returns DLF.3051 on
-        // a run-once job. startPath() resolves to the run-immediate route.
-        wireMock.verify(postRequestedFor(urlPathEqualTo(startPath(JOB_NAME))));
+    /** A date-only {@code endDate} means through the end of that day, not midnight at its start. */
+    @Test
+    void startJobRun_explicitDateRangeAndParallel_areSent() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01"))
+            .endDate(Property.ofValue("2026-07-31"))
+            .parallel(Property.ofValue(4))
+            .stopWhenFail(Property.ofValue(false))
+            .dayGranularity(Property.ofValue(false))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-31T23:59:59 +00\""))
+            .withRequestBody(WireMock.containing("\"parallel\":4"))
+            .withRequestBody(WireMock.containing("\"is_stop_when_fail\":false"))
+            .withRequestBody(WireMock.containing("\"is_day_granularity\":false")));
+    }
+
+    /**
+     * Pins the trigger route. Both {@code run-immediate} and {@code start} reject every request with
+     * DLF.3051 on standard and sovereign regions alike, and neither is declared in the SDK's route
+     * metadata — supplement-data is the only mechanism that actually creates a run.
+     */
+    @Test
+    void startJobRun_usesSupplementData_notRunImmediateOrStart() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask().wait(Property.ofValue(false)).build().run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath())));
+        wireMock.verify(0, postRequestedFor(urlPathEqualTo(
+            "/v2/" + PROJECT_ID + "/factory/jobs/" + JOB_NAME + "/run-immediate")));
         wireMock.verify(0, postRequestedFor(urlPathEqualTo(
             "/v2/" + PROJECT_ID + "/factory/jobs/" + JOB_NAME + "/start")));
     }
 
+    /**
+     * With no {@code runName}, a unique one is generated — the name is the only handle for polling
+     * and for StopJobRun, so a collision with an existing run would break both.
+     */
     @Test
-    void startJobRun_listInstances_scopesByJobNameInPath() throws Exception {
+    void startJobRun_generatesRunName_whenOmitted() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = StartJobRun.builder()
@@ -287,59 +430,186 @@ class DataArtsTasksTest {
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
             .jobName(Property.ofValue(JOB_NAME))
-            .wait(Property.ofValue(false))
+            .maxDuration(Property.ofValue(Duration.ofMillis(150)))
             .interval(Property.ofValue(Duration.ofMillis(50)))
             .build();
 
-        task.run(runContext);
+        // The generated name has no matching GET stub, so the run never becomes visible and the
+        // task times out — which is precisely what isolates the name-generation assertion below.
+        assertThrows(IllegalStateException.class, () -> task.run(runContext));
 
-        // The v2 route carries the job name as a path segment, which is what guarantees a
-        // substring-named job's instances can never be returned by mistake. The v1 route needed
-        // `jobName` + `preciseQuery=true` query params for the same guarantee; asserting on those
-        // now would be asserting on a dead API, so this pins the path instead.
-        wireMock.verify(getRequestedFor(urlPathEqualTo(instancesDetailPath(JOB_NAME))));
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"name\":\"kestra_" + JOB_NAME + "_")));
     }
 
     @Test
-    void terminalAndSuccessStates_matchDataArtsStatusEnum() {
-        // Finished states per the DataArts Factory instance status enum.
-        for (var s : new String[]{"success", "forceSuccess", "ignoreSuccess", "skip-by-depend",
-                                  "fail", "running-exception", "manual-stop"}) {
-            assertThat("'" + s + "' should be terminal", DataArtsService.isTerminalState(s), is(true));
-        }
-        // Transient states must not be treated as terminal (else the wait loop would exit early).
-        for (var s : new String[]{"waiting", "running", "waiting-confirm", "freeze", "pause"}) {
-            assertThat("'" + s + "' should not be terminal", DataArtsService.isTerminalState(s), is(false));
-        }
-        // null status (freshly-queued instance, status not yet populated) is not terminal.
-        assertThat(DataArtsService.isTerminalState(null), is(false));
+    void startJobRun_runNeverVisible_throwsActionableError() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
 
-        // Successful outcomes include operator-forced and ignored-failure successes.
-        for (var s : new String[]{"success", "forceSuccess", "ignoreSuccess"}) {
-            assertThat("'" + s + "' should be success", DataArtsService.isSuccessState(s), is(true));
-        }
-        for (var s : new String[]{"fail", "running-exception", "manual-stop", "skip-by-depend"}) {
-            assertThat("'" + s + "' should not be success", DataArtsService.isSuccessState(s), is(false));
-        }
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo("ghost_run"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"total\":0,\"rows\":[]}")));
+
+        var task = startTask()
+            .runName(Property.ofValue("ghost_run"))
+            .maxDuration(Property.ofValue(Duration.ofMillis(150)))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("ghost_run"));
+        assertThat(ex.getMessage(), containsString("never appeared"));
+    }
+
+    /**
+     * A row whose name merely resembles the requested one must not be reported as this run's status:
+     * the API treats {@code name} as a filter rather than an exact key.
+     */
+    @Test
+    void startJobRun_prefixMatchingRow_isNotMistakenForThisRun() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo("run_a"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(supplementDataListBody("run_a_other", "SUCCESS"))));
+
+        var task = startTask()
+            .runName(Property.ofValue("run_a"))
+            .maxDuration(Property.ofValue(Duration.ofMillis(150)))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("never appeared"));
+    }
+
+    /**
+     * {@code supplement_data_run_time} stays out of the body unless asked for: a live run with the
+     * field absent executed all of its instances immediately, so the API's documented
+     * {@code 00:00-00:00} default does not restrict execution despite reading like a zero-width
+     * window. Sending a window by default would risk confining runs for no reason.
+     */
+    @Test
+    void startJobRun_omitsTheRunWindow_byDefault() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask().wait(Property.ofValue(false)).build().run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.notContaining("supplement_data_run_time")));
+    }
+
+    @Test
+    void startJobRun_explicitRunWindow_isSent() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .runTimeWindow(Property.ofValue("01:00-05:00"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing(
+                "\"supplement_data_run_time\":{\"time_of_day\":\"01:00-05:00\"}")));
+    }
+
+    /**
+     * {@code page} is 0-based on this API ("default 0, must be ≥ 0"), not 1-based like the
+     * {@code offset} conventions elsewhere in Huawei's APIs. Sending {@code page=1} asks for the
+     * second page, which for a name-filtered query is empty — so a created run reads back as
+     * missing and every {@code StartJobRun} times out. Asserted explicitly because the symptom
+     * ("never appeared in the run list") points at creation rather than at the query.
+     */
+    @Test
+    void startJobRun_queriesTheFirstPage_zeroBased() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask().wait(Property.ofValue(false)).build().run(runContext);
+
+        wireMock.verify(getRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME))
+            .withQueryParam("page", WireMock.equalTo("0")));
+    }
+
+    @Test
+    void startJobRun_maxDurationExceeded_throws() {
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo("slow_run"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(supplementDataListBody("slow_run", "RUNNING"))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask()
+            .runName(Property.ofValue("slow_run"))
+            .wait(Property.ofValue(true))
+            .maxDuration(Property.ofValue(Duration.ofMillis(200)))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("slow_run"));
+        assertThat(ex.getMessage(), containsString("terminal"));
+    }
+
+    @Test
+    void startJobRun_failStatus_throws() {
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo("failing_run"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(supplementDataListBody("failing_run", "FAIL"))));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask()
+            .runName(Property.ofValue("failing_run"))
+            .wait(Property.ofValue(true))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("failing_run"));
+        assertThat(ex.getMessage(), containsString("FAIL"));
+    }
+
+    @Test
+    void startJobRun_dlfRejectsBody_surfacesDateFormatHint() {
+        wireMock.stubFor(post(urlPathEqualTo(supplementDataPath()))
+            .willReturn(aResponse()
+                .withStatus(400)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"error_code\":\"DLF.3051\",\"error_msg\":\"The request parameter is invalid.\"}")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var ex = assertThrows(IllegalStateException.class,
+            () -> startTask().wait(Property.ofValue(false)).build().run(runContext));
+
+        assertThat(ex.getMessage(), containsString("DLF.3051"));
+        // The hint must point at the undocumented date format, the actual likely cause.
+        assertThat(ex.getMessage(), containsString("start_date"));
     }
 
     @Test
     void startJobRun_withWorkspaceId_passes() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
+        var output = startTask()
             .workspaceId(Property.ofValue(WORKSPACE_ID))
-            .jobName(Property.ofValue(JOB_NAME))
             .wait(Property.ofValue(false))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .build();
+            .build()
+            .run(runContext);
 
-        var output = task.run(runContext);
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
+        assertThat(output.getRunName(), equalTo(RUN_NAME));
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withHeader("workspace", WireMock.equalTo(WORKSPACE_ID)));
     }
 
     @Test
@@ -357,178 +627,75 @@ class DataArtsTasksTest {
         assertThat(ex.getMessage(), containsString("projectId"));
     }
 
+    // ── Status vocabularies ─────────────────────────────────────────────────────
+
+    /**
+     * Job-instance statuses, per the SDK's {@code JobInstance$StatusEnum}: {@code waiting},
+     * {@code running}, {@code success}, {@code fail}, {@code manual}, {@code pause}, {@code skip},
+     * {@code freeze} — and nothing else.
+     *
+     * <p>This test previously asserted invented values ({@code forceSuccess}, {@code ignoreSuccess},
+     * {@code skip-by-depend}, {@code running-exception}, {@code manual-stop}) as terminal.
+     * {@code force_success}/{@code ignore_success} are separate <em>boolean</em> fields on the
+     * instance and never appear as a status; the hyphenated spellings are not in the enum at all.
+     */
     @Test
-    void startJobRun_maxDurationExceeded_throws() {
-        // Pre-start: no prior runs → waterMark = 0
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("slow_job")))
-            .inScenario("slow-job")
-            .whenScenarioStateIs(Scenario.STARTED)
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("{\"instances\":[]}"))
-            .willSetStateTo("post-start"));
+    void jobInstanceTerminalAndSuccessStates_matchSdkStatusEnum() {
+        for (var s : new String[]{"success", "fail", "skip"}) {
+            assertThat("'" + s + "' should be terminal", DataArtsService.isTerminalState(s), is(true));
+        }
+        // manual/pause/freeze await an operator, so they are deliberately non-terminal.
+        for (var s : new String[]{"waiting", "running", "manual", "pause", "freeze"}) {
+            assertThat("'" + s + "' should not be terminal", DataArtsService.isTerminalState(s), is(false));
+        }
+        // Values that are not in the enum must not be treated as terminal.
+        for (var s : new String[]{"forceSuccess", "ignoreSuccess", "skip-by-depend",
+                                  "running-exception", "manual-stop"}) {
+            assertThat("'" + s + "' is not a real status", DataArtsService.isTerminalState(s), is(false));
+        }
+        // null status (freshly-queued instance, status not yet populated) is not terminal.
+        assertThat(DataArtsService.isTerminalState(null), is(false));
 
-        wireMock.stubFor(post(urlPathEqualTo(startPath("slow_job")))
-            .willReturn(aResponse().withStatus(204)));
-
-        // Post-start: new instance with id > 0, stays in "running" so timeout triggers.
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("slow_job")))
-            .inScenario("slow-job")
-            .whenScenarioStateIs("post-start")
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                    {
-                      "instances": [
-                        { "instanceId": 111, "status": "running",
-                          "planTime": 1700000000000, "startTime": 1700000001000 }
-                      ]
-                    }
-                    """)));
-
-        wireMock.stubFor(get(urlPathEqualTo(instancePath("slow_job", 111)))
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                    { "instanceId": 111, "status": "running",
-                      "planTime": 1700000000000, "startTime": 1700000001000 }
-                    """)));
-
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue("slow_job"))
-            .wait(Property.ofValue(true))
-            .maxDuration(Property.ofValue(Duration.ofMillis(200)))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .build();
-
-        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
-        assertThat(ex.getMessage(), containsString("slow_job"));
-        assertThat(ex.getMessage(), containsString("terminal"));
-    }
-
-    @Test
-    void startJobRun_failStatus_throws() {
-        // Pre-start: no prior runs → waterMark = 0
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("failing_job")))
-            .inScenario("failing-job")
-            .whenScenarioStateIs(Scenario.STARTED)
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("{\"instances\":[]}"))
-            .willSetStateTo("post-start"));
-
-        wireMock.stubFor(post(urlPathEqualTo(startPath("failing_job")))
-            .willReturn(aResponse().withStatus(204)));
-
-        // Post-start: new failing instance (instanceId=222 > waterMark=0)
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("failing_job")))
-            .inScenario("failing-job")
-            .whenScenarioStateIs("post-start")
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                    {
-                      "instances": [
-                        { "instanceId": 222, "status": "fail",
-                          "planTime": 1700000000000, "startTime": 1700000001000,
-                          "errorMessage": "OOM error in step 2" }
-                      ]
-                    }
-                    """)));
-
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue("failing_job"))
-            .wait(Property.ofValue(true))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .build();
-
-        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
-        assertThat(ex.getMessage(), containsString("failing_job"));
-        assertThat(ex.getMessage(), containsString("fail"));
-        assertThat(ex.getMessage(), containsString("OOM error in step 2"));
+        assertThat(DataArtsService.isSuccessState("success"), is(true));
+        for (var s : new String[]{"fail", "skip", "forceSuccess", "ignoreSuccess"}) {
+            assertThat("'" + s + "' should not be success", DataArtsService.isSuccessState(s), is(false));
+        }
     }
 
     /**
-     * Verifies that resolveNewestInstance skips a prior run that has a lower instanceId,
-     * picking only the newly created one with a higher instanceId.
+     * Supplement-data statuses are <b>UPPER CASE</b> — {@code SUCCESS} / {@code RUNNING} /
+     * {@code CANCEL}, per the {@code status} filter and the response example in the "Querying
+     * PatchData Instances" reference. That is a different vocabulary from the lower-case job-instance
+     * statuses above, and matching them case-sensitively against the lower-case set meant a finished
+     * run was never recognised as terminal — it polled until {@code maxDuration}.
+     *
+     * <p>No SDK enum exists, and the doc enumerates only the three filterable values, so matching is
+     * case-insensitive and covers plausible failure/cancellation spellings. An unrecognised value must
+     * stay non-terminal so the worst case is a timeout, never a wrong reported outcome.
      */
     @Test
-    void startJobRun_staleInstanceSkipped_resolvesNewInstance() throws Exception {
-        long staleId = 500L;
-        long newId = 600L;
-        String staleJob = "anchored_job";
+    void supplementDataTerminalStates_areUpperCase_andTreatUnknownAsNonTerminal() {
+        for (var s : new String[]{"SUCCESS", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED",
+                                  "STOP", "STOPPED"}) {
+            assertThat("'" + s + "' should be terminal",
+                DataArtsService.isSupplementDataTerminalState(s), is(true));
+        }
+        // Case-insensitive: the doc shows upper case, but nothing guarantees it across regions.
+        for (var s : new String[]{"success", "Success", "cancel"}) {
+            assertThat("'" + s + "' should be terminal regardless of case",
+                DataArtsService.isSupplementDataTerminalState(s), is(true));
+        }
+        for (var s : new String[]{"RUNNING", "WAITING", "some-unknown-status", ""}) {
+            assertThat("'" + s + "' should not be terminal",
+                DataArtsService.isSupplementDataTerminalState(s), is(false));
+        }
+        assertThat(DataArtsService.isSupplementDataTerminalState(null), is(false));
 
-        // Pre-start list returns only the stale instance.
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(staleJob)))
-            .inScenario("anchored-start")
-            .whenScenarioStateIs(Scenario.STARTED)
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody(instanceListBody(staleId, "success")))
-            .willSetStateTo("new-instance-visible"));
-
-        wireMock.stubFor(post(urlPathEqualTo(startPath(staleJob)))
-            .willReturn(aResponse().withStatus(204)));
-
-        // Post-start list returns both the stale and the new instance; new one has higher ID.
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(staleJob)))
-            .inScenario("anchored-start")
-            .whenScenarioStateIs("new-instance-visible")
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                    {
-                      "instances": [
-                        { "instanceId": %d, "status": "running",
-                          "planTime": 1700000100000, "startTime": 1700000101000 },
-                        { "instanceId": %d, "status": "success",
-                          "planTime": 1700000000000, "startTime": 1700000001000 }
-                      ]
-                    }
-                    """.formatted(newId, staleId))));
-
-        wireMock.stubFor(get(urlPathEqualTo(instancePath(staleJob, newId)))
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody(instanceDetailBody(newId, "success"))));
-
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(staleJob))
-            .wait(Property.ofValue(true))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
-            .build();
-
-        var output = task.run(runContext);
-
-        // Must resolve the new instance, not the stale prior run.
-        assertThat(output.getInstanceId(), equalTo(newId));
+        assertThat(DataArtsService.isSupplementDataSuccessState("SUCCESS"), is(true));
+        assertThat(DataArtsService.isSupplementDataSuccessState("success"), is(true));
+        for (var s : new String[]{"FAIL", "STOPPED", "CANCEL", "RUNNING", null}) {
+            assertThat(DataArtsService.isSupplementDataSuccessState(s), is(false));
+        }
     }
 
     // ── GetJobRun ────────────────────────────────────────────────────────────────
@@ -552,6 +719,11 @@ class DataArtsTasksTest {
         assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
         assertThat(output.getStatus(), equalTo("success"));
         assertThat(output.getPlanTime(), is(1700000000000L));
+        // Fields that silently mapped to null while the mapper read camelCase keys.
+        assertThat(output.getJobInstanceName(), equalTo("job_instance_" + INSTANCE_ID));
+        assertThat(output.getExecuteTime(), equalTo(1700000059000L));
+        assertThat(output.getSubmitTime(), equalTo(1700000000500L));
+        assertThat(output.getJobId(), equalTo(366647L));
     }
 
     @Test
@@ -602,8 +774,6 @@ class DataArtsTasksTest {
     void getJobRun_noInstanceId_resolvesLatest() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
-        // GetJobRun uses listInstances (full paging), not the scenario-bound stub.
-        // Use a separate job name to avoid scenario state interference.
         var getJobName = "get_latest_job";
         wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(getJobName)))
             .willReturn(aResponse()
@@ -653,13 +823,25 @@ class DataArtsTasksTest {
     // ── StopJobRun ───────────────────────────────────────────────────────────────
 
     @Test
-    void stopJobRun_wait_pollsUntilManualStop() throws Exception {
-        // Stub get instance to return manual-stop immediately after the stop call.
-        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
+    void stopJobRun_wait_pollsUntilStopped() throws Exception {
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME))
+            .inScenario("stop-run")
+            .whenScenarioStateIs(Scenario.STARTED)
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
-                .withBody(instanceDetailBody(INSTANCE_ID, "manual-stop"))));
+                .withBody(supplementDataListBody(RUN_NAME, "RUNNING")))
+            .willSetStateTo("cancelled"));
+
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME))
+            .inScenario("stop-run")
+            .whenScenarioStateIs("cancelled")
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(supplementDataListBody(RUN_NAME, "CANCEL"))));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
 
@@ -668,17 +850,16 @@ class DataArtsTasksTest {
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
-            .instanceId(Property.ofValue(INSTANCE_ID))
+            .runName(Property.ofValue(RUN_NAME))
             .wait(Property.ofValue(true))
             .interval(Property.ofValue(Duration.ofMillis(50)))
             .build();
 
         var output = task.run(runContext);
 
-        assertThat(output.getJobName(), equalTo(JOB_NAME));
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
-        assertThat(output.getStatus(), equalTo("manual-stop"));
+        assertThat(output.getRunName(), equalTo(RUN_NAME));
+        assertThat(output.getStatus(), equalTo("CANCEL"));
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementStopPath(RUN_NAME))));
     }
 
     @Test
@@ -690,26 +871,25 @@ class DataArtsTasksTest {
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
-            .instanceId(Property.ofValue(INSTANCE_ID))
+            .runName(Property.ofValue(RUN_NAME))
             .wait(Property.ofValue(false))
             .build();
 
         var output = task.run(runContext);
 
-        assertThat(output.getJobName(), equalTo(JOB_NAME));
-        assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
+        assertThat(output.getRunName(), equalTo(RUN_NAME));
         assertThat(output.getStatus(), equalTo("stopping"));
     }
 
     @Test
     void stopJobRun_maxDurationExceeded_throws() {
-        // Instance remains in "running" state indefinitely — stop API accepts but state never transitions.
-        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
+        // Run stays "running" — the stop request is accepted but never confirmed.
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
-                .withBody(instanceDetailBody(INSTANCE_ID, "running"))));
+                .withBody(supplementDataListBody(RUN_NAME, "RUNNING"))));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
 
@@ -718,15 +898,14 @@ class DataArtsTasksTest {
             .secretAccessKey(Property.ofValue(FAKE_SK))
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(JOB_NAME))
-            .instanceId(Property.ofValue(INSTANCE_ID))
+            .runName(Property.ofValue(RUN_NAME))
             .wait(Property.ofValue(true))
             .maxDuration(Property.ofValue(Duration.ofMillis(200)))
             .interval(Property.ofValue(Duration.ofMillis(50)))
             .build();
 
         var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
-        assertThat(ex.getMessage(), containsString(JOB_NAME));
+        assertThat(ex.getMessage(), containsString(RUN_NAME));
         assertThat(ex.getMessage(), containsString("terminal"));
     }
 
@@ -765,74 +944,6 @@ class DataArtsTasksTest {
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), containsString("endpointOverride"));
         assertThat(ex.getMessage(), containsString("region"));
-    }
-
-    /**
-     * Verifies that null status (freshly-queued instance) does not cause an NPE in the polling
-     * loop via isTerminalState — the loop must treat null as non-terminal and continue polling.
-     */
-    @Test
-    void startJobRun_nullStatusInstance_treatedAsNonTerminal() throws Exception {
-        var nullStatusJob = "null_status_job";
-
-        // Pre-start: no prior runs.
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(nullStatusJob)))
-            .inScenario("null-status")
-            .whenScenarioStateIs(Scenario.STARTED)
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("{\"instances\":[]}"))
-            .willSetStateTo("post-start"));
-
-        wireMock.stubFor(post(urlPathEqualTo(startPath(nullStatusJob)))
-            .willReturn(aResponse().withStatus(204)));
-
-        // Post-start: instance visible with null status (freshly queued).
-        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(nullStatusJob)))
-            .inScenario("null-status")
-            .whenScenarioStateIs("post-start")
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("""
-                    {"instances":[{"instanceId": 333, "planTime": 1700000000000}]}
-                    """)));
-
-        // Instance detail starts with null status, transitions to success.
-        wireMock.stubFor(get(urlPathEqualTo(instancePath(nullStatusJob, 333)))
-            .inScenario("null-status-detail")
-            .whenScenarioStateIs(Scenario.STARTED)
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody("{\"instanceId\": 333, \"planTime\": 1700000000000}"))
-            .willSetStateTo("succeeded"));
-
-        wireMock.stubFor(get(urlPathEqualTo(instancePath(nullStatusJob, 333)))
-            .inScenario("null-status-detail")
-            .whenScenarioStateIs("succeeded")
-            .willReturn(aResponse()
-                .withStatus(200)
-                .withHeader("Content-Type", "application/json")
-                .withBody(instanceDetailBody(333, "success"))));
-
-        var runContext = runContextFactory.of(Collections.emptyMap());
-
-        var task = StartJobRun.builder()
-            .accessKeyId(Property.ofValue(FAKE_AK))
-            .secretAccessKey(Property.ofValue(FAKE_SK))
-            .projectId(Property.ofValue(PROJECT_ID))
-            .endpointOverride(Property.ofValue(wireMockUrl()))
-            .jobName(Property.ofValue(nullStatusJob))
-            .wait(Property.ofValue(true))
-            .maxDuration(Property.ofValue(Duration.ofSeconds(10)))
-            .interval(Property.ofValue(Duration.ofMillis(50)))
-            .build();
-
-        var output = task.run(runContext);
-        assertThat(output.getInstanceId(), equalTo(333L));
-        assertThat(output.getStatus(), equalTo("success"));
     }
 
     // ── Authentication ───────────────────────────────────────────────────────────
