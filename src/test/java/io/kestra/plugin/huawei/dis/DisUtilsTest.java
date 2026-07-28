@@ -68,4 +68,24 @@ class DisUtilsTest {
     void noCustomEndpoint_withoutProjectId_doesNotThrow() {
         DisUtils.requireProjectIdForCustomEndpoint(null, null, null);
     }
+
+    @Test
+    void regionNotInSdkEnum_withoutProjectId_throws() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> DisUtils.requireProjectIdForRegionNotInSdkEnum("ap-southeast-3", null));
+        assertThat(ex.getMessage().contains("projectId"), equalTo(true));
+        assertThat(ex.getMessage().contains("ap-southeast-3"), equalTo(true));
+    }
+
+    @Test
+    void regionNotInSdkEnum_withBlankProjectId_throws() {
+        var ex = assertThrows(IllegalArgumentException.class,
+            () -> DisUtils.requireProjectIdForRegionNotInSdkEnum("cn-north-9", "   "));
+        assertThat(ex.getMessage().contains("projectId"), equalTo(true));
+    }
+
+    @Test
+    void regionNotInSdkEnum_withProjectId_doesNotThrow() {
+        DisUtils.requireProjectIdForRegionNotInSdkEnum("ap-southeast-3", "project-abc");
+    }
 }
