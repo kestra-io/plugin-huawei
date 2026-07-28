@@ -72,6 +72,36 @@ class DataArtsTasksTest {
         return "http://localhost:" + wireMock.port();
     }
 
+    // ── Route builders ──────────────────────────────────────────────────────────
+    // Kept in one place so a path change fails every stub at once rather than
+    // silently drifting from DataArtsService. These MUST mirror the real published
+    // routes (/v2/{project_id}/factory/...) — a stub that mirrors whatever the code
+    // happens to send validates nothing, which is how the dead /v1/ paths stayed
+    // green while every live call 404'd with APIGW.0101.
+
+    private static String startPath(String jobName) {
+        // StartJobRun triggers an on-demand run via "Executing a Job Immediately" (run-immediate),
+        // NOT "Starting a Job" (/start, which toggles a schedule and returns DLF.3051 on run-once jobs).
+        return "/v2/" + PROJECT_ID + "/factory/jobs/" + jobName + "/run-immediate";
+    }
+
+    private static String instancesDetailPath(String jobName) {
+        return "/v2/" + PROJECT_ID + "/factory/jobs/" + jobName + "/instances/detail";
+    }
+
+    private static String instancePath(String jobName, long instanceId) {
+        return "/v2/" + PROJECT_ID + "/factory/jobs/" + jobName + "/instances/" + instanceId;
+    }
+
+    /**
+     * Stop is still on the unpublished /v1/ route — see the {@code stopInstance} javadoc in
+     * {@link DataArtsService}. This helper mirrors that so StopJobRun tests keep passing, but it
+     * asserts nothing about the real API: no working stop route has been found yet.
+     */
+    private static String stopPath(String jobName, long instanceId) {
+        return "/v1/" + PROJECT_ID + "/jobs/" + jobName + "/instances/" + instanceId + "/stop";
+    }
+
     /**
      * Default stubs use a WireMock scenario so that:
      * - pre-start listInstances (state=STARTED) → returns OLD_INSTANCE_ID (waterMark snapshot)
@@ -79,11 +109,12 @@ class DataArtsTasksTest {
      * All other stubs are stateless.
      */
     private void setupStubs() {
-        // Pre-start list (first call in StartJobRun.run before startJob)
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        // Pre-start list (first call in StartJobRun.run before startJob).
+        // v2 puts the job name in the path, so no jobName query-param matcher is needed —
+        // the path itself disambiguates.
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(JOB_NAME)))
             .inScenario("start-job")
             .whenScenarioStateIs(Scenario.STARTED)
-            .withQueryParam("jobName", WireMock.equalTo(JOB_NAME))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -91,28 +122,27 @@ class DataArtsTasksTest {
             .willSetStateTo("post-start"));
 
         // Start job POST — advances the scenario state
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/start"))
+        wireMock.stubFor(post(urlPathEqualTo(startPath(JOB_NAME)))
             .willReturn(aResponse().withStatus(204)));
 
         // Post-start list (resolveNewestInstance after startJob)
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(JOB_NAME)))
             .inScenario("start-job")
             .whenScenarioStateIs("post-start")
-            .withQueryParam("jobName", WireMock.equalTo(JOB_NAME))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody(instanceListBody(INSTANCE_ID, "success"))));
 
         // Get instance detail
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/instances/" + INSTANCE_ID))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody(instanceDetailBody(INSTANCE_ID, "success"))));
 
         // Stop instance
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/instances/" + INSTANCE_ID + "/stop"))
+        wireMock.stubFor(post(urlPathEqualTo(stopPath(JOB_NAME, INSTANCE_ID)))
             .willReturn(aResponse().withStatus(204)));
     }
 
@@ -178,7 +208,7 @@ class DataArtsTasksTest {
         // Guard against Content-Type duplication: a doubled header arrives as
         // "application/json, application/json" (comma-joined). The not(containing(","))
         // matcher fails if the signer loop appends a second content-type value.
-        wireMock.verify(postRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/start"))
+        wireMock.verify(postRequestedFor(urlPathEqualTo(startPath(JOB_NAME)))
             .withHeader("Content-Type", WireMock.not(WireMock.containing(","))));
     }
 
@@ -224,7 +254,7 @@ class DataArtsTasksTest {
     }
 
     @Test
-    void startJobRun_startDate_sentAsNumericSnakeCaseField() throws Exception {
+    void startJobRun_triggersRunImmediate_notStartSchedule() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = StartJobRun.builder()
@@ -233,22 +263,22 @@ class DataArtsTasksTest {
             .projectId(Property.ofValue(PROJECT_ID))
             .endpointOverride(Property.ofValue(wireMockUrl()))
             .jobName(Property.ofValue(JOB_NAME))
-            .startDate(Property.ofValue(20241030L))
             .wait(Property.ofValue(false))
             .interval(Property.ofValue(Duration.ofMillis(50)))
             .build();
 
         task.run(runContext);
 
-        // The DataArts API expects the numeric snake_case field "start_date" (e.g. 20241030);
-        // a camelCase "startDate" string would be silently ignored by the server.
-        wireMock.verify(postRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/start"))
-            .withRequestBody(WireMock.matchingJsonPath("$.start_date", WireMock.equalTo("20241030")))
-            .withRequestBody(WireMock.notMatching("(?s).*startDate.*")));
+        // Must hit "Executing a Job Immediately" (run-immediate), which produces a single waitable
+        // instance — NOT "Starting a Job" (/start), which toggles a schedule and returns DLF.3051 on
+        // a run-once job. startPath() resolves to the run-immediate route.
+        wireMock.verify(postRequestedFor(urlPathEqualTo(startPath(JOB_NAME))));
+        wireMock.verify(0, postRequestedFor(urlPathEqualTo(
+            "/v2/" + PROJECT_ID + "/factory/jobs/" + JOB_NAME + "/start")));
     }
 
     @Test
-    void startJobRun_listInstances_usesPreciseQuery() throws Exception {
+    void startJobRun_listInstances_scopesByJobNameInPath() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = StartJobRun.builder()
@@ -263,10 +293,11 @@ class DataArtsTasksTest {
 
         task.run(runContext);
 
-        // preciseQuery=true forces exact jobName matching so a substring-named job's instances
-        // cannot be returned by mistake.
-        wireMock.verify(getRequestedFor(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
-            .withQueryParam("preciseQuery", WireMock.equalTo("true")));
+        // The v2 route carries the job name as a path segment, which is what guarantees a
+        // substring-named job's instances can never be returned by mistake. The v1 route needed
+        // `jobName` + `preciseQuery=true` query params for the same guarantee; asserting on those
+        // now would be asserting on a dead API, so this pins the path instead.
+        wireMock.verify(getRequestedFor(urlPathEqualTo(instancesDetailPath(JOB_NAME))));
     }
 
     @Test
@@ -329,24 +360,22 @@ class DataArtsTasksTest {
     @Test
     void startJobRun_maxDurationExceeded_throws() {
         // Pre-start: no prior runs → waterMark = 0
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("slow_job")))
             .inScenario("slow-job")
             .whenScenarioStateIs(Scenario.STARTED)
-            .withQueryParam("jobName", WireMock.equalTo("slow_job"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"instances\":[]}"))
             .willSetStateTo("post-start"));
 
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/slow_job/start"))
+        wireMock.stubFor(post(urlPathEqualTo(startPath("slow_job")))
             .willReturn(aResponse().withStatus(204)));
 
         // Post-start: new instance with id > 0, stays in "running" so timeout triggers.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("slow_job")))
             .inScenario("slow-job")
             .whenScenarioStateIs("post-start")
-            .withQueryParam("jobName", WireMock.equalTo("slow_job"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -359,7 +388,7 @@ class DataArtsTasksTest {
                     }
                     """)));
 
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/slow_job/instances/111"))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath("slow_job", 111)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -389,24 +418,22 @@ class DataArtsTasksTest {
     @Test
     void startJobRun_failStatus_throws() {
         // Pre-start: no prior runs → waterMark = 0
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("failing_job")))
             .inScenario("failing-job")
             .whenScenarioStateIs(Scenario.STARTED)
-            .withQueryParam("jobName", WireMock.equalTo("failing_job"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"instances\":[]}"))
             .willSetStateTo("post-start"));
 
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/failing_job/start"))
+        wireMock.stubFor(post(urlPathEqualTo(startPath("failing_job")))
             .willReturn(aResponse().withStatus(204)));
 
         // Post-start: new failing instance (instanceId=222 > waterMark=0)
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("failing_job")))
             .inScenario("failing-job")
             .whenScenarioStateIs("post-start")
-            .withQueryParam("jobName", WireMock.equalTo("failing_job"))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -449,24 +476,22 @@ class DataArtsTasksTest {
         String staleJob = "anchored_job";
 
         // Pre-start list returns only the stale instance.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(staleJob)))
             .inScenario("anchored-start")
             .whenScenarioStateIs(Scenario.STARTED)
-            .withQueryParam("jobName", WireMock.equalTo(staleJob))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody(instanceListBody(staleId, "success")))
             .willSetStateTo("new-instance-visible"));
 
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + staleJob + "/start"))
+        wireMock.stubFor(post(urlPathEqualTo(startPath(staleJob)))
             .willReturn(aResponse().withStatus(204)));
 
         // Post-start list returns both the stale and the new instance; new one has higher ID.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(staleJob)))
             .inScenario("anchored-start")
             .whenScenarioStateIs("new-instance-visible")
-            .withQueryParam("jobName", WireMock.equalTo(staleJob))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -481,7 +506,7 @@ class DataArtsTasksTest {
                     }
                     """.formatted(newId, staleId))));
 
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + staleJob + "/instances/" + newId))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(staleJob, newId)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -530,14 +555,57 @@ class DataArtsTasksTest {
     }
 
     @Test
+    void getJobRun_withSecurityToken_sendsAndSignsTokenHeader() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var token = "STS-TEMP-TOKEN-abc123";
+
+        var task = GetJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .securityToken(Property.ofValue(token))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(INSTANCE_ID))
+            .build();
+
+        task.run(runContext);
+
+        // The token must reach the wire — AKSKSigner's returned header map contains only
+        // Authorization/Host/X-Sdk-Date, so it has to be added to the outgoing request explicitly.
+        // It must ALSO appear in SignedHeaders, or the server's canonical request won't match ours.
+        wireMock.verify(getRequestedFor(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
+            .withHeader("X-Security-Token", WireMock.equalTo(token))
+            .withHeader("Authorization", WireMock.containing("x-security-token")));
+    }
+
+    @Test
+    void getJobRun_withoutSecurityToken_omitsTokenHeader() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(INSTANCE_ID))
+            .build();
+
+        task.run(runContext);
+
+        wireMock.verify(getRequestedFor(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
+            .withoutHeader("X-Security-Token"));
+    }
+
+    @Test
     void getJobRun_noInstanceId_resolvesLatest() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         // GetJobRun uses listInstances (full paging), not the scenario-bound stub.
         // Use a separate job name to avoid scenario state interference.
         var getJobName = "get_latest_job";
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
-            .withQueryParam("jobName", WireMock.equalTo(getJobName))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(getJobName)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -560,8 +628,7 @@ class DataArtsTasksTest {
 
     @Test
     void getJobRun_noInstances_throws() {
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
-            .withQueryParam("jobName", WireMock.equalTo("empty_job"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath("empty_job")))
             .withQueryParam("limit", WireMock.equalTo("1"))
             .withQueryParam("offset", WireMock.equalTo("0"))
             .willReturn(aResponse()
@@ -588,7 +655,7 @@ class DataArtsTasksTest {
     @Test
     void stopJobRun_wait_pollsUntilManualStop() throws Exception {
         // Stub get instance to return manual-stop immediately after the stop call.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/instances/" + INSTANCE_ID))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -638,7 +705,7 @@ class DataArtsTasksTest {
     @Test
     void stopJobRun_maxDurationExceeded_throws() {
         // Instance remains in "running" state indefinitely — stop API accepts but state never transitions.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + JOB_NAME + "/instances/" + INSTANCE_ID))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -709,24 +776,22 @@ class DataArtsTasksTest {
         var nullStatusJob = "null_status_job";
 
         // Pre-start: no prior runs.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(nullStatusJob)))
             .inScenario("null-status")
             .whenScenarioStateIs(Scenario.STARTED)
-            .withQueryParam("jobName", WireMock.equalTo(nullStatusJob))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"instances\":[]}"))
             .willSetStateTo("post-start"));
 
-        wireMock.stubFor(post(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/start"))
+        wireMock.stubFor(post(urlPathEqualTo(startPath(nullStatusJob)))
             .willReturn(aResponse().withStatus(204)));
 
         // Post-start: instance visible with null status (freshly queued).
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/instances/detail"))
+        wireMock.stubFor(get(urlPathEqualTo(instancesDetailPath(nullStatusJob)))
             .inScenario("null-status")
             .whenScenarioStateIs("post-start")
-            .withQueryParam("jobName", WireMock.equalTo(nullStatusJob))
             .willReturn(aResponse()
                 .withStatus(200)
                 .withHeader("Content-Type", "application/json")
@@ -735,7 +800,7 @@ class DataArtsTasksTest {
                     """)));
 
         // Instance detail starts with null status, transitions to success.
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/instances/333"))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(nullStatusJob, 333)))
             .inScenario("null-status-detail")
             .whenScenarioStateIs(Scenario.STARTED)
             .willReturn(aResponse()
@@ -744,7 +809,7 @@ class DataArtsTasksTest {
                 .withBody("{\"instanceId\": 333, \"planTime\": 1700000000000}"))
             .willSetStateTo("succeeded"));
 
-        wireMock.stubFor(get(urlPathEqualTo("/v1/" + PROJECT_ID + "/jobs/" + nullStatusJob + "/instances/333"))
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(nullStatusJob, 333)))
             .inScenario("null-status-detail")
             .whenScenarioStateIs("succeeded")
             .willReturn(aResponse()

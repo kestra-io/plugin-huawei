@@ -44,25 +44,25 @@ class DataArtsUtilsTest {
     @Test
     void region_derivesComTldEndpoint() {
         var endpoint = DataArtsUtils.dataArtsEndpoint(null, "cn-north-4");
-        assertThat(endpoint, equalTo("https://dataarts.cn-north-4.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://dayu.cn-north-4.myhuaweicloud.com"));
     }
 
     @Test
     void region_euWest_derivesEndpoint() {
         var endpoint = DataArtsUtils.dataArtsEndpoint(null, "eu-west-101");
-        assertThat(endpoint, equalTo("https://dataarts.eu-west-101.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://dayu.eu-west-101.myhuaweicloud.com"));
     }
 
     @Test
     void region_withTrailingWhitespace_derivesCorrectEndpoint() {
         var endpoint = DataArtsUtils.dataArtsEndpoint(null, "  ap-southeast-1  ");
-        assertThat(endpoint, equalTo("https://dataarts.ap-southeast-1.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://dayu.ap-southeast-1.myhuaweicloud.com"));
     }
 
     @Test
     void blankEndpointOverride_fallsBackToRegion() {
         var endpoint = DataArtsUtils.dataArtsEndpoint("   ", "ap-southeast-1");
-        assertThat(endpoint, equalTo("https://dataarts.ap-southeast-1.myhuaweicloud.com"));
+        assertThat(endpoint, equalTo("https://dayu.ap-southeast-1.myhuaweicloud.com"));
     }
 
     @Test

@@ -29,15 +29,19 @@ import java.util.Map;
     title = "Start a DataArts Studio (DataArts Factory) job run",
     description = """
         Starts a batch job in Huawei Cloud DataArts Factory (DLF) by calling the
-        `POST /v1/{project_id}/jobs/{job_name}/start` API.
+        "Executing a Job Immediately" API (`POST /v2/{project_id}/factory/jobs/{job_name}/run-immediate`),
+        which performs a single on-demand run — not `start`, which only toggles a job's schedule.
 
-        Because the start API returns HTTP 204 with no instance ID, this task immediately queries the
-        instance list to resolve the newly created run. If `wait` is `true` (the default), it polls
-        until the run reaches a terminal state (`success`, `fail`, `running-exception`, or
+        Because the run-immediate response carries no instance ID this task relies on, it immediately
+        queries the instance list to resolve the newly created run. If `wait` is `true` (the default),
+        it polls until the run reaches a terminal state (`success`, `fail`, `running-exception`, or
         `manual-stop`), then fails the Kestra task if the job run did not succeed.
 
         Use `GetJobRun` to fetch the status of an in-progress run without waiting, or `StopJobRun`
         to stop a run before it completes.
+
+        Note: on some sovereign gateways (e.g. `tr-west-1`, T-Systems EU) the `run-immediate` route
+        rejects every request with `DLF.3051`; `StartJobRun` is not usable in those regions.
         """
 )
 @Plugin(
@@ -106,17 +110,6 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<Map<String, String>> jobParams;
 
     @Schema(
-        title = "Optional start date passed to the DataArts API",
-        description = """
-            When set, passed as the `start_date` field in the start request body. The DataArts Factory
-            API expects a numeric `yyyyMMdd` date — for example `20241030` for 30 October 2024. Leave
-            unset to start the job immediately without a date override.
-            """
-    )
-    @PluginProperty(group = "advanced")
-    private Property<Long> startDate;
-
-    @Schema(
         title = "Wait for the job run to reach a terminal state",
         description = """
             When `true` (the default), the task polls the job run status until it reaches `success`,
@@ -160,7 +153,6 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofHours(1));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(5));
         var rJobParams = runContext.render(jobParams).asMap(String.class, String.class);
-        var rStartDate = runContext.render(startDate).as(Long.class).orElse(null);
 
         var config = huaweiClientConfig(runContext);
 
@@ -177,9 +169,9 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
 
         DataArtsService.startJob(
             runContext, config, rEndpoint, rProjectId, rWorkspaceId,
-            rJobName, rJobParams.isEmpty() ? null : rJobParams, rStartDate);
+            rJobName, rJobParams.isEmpty() ? null : rJobParams);
 
-        // Resolve the new instance — the start API returns 204 with no body.
+        // Resolve the new instance — run-immediate does not return a usable instance ID.
         var instance = resolveNewestInstance(
             runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInterval, rMaxDuration, waterMark);
 
