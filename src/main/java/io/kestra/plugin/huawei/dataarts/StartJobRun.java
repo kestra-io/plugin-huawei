@@ -10,6 +10,7 @@ import io.kestra.plugin.huawei.AbstractConnection;
 import io.kestra.plugin.huawei.dataarts.models.SupplementDataRun;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -22,11 +23,15 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 @SuperBuilder
@@ -166,11 +171,16 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private static final String UTC_OFFSET = "+00";
 
     /**
-     * Matches a trailing UTC offset, but only when a {@code HH:mm} time precedes it — otherwise the
-     * {@code -28} in a bare {@code 2026-07-28} would look like an offset.
+     * Matches a value that is <em>already</em> in the exact wire form DataArts requires —
+     * {@code yyyy-MM-ddTHH:mm:ss ±HH}, nothing else. This is a narrow escape hatch, not a generic
+     * "looks like it has an offset" check: only a string byte-for-byte in the required form is
+     * passed through verbatim. Every other offset/zone-bearing spelling (a bare {@code Z}, a
+     * {@code +HH:mm} offset, fractional seconds, …) is parsed and re-emitted below instead, so it
+     * actually reaches the wire in the form the API parses rather than being forwarded as-is and
+     * silently rejected.
      */
-    private static final Pattern EXPLICIT_OFFSET =
-        Pattern.compile("\\d{2}:\\d{2}(?::\\d{2})?\\s*(?:[+-]\\d{2}(?::?\\d{2})?|Z)$");
+    private static final Pattern WIRE_FORM_EXACT =
+        Pattern.compile("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2} [+-]\\d{2}$");
 
     private static final int DATE_ONLY_LENGTH = "yyyy-MM-dd".length();
 
@@ -198,12 +208,13 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     @Schema(
         title = "Start of the business-date range to run the job for",
         description = """
-            Accepts `yyyy-MM-dd` (start of that day), `yyyy-MM-dd HH:mm:ss`, or an ISO date-time.
-            Times without a UTC offset are read as UTC. Defaults to the start of today (UTC).
+            Accepts `yyyy-MM-dd` (start of that day), `yyyy-MM-dd HH:mm:ss`, or an ISO date-time —
+            with or without a `Z`/`+HH:mm` offset. Times without an offset are read as UTC; times
+            with one are converted to UTC. Defaults to the start of today (UTC).
 
             DataArts itself requires the form `2026-07-28T00:00:00 +00` and does not parse any other
-            spelling, so the value is converted for you. A value that already ends in a UTC offset is
-            sent through verbatim, which is the escape hatch if the required form ever changes.
+            spelling, so the value is converted for you. A value already in that exact form is sent
+            through verbatim, which is the escape hatch if the required form ever changes.
             """
     )
     @PluginProperty(group = "main")
@@ -296,6 +307,23 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     @PluginProperty(group = "advanced")
     private Property<Duration> interval = Property.ofValue(Duration.ofSeconds(5));
 
+    // Guards against a duplicate/racing kill signal; cancels the remote supplement-data run (and
+    // every DLF instance it still has queued) so it stops executing/billing after the Kestra
+    // execution is killed. Excluded from equals/hashCode/toString: AtomicReference/AtomicBoolean use
+    // identity equality, so two otherwise-identical task instances would never be equal, and their
+    // content is a runtime implementation detail, not task config.
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final AtomicReference<Runnable> killable = new AtomicReference<>();
+
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final AtomicBoolean isKilled = new AtomicBoolean(false);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
         var rJobName = runContext.render(jobName).as(String.class).orElseThrow(
@@ -335,6 +363,15 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
             runContext, config, rEndpoint, rProjectId, rWorkspaceId,
             rRunName, rJobName, rStartDate, rEndDate, rParallel, rDayGranularity, rStopWhenFail,
             rRunTimeWindow);
+
+        killable.set(() -> stopQuietly(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName));
+        // Closes the create->set race: if kill() ran (and found killable still null) while the
+        // create call was in flight, re-invoke it now that the run is confirmed to exist.
+        // stopSupplementData is a no-op on an already-stopped run, so this is safe even if kill()
+        // never actually raced.
+        if (isKilled.get()) {
+            killable.get().run();
+        }
 
         // The create response carries only a request ID, so the run has to be read back by name.
         // Bounded by the same deadline as the status polling below, so both together respect
@@ -427,26 +464,77 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
      * {@code 23:59:59} when it is the end of the range, so {@code 2026-07-01} → {@code 2026-07-31}
      * covers all of July rather than stopping at midnight on the 31st.
      *
-     * <p>A value that already carries a UTC offset is passed through untouched: it is either already
-     * in the required form, or a deliberate attempt to reach a form this method doesn't produce.
+     * <p>A value already in the exact wire form is passed through untouched. Any other offset- or
+     * zone-bearing ISO value (a trailing {@code Z}, a {@code +HH:mm} offset, fractional seconds, …)
+     * is parsed and normalised to <b>UTC</b> rather than re-emitted with its original offset: the
+     * wire form DataArts documents only ever shows a whole-hour offset ({@code +08}), so converting
+     * a non-whole-hour offset (e.g. {@code +05:30}) to an untested spelling would risk exactly the
+     * silent {@code DLF.30121} this method exists to avoid. UTC is always exactly representable in
+     * the {@code ±HH} wire form, so every offset/zone-bearing input is converted to it.
      */
     private static String toWireDateTime(String raw, boolean endOfDay, String property) {
         var trimmed = raw.trim();
-        if (EXPLICIT_OFFSET.matcher(trimmed).find()) {
+
+        if (WIRE_FORM_EXACT.matcher(trimmed).matches()) {
             return trimmed;
         }
 
+        if (trimmed.length() == DATE_ONLY_LENGTH) {
+            try {
+                var dateTime = LocalDate.parse(trimmed).atTime(endOfDay ? END_OF_DAY : LocalTime.MIDNIGHT);
+                return dateTime.format(WIRE_DATE_TIME) + " " + UTC_OFFSET;
+            } catch (DateTimeParseException e) {
+                throw invalidDateTimeError(property, raw);
+            }
+        }
+
         try {
-            var dateTime = trimmed.length() == DATE_ONLY_LENGTH
-                ? LocalDate.parse(trimmed).atTime(endOfDay ? END_OF_DAY : LocalTime.MIDNIGHT)
-                // ISO parsing covers both 'T' and the space-separated spelling once normalised.
-                : LocalDateTime.parse(trimmed.replace(' ', 'T'));
+            var utc = OffsetDateTime.parse(trimmed).withOffsetSameInstant(ZoneOffset.UTC);
+            return utc.toLocalDateTime().format(WIRE_DATE_TIME) + " " + UTC_OFFSET;
+        } catch (DateTimeParseException ignored) {
+            // Not an offset/zone-bearing ISO value — fall through to the offset-free forms below.
+        }
+
+        try {
+            // ISO parsing covers both 'T' and the space-separated spelling once normalised.
+            var dateTime = LocalDateTime.parse(trimmed.replace(' ', 'T'));
             return dateTime.format(WIRE_DATE_TIME) + " " + UTC_OFFSET;
         } catch (DateTimeParseException e) {
-            throw new IllegalArgumentException(
-                property + " ('" + raw + "') is not a date or date-time. Use 'yyyy-MM-dd'," +
-                " 'yyyy-MM-dd HH:mm:ss', or DataArts' own form 'yyyy-MM-ddTHH:mm:ss +00'." +
-                " Epoch milliseconds are not accepted — DataArts does not parse them either.");
+            throw invalidDateTimeError(property, raw);
+        }
+    }
+
+    private static IllegalArgumentException invalidDateTimeError(String property, String raw) {
+        return new IllegalArgumentException(
+            property + " ('" + raw + "') is not a date or date-time. Use 'yyyy-MM-dd'," +
+            " 'yyyy-MM-dd HH:mm:ss', an ISO date-time (optionally with a 'Z' or '+HH:mm' offset)," +
+            " or DataArts' own form 'yyyy-MM-ddTHH:mm:ss +00'." +
+            " Epoch milliseconds are not accepted — DataArts does not parse them either.");
+    }
+
+    /**
+     * Best-effort stop of the supplement-data run, called from {@link #kill()}. Never throws: a
+     * failure here (the run already finished, a transient API error, …) must not surface as a
+     * second failure on top of the kill signal, so it is logged and swallowed.
+     */
+    private static void stopQuietly(
+        RunContext runContext,
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint, String projectId, String workspaceId, String runName
+    ) {
+        try {
+            DataArtsService.stopSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+        } catch (Exception e) {
+            runContext.logger().warn(
+                "Failed to stop DataArts Factory supplement-data run '{}' after kill: {}",
+                runName, e.getMessage());
+        }
+    }
+
+    @Override
+    public void kill() {
+        if (isKilled.compareAndSet(false, true)) {
+            Optional.ofNullable(killable.get()).ifPresent(Runnable::run);
         }
     }
 

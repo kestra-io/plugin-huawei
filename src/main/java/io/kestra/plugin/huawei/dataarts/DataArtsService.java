@@ -22,10 +22,13 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Static REST helpers for the DataArts Factory V2 API.
@@ -123,7 +126,9 @@ public final class DataArtsService {
      */
     public static boolean isSupplementDataTerminalState(String status) {
         if (status == null) return false;
-        return switch (status.toUpperCase()) {
+        // Locale.ROOT: this plugin explicitly targets tr-west-1, where a default (Turkish) locale
+        // would fold 'i' to 'İ' (U+0130) under String#toUpperCase() and break this match.
+        return switch (status.toUpperCase(Locale.ROOT)) {
             case "SUCCESS", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED", "STOP", "STOPPED" -> true;
             default -> false;
         };
@@ -270,11 +275,15 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         String name
     ) throws Exception {
-        var path = "/v2/" + projectId + "/factory/supplement-data"
-            + "?name=" + urlEncode(name)
-            + "&page=0&size=100";
+        var path = "/v2/" + projectId + "/factory/supplement-data";
+        // Raw (unencoded) — invoke() adds these directly via addQueryParam so the SDK signs and the
+        // wire URL are encoded exactly once, consistently. Pre-encoding here (as this used to do)
+        // made the value encoded twice over in the signed canonical request while the wire URL
+        // stayed single-encoded, an opaque APIGW.0301 signature mismatch for a name containing a
+        // space or a non-ASCII character.
+        var queryParams = Map.of("name", name, "page", "0", "size", "100");
 
-        var response = invoke(config, endpoint, path, "GET", workspaceId, null);
+        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -329,7 +338,13 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         String name
     ) throws Exception {
-        var path = "/v2/" + projectId + "/factory/supplement-data/" + urlEncode(name) + "/stop";
+        // Raw (unencoded) name: invoke() percent-encodes each path segment exactly once when it
+        // builds the wire URL, using the same algorithm AKSKSigner applies internally when it
+        // re-encodes the path for the canonical request it signs. Pre-encoding here (as this used to
+        // do, via a plain URLEncoder call) is wrong twice over — URLEncoder's '+' for space is not
+        // valid inside a path segment in the first place, and re-encoding an already-encoded segment
+        // during signing would produce yet another value, out of step with the wire request.
+        var path = "/v2/" + projectId + "/factory/supplement-data/" + name + "/stop";
         var response = invoke(config, endpoint, path, "POST", workspaceId, "{}");
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
@@ -410,12 +425,13 @@ public final class DataArtsService {
     ) throws Exception {
         // v2 carries the job name as a path segment, so the exact-match behaviour the v1 route
         // needed `jobName` + `preciseQuery=true` query params for is now inherent — a path segment
-        // cannot substring-match a differently-named job.
-        var path = "/v2/" + projectId + "/factory/jobs/" + urlEncode(jobName) + "/instances/detail"
-            + "?limit=" + limit
-            + "&offset=" + offset;
+        // cannot substring-match a differently-named job. jobName is passed raw (unencoded); invoke()
+        // is the single place path segments and query values get percent-encoded, for both the wire
+        // request and the signed canonical request.
+        var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/detail";
+        var queryParams = Map.of("limit", String.valueOf(limit), "offset", String.valueOf(offset));
 
-        var response = invoke(config, endpoint, path, "GET", workspaceId, null);
+        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -448,7 +464,7 @@ public final class DataArtsService {
         String jobName,
         long instanceId
     ) throws Exception {
-        var path = "/v2/" + projectId + "/factory/jobs/" + urlEncode(jobName) + "/instances/" + instanceId;
+        var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/" + instanceId;
         var response = invoke(config, endpoint, path, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
@@ -500,30 +516,40 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         @Nullable String body
     ) throws IOException, InterruptedException {
-        var url = endpoint + path;
+        return invoke(config, endpoint, path, Map.of(), method, workspaceId, body);
+    }
 
-        // Build the SDK HttpRequest for signing — path must not include the host.
-        // Extract path+query from the full URL for the signer (it derives the host from endpoint).
-        var pathOnly = path.contains("?") ? path.substring(0, path.indexOf('?')) : path;
-        var query = path.contains("?") ? path.substring(path.indexOf('?') + 1) : "";
-
+    /**
+     * @param path        RAW (unencoded) path, no query string — e.g. a caller-chosen run name goes
+     *                     straight into the path exactly as given, never pre-encoded. See
+     *                     {@code queryParams} for why.
+     * @param queryParams RAW (unencoded) query key/value pairs, added via {@code addQueryParam} so
+     *                     {@link AKSKSigner} is the only thing that percent-encodes them for the
+     *                     canonical request it signs. Pre-encoding a value here (as this used to do)
+     *                     made the signed canonical query string doubly-encoded while the wire URL
+     *                     below stayed singly-encoded — an opaque {@code APIGW.0301} signature
+     *                     mismatch for any value containing a space or a non-ASCII character. The
+     *                     same reasoning applies to path segments: {@link AKSKSigner} always
+     *                     re-encodes them from the raw path when it builds the canonical URI, so the
+     *                     path given here must be raw too, and {@link #encodeUriComponent} is what
+     *                     encodes it — once — for the request actually sent below.
+     */
+    private static HttpResponse<String> invoke(
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String path,
+        Map<String, String> queryParams,
+        String method,
+        @Nullable String workspaceId,
+        @Nullable String body
+    ) throws IOException, InterruptedException {
         var sdkReqBuilder = HttpRequest.newBuilder()
             .withEndpoint(endpoint)
-            .withPath(pathOnly)
+            .withPath(path)
             .withMethod(HttpMethod.valueOf(method))
             .withContentType("application/json");
 
-        if (!query.isBlank()) {
-            // addQueryParam expects List<String>; the query is already encoded so we re-parse it
-            for (var kv : query.split("&")) {
-                var eq = kv.indexOf('=');
-                if (eq > 0) {
-                    var k = kv.substring(0, eq);
-                    var v = kv.substring(eq + 1);
-                    sdkReqBuilder.addQueryParam(k, List.of(v));
-                }
-            }
-        }
+        queryParams.forEach((k, v) -> sdkReqBuilder.addQueryParam(k, List.of(v)));
 
         // Always sign the exact body bytes that will be sent on the wire so HMAC-SHA256 matches.
         if (body != null) {
@@ -545,6 +571,19 @@ public final class DataArtsService {
         }
 
         var sdkReq = sdkReqBuilder.build();
+
+        // The path segments and query values are percent-encoded exactly once here, with the same
+        // algorithm AKSKSigner applies internally (SignUtils#urlEncode — space -> %20, '*' -> %2A,
+        // '~' left literal). Building the wire URL any other way (e.g. java.net.URLEncoder alone,
+        // which leaves '*' unescaped and encodes space as '+') would disagree with the canonical
+        // request the signer computed from the same raw path/query above.
+        var wirePath = Arrays.stream(path.split("/", -1))
+            .map(DataArtsService::encodeUriComponent)
+            .collect(Collectors.joining("/"));
+        var wireQuery = queryParams.entrySet().stream()
+            .map(e -> encodeUriComponent(e.getKey()) + "=" + encodeUriComponent(e.getValue()))
+            .collect(Collectors.joining("&"));
+        var url = endpoint + wirePath + (wireQuery.isEmpty() ? "" : "?" + wireQuery);
 
         // Sign with AK/SK if available; otherwise fall back to X-Auth-Token.
         // Content-Type is NOT set here — AKSKSigner includes it in the signed headers map
@@ -568,7 +607,7 @@ public final class DataArtsService {
             // JDK HttpRequest.Builder rejects restricted headers (Host, Connection, …) that the
             // signer adds for canonical request computation. The JDK sets Host automatically.
             signedHeaders.entrySet().stream()
-                .filter(e -> !RESTRICTED_HEADERS.contains(e.getKey().toLowerCase()))
+                .filter(e -> !RESTRICTED_HEADERS.contains(e.getKey().toLowerCase(Locale.ROOT)))
                 .forEach(e -> jdkReqBuilder.header(e.getKey(), e.getValue()));
             if (hasSecurityToken) {
                 jdkReqBuilder.header(SECURITY_TOKEN_HEADER, securityToken);
@@ -729,7 +768,20 @@ public final class DataArtsService {
         return "";
     }
 
-    private static String urlEncode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    /**
+     * Percent-encodes a single path segment or query value exactly the way the Huawei Cloud SDK's
+     * {@code AKSKSigner} does internally ({@code SignUtils#urlEncode(String, boolean)}, verified via
+     * {@code javap} on {@code huaweicloud-sdk-core}): {@link URLEncoder}'s UTF-8 form-encoding,
+     * normalised to proper RFC 3986 form — space becomes {@code %20} rather than the {@code '+'}
+     * {@link URLEncoder} alone would produce (wrong inside a path segment), {@code '*'} becomes
+     * {@code %2A}, and {@code '~'} is left unescaped. This is the only place a path segment or query
+     * value gets encoded on the wire-request side, matching the one encoding pass the SDK applies on
+     * the signing side from the same raw string.
+     */
+    private static String encodeUriComponent(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8)
+            .replace("+", "%20")
+            .replace("*", "%2A")
+            .replace("%7E", "~");
     }
 }

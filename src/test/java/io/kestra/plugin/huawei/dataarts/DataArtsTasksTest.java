@@ -26,12 +26,15 @@ import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @KestraTest
@@ -324,11 +327,12 @@ class DataArtsTasksTest {
     }
 
     /**
-     * A value that already carries a UTC offset is the escape hatch for a wire form this task does
-     * not generate, so it must reach the API byte-for-byte — including a non-UTC offset.
+     * A value already in the exact wire form ({@code yyyy-MM-ddTHH:mm:ss ±HH}, no minutes on the
+     * offset) is the escape hatch for a spelling this task doesn't otherwise generate, so it must
+     * reach the API byte-for-byte — including a non-UTC offset.
      */
     @Test
-    void startJobRun_offsetBearingDates_arePassedThroughVerbatim() throws Exception {
+    void startJobRun_exactWireFormDates_arePassedThroughVerbatim() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         startTask()
@@ -341,6 +345,87 @@ class DataArtsTasksTest {
         wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
             .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +08\""))
             .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T23:59:59 +08\"")));
+    }
+
+    /**
+     * A trailing {@code Z} is the ISO spelling a Kestra expression like
+     * {@code {{ now() }}} commonly produces. It must be converted to the wire form (as UTC), not
+     * passed through verbatim — the old, over-broad "looks like it has an offset" regex used to
+     * forward it untouched, and DataArts silently fails to parse a bare {@code Z} suffix.
+     */
+    @Test
+    void startJobRun_zSuffixDates_areConvertedToUtcWireForm() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01T00:00:00Z"))
+            .endDate(Property.ofValue("2026-07-01T23:59:59Z"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T23:59:59 +00\"")));
+    }
+
+    /**
+     * A {@code +HH:mm} offset is converted to UTC rather than re-emitted with its original offset —
+     * the wire form DataArts documents only ever shows a whole-hour offset, so this is also the case
+     * that exercises an actual instant shift (2 hours earlier here), not just a re-spelling.
+     */
+    @Test
+    void startJobRun_explicitOffsetDates_areConvertedToUtcWireForm() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01T00:00:00+02:00"))
+            .endDate(Property.ofValue("2026-07-01T23:59:59+02:00"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-06-30T22:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T21:59:59 +00\"")));
+    }
+
+    /** Fractional seconds must not break offset parsing, and are silently dropped on conversion. */
+    @Test
+    void startJobRun_fractionalSecondsWithZSuffix_areConvertedAndTruncated() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01T00:00:00.123Z"))
+            .endDate(Property.ofValue("2026-07-01T23:59:59.999Z"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-01T23:59:59 +00\"")));
+    }
+
+    /**
+     * A non-whole-hour offset (e.g. {@code +05:30}) has no representation in the {@code ±HH} wire
+     * form DataArts documents, so it is converted to UTC rather than rounded or rejected — UTC is
+     * always exactly representable in that form.
+     */
+    @Test
+    void startJobRun_nonWholeHourOffsetDates_areConvertedToUtcWireForm() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .startDate(Property.ofValue("2026-07-01T05:30:00+05:30"))
+            .endDate(Property.ofValue("2026-07-02T05:30:00+05:30"))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withRequestBody(WireMock.containing("\"start_date\":\"2026-07-01T00:00:00 +00\""))
+            .withRequestBody(WireMock.containing("\"end_date\":\"2026-07-02T00:00:00 +00\"")));
     }
 
     /**
@@ -363,12 +448,14 @@ class DataArtsTasksTest {
     }
 
     /**
-     * An offset-bearing {@code startDate} is passed through verbatim, so it can clear the format
-     * check and still not begin with the {@code yyyy-MM-dd} the default {@code endDate} is derived
-     * from — the one case where the range end genuinely cannot be inferred.
+     * A malformed {@code startDate} that used to slip through the old, over-broad "looks like it has
+     * an offset" regex (and then fail later, inside {@code sameDayAs}, with a confusing "endDate is
+     * required" message) must now fail at the format check itself: the escape hatch only matches a
+     * value byte-for-byte in the exact wire form, so a {@code dd/MM/yyyy}-style date can no longer
+     * reach it.
      */
     @Test
-    void startJobRun_offsetStartDateWithoutLeadingDateAndNoEndDate_throwsActionableError() {
+    void startJobRun_malformedStartDateWithOffsetSuffix_throwsActionableError() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = startTask()
@@ -377,8 +464,8 @@ class DataArtsTasksTest {
             .build();
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
-        assertThat(ex.getMessage(), containsString("endDate is required"));
-        assertThat(ex.getMessage(), containsString("01/07/2026"));
+        assertThat(ex.getMessage(), containsString("startDate ('01/07/2026 00:00:00 +00')"));
+        assertThat(ex.getMessage(), containsString("is not a date or date-time"));
     }
 
     /** A startDate in no recognised form fails on the format check, before endDate is derived. */
@@ -648,6 +735,121 @@ class DataArtsTasksTest {
 
         var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), containsString("projectId"));
+    }
+
+    /**
+     * A {@code runName} containing a space and a non-ASCII character must reach the {@code GET}
+     * query string encoded exactly once. The fixed-value fixtures used everywhere else in this class
+     * ({@code kestra_test_run_0001}, {@code my_etl_job}) are all alnum/underscore, which
+     * {@code URLEncoder} never touches — so this is the only test that would have caught the
+     * double-encoding bug: the old code pre-encoded {@code name} into the query string, then
+     * {@code invoke()} re-split that already-encoded string and re-added it via
+     * {@code addQueryParam}, which the SDK's signer encoded a <em>second</em> time for the canonical
+     * request it signs — an opaque {@code APIGW.0301} against a live API, while every WireMock test
+     * using an alnum name stayed green throughout.
+     */
+    @Test
+    void startJobRun_runNameWithSpaceAndNonAscii_reachesTheCorrectlyEncodedQueryUrl() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var runName = "kestra café run";
+
+        wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(runName))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(supplementDataListBody(runName, "SUCCESS"))));
+
+        var output = startTask()
+            .runName(Property.ofValue(runName))
+            .wait(Property.ofValue(false))
+            .build()
+            .run(runContext);
+
+        assertThat(output.getRunName(), equalTo(runName));
+
+        var received = wireMock.findAll(getRequestedFor(urlPathEqualTo(supplementDataPath())));
+        assertThat(received, hasSize(1));
+        // Pins the actual wire bytes: a double-encode (the original bug) would leave a literal
+        // '%25' sequence here instead of a single percent-encoded UTF-8 accented character.
+        assertThat(received.get(0).getUrl(), containsString("name=kestra%20caf%C3%A9%20run"));
+    }
+
+    /**
+     * The analogous case for a {@code runName} used as a <em>path</em> segment (StopJobRun), where
+     * {@code URLEncoder}'s '+' for space is doubly wrong: it's not valid in a path segment in the
+     * first place (a server would read it as a literal plus sign, not a space), and re-encoding an
+     * already-encoded segment during signing would produce yet another, disagreeing value.
+     */
+    @Test
+    void stopJobRun_runNameWithSpaceAndNonAscii_reachesTheCorrectlyEncodedPathUrl() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var runName = "kestra café run";
+
+        wireMock.stubFor(post(urlPathMatching(
+                "/v2/" + PROJECT_ID + "/factory/supplement-data/.*/stop"))
+            .willReturn(aResponse().withStatus(204)));
+
+        var task = StopJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .runName(Property.ofValue(runName))
+            .wait(Property.ofValue(false))
+            .build();
+
+        task.run(runContext);
+
+        var received = wireMock.findAll(postRequestedFor(urlPathMatching(
+            "/v2/" + PROJECT_ID + "/factory/supplement-data/.*/stop")));
+        assertThat(received, hasSize(1));
+        assertThat(received.get(0).getUrl(), containsString(
+            "/v2/" + PROJECT_ID + "/factory/supplement-data/kestra%20caf%C3%A9%20run/stop"));
+    }
+
+    // ── kill() ───────────────────────────────────────────────────────────────────
+
+    @Test
+    void startJobRun_kill_stopsTheSupplementDataRun() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask().wait(Property.ofValue(false)).build();
+        task.run(runContext);
+
+        task.kill();
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementStopPath(RUN_NAME))));
+    }
+
+    /**
+     * A kill signal arriving before the run is even created must still be honoured once the run
+     * name becomes known: {@code killable} is set right after {@code createSupplementData} succeeds,
+     * and {@code isKilled} is checked immediately afterwards to close exactly this race.
+     */
+    @Test
+    void startJobRun_killBeforeRun_stopsAsSoonAsRunNameIsKnown() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask().wait(Property.ofValue(false)).build();
+        task.kill();
+        task.run(runContext);
+
+        wireMock.verify(postRequestedFor(urlPathEqualTo(supplementStopPath(RUN_NAME))));
+    }
+
+    /** kill() must never propagate a failure from the best-effort stop call. */
+    @Test
+    void startJobRun_kill_neverThrows_whenStopFails() throws Exception {
+        wireMock.stubFor(post(urlPathEqualTo(supplementStopPath(RUN_NAME)))
+            .willReturn(aResponse().withStatus(500)));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = startTask().wait(Property.ofValue(false)).build();
+        task.run(runContext);
+
+        assertDoesNotThrow(task::kill);
     }
 
     // ── Status vocabularies ─────────────────────────────────────────────────────
