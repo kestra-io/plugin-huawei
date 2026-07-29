@@ -16,7 +16,6 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.AwsSessionCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
@@ -32,10 +31,20 @@ import java.util.Map;
 /**
  * Base class for Huawei Cloud GeminiDB for NoSQL (DynamoDB-Compatible API) tasks.
  *
- * <p>GeminiDB exposes a wire-compatible DynamoDB data-plane API over HTTPS with SigV4 AK/SK
- * signing (Huawei's own docs connect via boto3 with an explicit {@code endpoint_url}). There is no
- * Huawei-specific SDK for item-level operations, so the AWS SDK v2 {@code dynamodb} module is used
- * directly as the transport, pointed at the instance's connection address instead of an AWS region.
+ * <p>GeminiDB exposes a wire-compatible DynamoDB data-plane API with SigV4 signing (Huawei's own
+ * docs connect via boto3 with an explicit {@code endpoint_url}). There is no Huawei-specific SDK for
+ * item-level operations, so the AWS SDK v2 {@code dynamodb} module is used directly as the
+ * transport, pointed at the instance's connection address instead of an AWS region.
+ *
+ * <p><strong>The credentials are the instance's database account, not Huawei IAM.</strong> The
+ * data plane is served by the GeminiDB instance itself rather than through the API gateway, so it
+ * never consults IAM: {@code accessKeyId} must be the database username ({@code rwuser}) and
+ * {@code secretAccessKey} the admin password set when the instance was bought. A perfectly valid
+ * IAM AK/SK — even with {@code GeminiDB FullAccess} correctly scoped to the instance's project —
+ * is rejected with a bare {@code AccessDeniedException: auth failed} carrying no error code and no
+ * detail. Verified live against {@code ap-southeast-3} on 2026-07-29. Consequently
+ * {@code securityToken} and {@code temporaryCredentials} cannot work here at all; {@link
+ * #client(RunContext)} rejects them up front rather than letting them fail as an opaque auth error.
  */
 @SuperBuilder
 @ToString
@@ -58,9 +67,14 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         title = "GeminiDB instance connection address",
         description = """
             The DynamoDB-compatible API endpoint of the GeminiDB for NoSQL instance, e.g.
-            `https://192.168.0.10:8635`. Find it on the instance's "Connection Management" page in
-            the Huawei Cloud console. Unlike other Huawei Cloud services, this address is
-            per-instance and cannot be derived from `region`.
+            `http://192.168.0.10:8000`. Find it under *Connections* on the instance's console page.
+            Unlike other Huawei Cloud services, this address is per-instance and cannot be derived
+            from `region`.
+
+            The data-plane port is **8000** and is fixed: it cannot be chosen at creation or changed
+            afterwards (a high-availability port 80 is also documented). Do not use 8635 — that is
+            the Cassandra/CQL port of the underlying kernel and does not speak the DynamoDB
+            protocol.
 
             `region` is used only for SigV4 request signing and does not affect routing — GeminiDB
             routes solely by this `endpoint` property; leave `region` at its default unless signing
@@ -85,7 +99,7 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         var rEndpoint = runContext.render(this.endpoint).as(String.class)
             .orElseThrow(() -> new IllegalArgumentException(
                 "GeminiDB requires the 'endpoint' property — set it to the DynamoDB-compatible " +
-                "connection address of the GeminiDB instance (e.g. https://192.168.0.10:8635)."));
+                "connection address of the GeminiDB instance (e.g. http://192.168.0.10:8000)."));
 
         URI endpointUri;
         try {
@@ -93,22 +107,35 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(
                 "Invalid 'endpoint' value '" + rEndpoint + "' — must be a valid URI such as " +
-                "https://192.168.0.10:8635", e);
+                "http://192.168.0.10:8000", e);
         }
 
         if (config.accessKeyId() == null || config.accessKeyId().isBlank()) {
             throw new IllegalArgumentException(
-                "AK/SK credentials are required — set 'accessKeyId' and 'secretAccessKey' properties, " +
-                "or configure 'temporaryCredentials' for inline IAM credential exchange.");
+                "GeminiDB requires database-account credentials — set 'accessKeyId' to the database " +
+                "username ('rwuser') and 'secretAccessKey' to the admin password set when the " +
+                "instance was bought. IAM AK/SK credentials do not work: the DynamoDB-compatible " +
+                "data plane is served by the instance itself and never consults IAM.");
         }
         if (config.secretAccessKey() == null || config.secretAccessKey().isBlank()) {
             throw new IllegalArgumentException(
-                "AK/SK credentials are incomplete — 'secretAccessKey' is required when 'accessKeyId' is set.");
+                "GeminiDB credentials are incomplete — 'secretAccessKey' (the instance admin " +
+                "password) is required when 'accessKeyId' is set.");
         }
 
-        var credentials = (config.securityToken() != null && !config.securityToken().isBlank())
-            ? AwsSessionCredentials.create(config.accessKeyId(), config.secretAccessKey(), config.securityToken())
-            : AwsBasicCredentials.create(config.accessKeyId(), config.secretAccessKey());
+        // The data plane authenticates against the instance's own database account, so an STS triple
+        // has nothing to authenticate against. Left to reach the wire it comes back as a bare
+        // `AccessDeniedException: auth failed`, which is indistinguishable from a wrong password —
+        // so refuse it here, where the reason can actually be stated.
+        if (config.securityToken() != null && !config.securityToken().isBlank()) {
+            throw new IllegalArgumentException(
+                "GeminiDB does not support 'securityToken' or 'temporaryCredentials': the " +
+                "DynamoDB-compatible data plane authenticates against the instance's database " +
+                "account, not Huawei IAM, so temporary IAM credentials can never be accepted. " +
+                "Use 'accessKeyId: rwuser' with the instance admin password as 'secretAccessKey'.");
+        }
+
+        var credentials = AwsBasicCredentials.create(config.accessKeyId(), config.secretAccessKey());
 
         var rRegion = (config.region() != null && !config.region().isBlank()) ? config.region() : DEFAULT_SIGNING_REGION;
 

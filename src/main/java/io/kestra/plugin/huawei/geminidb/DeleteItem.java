@@ -27,6 +27,10 @@ import java.util.Map;
     title = "Delete a GeminiDB (DynamoDB-compatible) item by key",
     description = """
         Deletes a single item using the provided primary key; no condition expression is applied.
+
+        Authenticate with the instance's database account — `accessKeyId: rwuser` and the instance
+        admin password as `secretAccessKey`. Huawei IAM AK/SK credentials are not accepted by the
+        DynamoDB-compatible data plane.
         """
 )
 @Plugin(
@@ -41,9 +45,9 @@ import java.util.Map;
                 tasks:
                   - id: delete_item
                     type: io.kestra.plugin.huawei.geminidb.DeleteItem
-                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
-                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-                    endpoint: "https://192.168.0.10:8635"
+                    accessKeyId: rwuser
+                    secretAccessKey: "{{ secret('GEMINIDB_ADMIN_PASSWORD') }}"
+                    endpoint: "http://192.168.0.10:8000"
                     tableName: persons
                     key:
                       id: "1"

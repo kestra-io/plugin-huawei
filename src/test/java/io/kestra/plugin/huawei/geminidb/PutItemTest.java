@@ -10,8 +10,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class PutItemTest extends AbstractGeminiDbTest {
 
@@ -35,24 +37,24 @@ class PutItemTest extends AbstractGeminiDbTest {
         assertThat(response.item().get("lastname").s(), equalTo("Doe"));
     }
 
+    // GeminiDB's DynamoDB-compatible data plane authenticates against the instance's own database
+    // account (`rwuser` + admin password) and never consults IAM, so an STS security token has
+    // nothing to authenticate against. dynamodb-local accepts any credential and would happily let
+    // this through, which is exactly why the rejection has to be asserted here rather than trusted
+    // to surface at runtime — on real GeminiDB it comes back as an undiagnosable
+    // `AccessDeniedException: auth failed`.
     @Test
-    void putItem_withSecurityToken_usesSessionCredentials() throws Exception {
-        var id = IdUtils.create();
+    void putItem_withSecurityToken_isRejectedUpFront() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = applyGeminiDbConfig(PutItem.builder())
             .securityToken(Property.ofValue("dummy-session-token"))
-            .item(Property.ofValue(Map.of("id", id, "firstname", "Jane")))
+            .item(Property.ofValue(Map.of("id", IdUtils.create(), "firstname", "Jane")))
             .build();
 
-        var output = task.run(runContext);
-        assertThat(output, nullValue());
-
-        var response = rawClient.getItem(builder -> builder
-            .tableName(testTableName)
-            .key(Map.of("id", AttributeValue.fromS(id))));
-
-        assertThat(response.item().get("firstname").s(), equalTo("Jane"));
+        var exception = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(exception.getMessage(), containsString("does not support 'securityToken'"));
+        assertThat(exception.getMessage(), containsString("rwuser"));
     }
 
     @Test

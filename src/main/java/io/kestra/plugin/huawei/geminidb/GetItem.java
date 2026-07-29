@@ -28,6 +28,10 @@ import java.util.Map;
     description = """
         Retrieves a single item by its primary key. Returns an empty `row` when the item does not
         exist.
+
+        Authenticate with the instance's database account — `accessKeyId: rwuser` and the instance
+        admin password as `secretAccessKey`. Huawei IAM AK/SK credentials are not accepted by the
+        DynamoDB-compatible data plane.
         """
 )
 @Plugin(
@@ -42,9 +46,9 @@ import java.util.Map;
                 tasks:
                   - id: get_item
                     type: io.kestra.plugin.huawei.geminidb.GetItem
-                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
-                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-                    endpoint: "https://192.168.0.10:8635"
+                    accessKeyId: rwuser
+                    secretAccessKey: "{{ secret('GEMINIDB_ADMIN_PASSWORD') }}"
+                    endpoint: "http://192.168.0.10:8000"
                     tableName: persons
                     key:
                       id: "1"
