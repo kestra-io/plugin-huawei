@@ -49,6 +49,9 @@ final class DisService {
                 try {
                     builder.withRegion(DisRegion.valueOf(rRegion));
                 } catch (IllegalArgumentException e) {
+                    // This fallback also resolves to withEndpoint(), so it bypasses project
+                    // auto-discovery just like an explicit override — and needs the same guard.
+                    DisUtils.requireProjectIdForRegionNotInSdkEnum(rRegion, config.projectId());
                     builder.withEndpoint(DisUtils.disEndpoint(null, rRegion, null));
                 }
             }

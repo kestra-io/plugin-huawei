@@ -41,6 +41,25 @@ public final class DisUtils {
         }
     }
 
+    /**
+     * Same project-id requirement as {@link #requireProjectIdForCustomEndpoint}, for the case where the
+     * region is absent from the SDK's {@code DisRegion} enum. The client then falls back to a derived
+     * endpoint via {@code withEndpoint}, which bypasses project auto-discovery exactly as an explicit
+     * {@code endpointOverride}/{@code endpointSuffix} does — but neither of those properties is set, so
+     * {@link #requireProjectIdForCustomEndpoint} cannot see it. Keyed off the <em>resolved</em> outcome
+     * instead of the input properties, so this path can no longer slip past the guard and produce an
+     * opaque gateway 400 with {@code {project_id}} left unsubstituted.
+     */
+    public static void requireProjectIdForRegionNotInSdkEnum(String region, String projectId) {
+        if (!isNotBlank(projectId)) {
+            throw new IllegalArgumentException(
+                "DIS requires `projectId` for region '" + region + "': that region is not in the SDK's " +
+                "known-region list, so the endpoint is derived and project auto-discovery is unavailable — " +
+                "set the 'projectId' property to your Huawei Cloud project ID for that region " +
+                "(found in the console under 'My Credentials' → 'API Credentials').");
+        }
+    }
+
     private static boolean isNotBlank(String s) {
         return s != null && !s.isBlank();
     }
