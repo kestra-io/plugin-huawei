@@ -136,31 +136,14 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
         }
 
         var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
-        var current = DataArtsService.getSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
+        var seed = DataArtsService.getSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
 
-        while (current == null || !DataArtsService.isSupplementDataTerminalState(current.getStatus())) {
-            try {
-                Thread.sleep(rInterval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
-            if (System.currentTimeMillis() > deadline) {
-                throw new IllegalStateException(
-                    "DataArts Factory supplement-data run '" + rRunName +
-                    "' did not reach a terminal state within " + rMaxDuration +
-                    " — last status: " + (current == null ? "unknown" : current.getStatus()) +
-                    ". Increase maxDuration or check the DataArts Studio console.");
-            }
-            var refreshed = DataArtsService.getSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
-            if (refreshed != null) {
-                current = refreshed;
-            }
-            // INFO rather than DEBUG: the supplement-data status vocabulary is undocumented, so these
-            // lines are how the real values get discovered from a run's logs.
-            runContext.logger().info("Supplement-data run '{}' status={}",
-                rRunName, current == null ? "not yet visible" : current.getStatus());
-        }
+        var current = DataArtsService.pollUntilTerminal(
+            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, seed, rInterval, deadline,
+            lastStatus -> "DataArts Factory supplement-data run '" + rRunName +
+                "' did not reach a terminal state within " + rMaxDuration +
+                " — last status: " + lastStatus +
+                ". Increase maxDuration or check the DataArts Studio console.");
 
         runContext.logger().info("Supplement-data run '{}' stopped, final status={}", rRunName, current.getStatus());
 

@@ -252,6 +252,29 @@ class DataArtsTasksTest {
             .withHeader("Content-Type", WireMock.not(WireMock.containing(","))));
     }
 
+    /**
+     * A run already terminal on its first read returns without a further poll cycle.
+     *
+     * <p>{@code DataArtsService.pollUntilTerminal} sleeps <em>before</em> refreshing, so a
+     * seed-terminal run must skip the loop body entirely. Restructuring it to refresh first — the
+     * obvious "simplification" — would add a full {@code interval} of latency plus a redundant
+     * request to every wait that was already done, which no other assertion here would catch.
+     */
+    @Test
+    void startJobRun_waitTrue_terminalOnFirstRead_doesNotPollAgain() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        startTask()
+            .wait(Property.ofValue(true))
+            .maxDuration(Property.ofValue(Duration.ofSeconds(30)))
+            .build()
+            .run(runContext);
+
+        // Exactly one: the awaitVisible read, which already saw SUCCESS.
+        wireMock.verify(1, getRequestedFor(urlPathEqualTo(supplementDataPath()))
+            .withQueryParam("name", WireMock.equalTo(RUN_NAME)));
+    }
+
     @Test
     void startJobRun_waitFalse_returnsImmediately() throws Exception {
         var runContext = runContextFactory.of(Collections.emptyMap());

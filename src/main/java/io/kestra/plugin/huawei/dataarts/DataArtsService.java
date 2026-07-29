@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -140,6 +141,74 @@ public final class DataArtsService {
      */
     public static boolean isSupplementDataSuccessState(String status) {
         return status != null && "SUCCESS".equalsIgnoreCase(status);
+    }
+
+    /**
+     * Polls a supplement-data run until it reaches a terminal state, and returns it.
+     *
+     * <p>Shared by {@code StartJobRun} (waiting for a run it just created) and {@code StopJobRun}
+     * (waiting for a stop to be confirmed), which polled identically apart from their timeout
+     * message.
+     *
+     * @param seed          the run's last known state, or {@code null} if it has not been read yet —
+     *                      an already-terminal seed returns immediately without an extra API call
+     * @param deadline      {@link System#currentTimeMillis()} value after which to give up. Checked
+     *                      after the sleep and before the refresh, so a run that goes terminal within
+     *                      the final interval is still observed
+     * @param timeoutMessage builds the timeout error message from the last observed status
+     *                      ({@code "unknown"} when the run was never readable)
+     * @return the run in its terminal state, never {@code null}
+     */
+    public static SupplementDataRun pollUntilTerminal(
+        RunContext runContext,
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String runName,
+        @Nullable SupplementDataRun seed,
+        Duration interval,
+        long deadline,
+        Function<String, String> timeoutMessage
+    ) throws Exception {
+        var current = seed;
+
+        while (current == null || !isSupplementDataTerminalState(current.getStatus())) {
+            sleepOrPropagate(interval);
+
+            if (System.currentTimeMillis() > deadline) {
+                throw new IllegalStateException(
+                    timeoutMessage.apply(current == null ? "unknown" : current.getStatus()));
+            }
+
+            var refreshed = getSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+            if (refreshed != null) {
+                current = refreshed;
+            }
+
+            // INFO rather than DEBUG: the supplement-data status vocabulary is undocumented, so these
+            // lines are how the real values get discovered from a run's logs.
+            runContext.logger().info("Supplement-data run '{}' status={}",
+                runName, current == null ? "not yet visible" : current.getStatus());
+        }
+
+        return current;
+    }
+
+    /**
+     * Sleeps for {@code interval}, propagating an interrupt instead of swallowing it.
+     *
+     * <p>Restores the interrupt flag that {@link Thread#sleep} clears before rethrowing, so a killed
+     * Kestra execution actually aborts the surrounding poll loop rather than continuing with the
+     * signal lost.
+     */
+    public static void sleepOrPropagate(Duration interval) throws InterruptedException {
+        try {
+            Thread.sleep(interval.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
     }
 
     /**

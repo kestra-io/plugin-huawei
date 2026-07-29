@@ -386,29 +386,12 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
             return buildOutput(rJobName, current);
         }
 
-        while (!DataArtsService.isSupplementDataTerminalState(current.getStatus())) {
-            try {
-                Thread.sleep(rInterval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
-            if (System.currentTimeMillis() > deadline) {
-                throw new IllegalStateException(
-                    "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
-                    "' did not reach a terminal state within " + rMaxDuration +
-                    " — last status: " + current.getStatus() +
-                    ". Use StopJobRun with runName '" + rRunName + "' to cancel it, or increase maxDuration.");
-            }
-            var refreshed = DataArtsService.getSupplementData(
-                runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
-            if (refreshed != null) {
-                current = refreshed;
-            }
-            // Logged at INFO, not DEBUG: the supplement-data status vocabulary is undocumented, so
-            // these lines are how the real values get discovered from a run's logs.
-            runContext.logger().info("Supplement-data run '{}' status={}", rRunName, current.getStatus());
-        }
+        current = DataArtsService.pollUntilTerminal(
+            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, current, rInterval, deadline,
+            lastStatus -> "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
+                "' did not reach a terminal state within " + rMaxDuration +
+                " — last status: " + lastStatus +
+                ". Use StopJobRun with runName '" + rRunName + "' to cancel it, or increase maxDuration.");
 
         runContext.logger().info("Supplement-data run '{}' finished with status={}", rRunName, current.getStatus());
 
@@ -449,12 +432,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
             attempt++;
             runContext.logger().debug("Supplement-data run '{}' not yet visible, waiting {} (attempt {})",
                 runName, interval, attempt);
-            try {
-                Thread.sleep(interval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
+            DataArtsService.sleepOrPropagate(interval);
         }
     }
 
