@@ -93,7 +93,65 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
     @PluginProperty(group = "main")
     protected Property<String> tableName;
 
+    // The inherited @Schema on AbstractConnectionInterface ("Huawei Cloud access key ... not
+    // required when providing a pre-obtained securityToken") is correct for every other service in
+    // this plugin, but wrong here: GeminiDB's data plane authenticates against the instance's
+    // database account, not IAM. Overridden so the UI tooltip a user actually reads states that.
+    @Schema(
+        title = "GeminiDB database account username",
+        description = "The DynamoDB-compatible data plane authenticates against the instance's own " +
+            "database account, not Huawei IAM — set this to the fixed database username `rwuser`. " +
+            "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
+    @PluginProperty(group = "connection", secret = true)
+    @Override
+    public Property<String> getAccessKeyId() {
+        return super.getAccessKeyId();
+    }
+
+    @Schema(
+        title = "GeminiDB database account password",
+        description = "The instance admin password set when the GeminiDB instance was purchased — " +
+            "it cannot be retrieved later, only reset. Paired with `accessKeyId: rwuser`. " +
+            "**Sensitive — always provide via `{{ secret('NAME') }}`.**"
+    )
+    @PluginProperty(group = "connection", secret = true)
+    @Override
+    public Property<String> getSecretAccessKey() {
+        return super.getSecretAccessKey();
+    }
+
+    @Schema(
+        title = "Not supported by GeminiDB",
+        description = "GeminiDB's DynamoDB-compatible data plane never consults Huawei IAM, so a " +
+            "security token (or an inline `temporaryCredentials` exchange) has nothing to " +
+            "authenticate against. Setting either causes the task to fail fast with an actionable " +
+            "error instead of the opaque `AccessDeniedException: auth failed` a real GeminiDB " +
+            "instance would otherwise return. Use `accessKeyId`/`secretAccessKey` instead."
+    )
+    @PluginProperty(group = "connection", secret = true)
+    @Override
+    public Property<String> getSecurityToken() {
+        return super.getSecurityToken();
+    }
+
     protected DynamoDbClient client(final RunContext runContext) throws Exception {
+        // The data plane authenticates against the instance's own database account, so an STS triple
+        // (direct `securityToken` or an inline `temporaryCredentials` exchange) has nothing to
+        // authenticate against. Checked here, before `huaweiClientConfig(runContext)`, so a
+        // `temporaryCredentials` default doesn't burn a live IAM STS round-trip only to be rejected
+        // afterward — and so the exchange's own failures never mask this message with an unrelated
+        // IAM auth error. `getTemporaryCredentials()` is a presence check only, not rendered: knowing
+        // the property was set at all is enough to reject it.
+        var rSecurityToken = runContext.render(this.getSecurityToken()).as(String.class).orElse(null);
+        if ((rSecurityToken != null && !rSecurityToken.isBlank()) || this.getTemporaryCredentials() != null) {
+            throw new IllegalArgumentException(
+                "GeminiDB does not support 'securityToken' or 'temporaryCredentials': the " +
+                "DynamoDB-compatible data plane authenticates against the instance's database " +
+                "account, not Huawei IAM, so temporary IAM credentials can never be accepted. " +
+                "Use 'accessKeyId: rwuser' with the instance admin password as 'secretAccessKey'.");
+        }
+
         var config = huaweiClientConfig(runContext);
 
         var rEndpoint = runContext.render(this.endpoint).as(String.class)
@@ -123,18 +181,9 @@ public abstract class AbstractGeminiDb extends AbstractConnection {
                 "password) is required when 'accessKeyId' is set.");
         }
 
-        // The data plane authenticates against the instance's own database account, so an STS triple
-        // has nothing to authenticate against. Left to reach the wire it comes back as a bare
-        // `AccessDeniedException: auth failed`, which is indistinguishable from a wrong password —
-        // so refuse it here, where the reason can actually be stated.
-        if (config.securityToken() != null && !config.securityToken().isBlank()) {
-            throw new IllegalArgumentException(
-                "GeminiDB does not support 'securityToken' or 'temporaryCredentials': the " +
-                "DynamoDB-compatible data plane authenticates against the instance's database " +
-                "account, not Huawei IAM, so temporary IAM credentials can never be accepted. " +
-                "Use 'accessKeyId: rwuser' with the instance admin password as 'secretAccessKey'.");
-        }
-
+        // No securityToken re-check needed here: the guard above already rejects any request that
+        // would otherwise reach huaweiClientConfig with a securityToken or temporaryCredentials set,
+        // so config.securityToken() is always null/blank by the time this line runs.
         var credentials = AwsBasicCredentials.create(config.accessKeyId(), config.secretAccessKey());
 
         var rRegion = (config.region() != null && !config.region().isBlank()) ? config.region() : DEFAULT_SIGNING_REGION;
