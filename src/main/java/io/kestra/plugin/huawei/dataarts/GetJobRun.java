@@ -113,6 +113,12 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
             return one: that task creates a supplement-data run identified by `runName`, and the job
             instances it spawns are separate entities. So the only source of a value for this property
             is the `instanceId` output of a `GetJobRun` that ran with it omitted.
+
+            **Setting it yields fewer outputs.** The single-instance API returns a subset of what the
+            instance-list API does, so `endTime`, `executeTime`, `submitTime`, `jobInstanceName` and
+            `jobId` all come back empty here — verified against a live instance that had already
+            succeeded, so even `endTime` is absent. Leave `instanceId` unset unless you specifically
+            need a named instance rather than the latest one.
             """
     )
     @PluginProperty(group = "main")

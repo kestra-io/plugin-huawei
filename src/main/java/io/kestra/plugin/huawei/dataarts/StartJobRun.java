@@ -186,6 +186,21 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
 
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59, 59);
 
+    /**
+     * Bounds on {@code parallel}, per the maximum DataArts documents for a PatchData instance.
+     *
+     * <p>Checked client-side rather than left to the API: an out-of-range value would otherwise come
+     * back as {@code DLF.3051 "The request parameter is invalid."}, which this task's error handling
+     * attributes to the job name or the date format — the two causes that actually produce it in
+     * practice — and so would point at the wrong property entirely.
+     *
+     * <p>{@code @Min}/{@code @Max} cannot be used here: {@link Property} has no Hibernate Validator
+     * ValueExtractor, so the constraints would never be evaluated. Same reason
+     * {@code geminidb.AbstractGeminiDb} validates its {@code limit} at render time.
+     */
+    private static final int MIN_PARALLEL = 1;
+    private static final int MAX_PARALLEL = 5;
+
     @Schema(
         title = "Name of the DataArts Factory job to run",
         description = "Must match the job name exactly as defined in the DataArts Studio console."
@@ -236,8 +251,12 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private Property<String> endDate;
 
     @Schema(
-        title = "Number of instances to run concurrently",
-        description = "Only meaningful when the date range spans more than one instance. Defaults to 1."
+        title = "Number of instances to run concurrently, from 1 to 5",
+        description = """
+            Only meaningful when the date range spans more than one instance. Defaults to 1, which runs
+            the range strictly in order. 5 is the maximum DataArts accepts; a value outside 1-5 fails
+            the task before anything is submitted.
+            """
     )
     @Builder.Default
     @PluginProperty(group = "advanced")
@@ -334,7 +353,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         var rWait = runContext.render(wait).as(Boolean.class).orElse(true);
         var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(Duration.ofHours(1));
         var rInterval = runContext.render(interval).as(Duration.class).orElse(Duration.ofSeconds(5));
-        var rParallel = runContext.render(parallel).as(Integer.class).orElse(1);
+        var rParallel = renderedParallel(runContext);
         var rDayGranularity = runContext.render(dayGranularity).as(Boolean.class).orElse(true);
         var rStopWhenFail = runContext.render(stopWhenFail).as(Boolean.class).orElse(true);
         var rRunTimeWindow = runContext.render(runTimeWindow).as(String.class).orElse(null);
@@ -403,6 +422,22 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         }
 
         return buildOutput(rJobName, current);
+    }
+
+    /**
+     * Renders {@code parallel} and rejects a value outside {@link #MIN_PARALLEL}-{@link #MAX_PARALLEL}
+     * before anything is submitted, so an out-of-range value never reaches the API as a misattributed
+     * {@code DLF.3051}.
+     */
+    private int renderedParallel(RunContext runContext) throws Exception {
+        var rParallel = runContext.render(parallel).as(Integer.class).orElse(MIN_PARALLEL);
+        if (rParallel < MIN_PARALLEL || rParallel > MAX_PARALLEL) {
+            throw new IllegalArgumentException(
+                "'parallel' must be between " + MIN_PARALLEL + " and " + MAX_PARALLEL +
+                " (was " + rParallel + ") — " + MAX_PARALLEL + " is the maximum DataArts accepts for a" +
+                " supplement-data run.");
+        }
+        return rParallel;
     }
 
     /**

@@ -290,31 +290,38 @@ public final class DataArtsService {
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
             var detail = parseDlfError(response.body());
+            // Each branch is one logical sentence; the trailing '\' suppresses the newline a text
+            // block would otherwise insert, so the message stays on one line at runtime while the
+            // source reads as prose. The shared " — " separator is added at the throw site.
             String hint;
             if (detail.contains("DLF.30111")) {
-                hint = " — supplement-data only accepts a job that has a trigger: a cron schedule, an HTTP"
-                    + " trigger, or a parent job. A run-once / manually-triggered job is rejected. Since"
-                    + " DataArts publishes no other working job-trigger route, give the job a schedule in"
-                    + " the DataArts Studio console (Job Monitoring → the job → scheduling), then retry."
-                    + " Note the schedule need not fire on its own for this task to work — it only has to"
-                    + " exist.";
+                hint = """
+                    supplement-data only accepts a job that has a trigger: a cron schedule, an HTTP \
+                    trigger, or a parent job. A run-once / manually-triggered job is rejected. Since \
+                    DataArts publishes no other working job-trigger route, give the job a schedule in \
+                    the DataArts Studio console (Job Monitoring → the job → scheduling), then retry. \
+                    Note the schedule need not fire on its own for this task to work — it only has to \
+                    exist.""";
             } else if (detail.contains("DLF.30121")) {
-                hint = " — startDate and endDate are compared as timestamps and must be at least 2 seconds"
-                    + " apart. Note DataArts reports this same error for a value it could not parse at"
-                    + " all, because both ends then collapse to the same instant: check that the dates"
-                    + " sent (logged just above) are in the form 'yyyy-MM-ddTHH:mm:ss +00' that DataArts"
-                    + " requires, and not a form passed through verbatim from startDate/endDate.";
+                hint = """
+                    startDate and endDate are compared as timestamps and must be at least 2 seconds \
+                    apart. Note DataArts reports this same error for a value it could not parse at \
+                    all, because both ends then collapse to the same instant: check that the dates \
+                    sent (logged just above) are in the form 'yyyy-MM-ddTHH:mm:ss +00' that DataArts \
+                    requires, and not a form passed through verbatim from startDate/endDate.""";
             } else if (detail.contains("DLF.3051")) {
-                hint = " — DLF rejected the request body. Confirm the job name exists in the target"
-                    + " workspace, and that startDate/endDate are in the form"
-                    + " 'yyyy-MM-ddTHH:mm:ss +00' that DataArts requires.";
+                hint = """
+                    DLF rejected the request body. Confirm the job name exists in the target \
+                    workspace, and that startDate/endDate are in the form 'yyyy-MM-ddTHH:mm:ss +00' \
+                    that DataArts requires.""";
             } else {
-                hint = " — check that the job name exists in this workspace, that the instance name is unique,"
-                    + " and that the credentials have permission to submit supplement data.";
+                hint = """
+                    check that the job name exists in this workspace, that the instance name is \
+                    unique, and that the credentials have permission to submit supplement data.""";
             }
             throw new IllegalStateException(
                 "DataArts Factory create supplement-data run '" + name + "' for job '" + jobName +
-                "' failed (HTTP " + response.statusCode() + ")" + detail + hint);
+                "' failed (HTTP " + response.statusCode() + ")" + detail + " — " + hint);
         }
         runContext.logger().debug("Supplement-data run '{}' for job '{}' accepted (HTTP {})",
             name, jobName, response.statusCode());
@@ -337,7 +344,7 @@ public final class DataArtsService {
      */
     @Nullable
     public static SupplementDataRun getSupplementData(
-        @Nullable RunContext runContext,
+        RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String projectId,
@@ -375,13 +382,11 @@ public final class DataArtsService {
         // A miss is ambiguous — the run may not exist yet, or the query may be wrong (a 0-based
         // `page` off-by-one silently returned an empty page for months). Reporting what the API
         // actually returned makes the difference visible without another rebuild.
-        if (runContext != null) {
-            var names = new ArrayList<String>();
-            rows.forEach(row -> names.add(String.valueOf(textOrNull(row, "name"))));
-            runContext.logger().debug(
-                "Supplement-data query for name='{}' returned total={}, {} row(s): {}",
-                name, body.path("total").asText("?"), names.size(), names);
-        }
+        var names = new ArrayList<String>();
+        rows.forEach(row -> names.add(String.valueOf(textOrNull(row, "name"))));
+        runContext.logger().debug(
+            "Supplement-data query for name='{}' returned total={}, {} row(s): {}",
+            name, body.path("total").asText("?"), names.size(), names);
         return null;
     }
 
@@ -440,49 +445,6 @@ public final class DataArtsService {
         return fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, 0);
     }
 
-    /**
-     * Lists all job run instances for {@code jobName}, newest first (by planTime/startTime desc).
-     * Paginates automatically until all instances have been fetched or a page is shorter than limit.
-     *
-     * @param limit page size (1–100)
-     */
-    public static List<JobRun> listInstances(
-        AbstractConnection.HuaweiClientConfig config,
-        String endpoint,
-        String projectId,
-        @Nullable String workspaceId,
-        String jobName,
-        int limit
-    ) throws Exception {
-        var result = new ArrayList<JobRun>();
-        int offset = 0;
-
-        while (true) {
-            var page = fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, offset);
-            result.addAll(page);
-            if (page.size() < limit) {
-                break;
-            }
-            offset += limit;
-        }
-
-        // Sort newest first across all pages: the API does not guarantee stable ordering when
-        // results span multiple pages, so a client-side sort is required for correctness.
-        result.sort((a, b) -> orderingTime(b).compareTo(orderingTime(a)));
-        return result;
-    }
-
-    /**
-     * Sort key for "newest instance first": plan time, falling back to actual start time, then to the
-     * epoch so an instance with neither sorts last rather than throwing.
-     */
-    private static Instant orderingTime(JobRun run) {
-        if (run.getPlanTime() != null) {
-            return run.getPlanTime();
-        }
-        return run.getStartTime() != null ? run.getStartTime() : Instant.EPOCH;
-    }
-
     private static List<JobRun> fetchInstancePage(
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -524,6 +486,30 @@ public final class DataArtsService {
 
     /**
      * Fetches the detail of a specific job run instance.
+     *
+     * <p><b>Live-verified 2026-07-29</b> on {@code ap-southeast-3} (job {@code job_6336}, instance
+     * {@code 1479208}), because this route is declared nowhere in {@code DataArtsStudioMeta} and was
+     * therefore suspected of being unpublished like {@code run-immediate}:
+     * <ul>
+     *   <li>It <b>is</b> published — HTTP 200 with an instance body. Absence from the SDK metadata is
+     *       not evidence a route is dead; the gateway serves routes the SDK never declares.</li>
+     *   <li>The {@code {instance_id}} segment is genuinely <b>honoured</b>, not ignored: asking for a
+     *       nonexistent instance ({@code 1}) returns HTTP 400 {@code DLF.30137 "Job instance does not
+     *       exist."} rather than falling back to the job's newest instance. Worth stating explicitly —
+     *       probing with the newest instance's own ID (the obvious test) cannot tell those two apart,
+     *       since both would return the same body.</li>
+     * </ul>
+     *
+     * <p>⚠ The response is a <b>strict subset</b> of what {@code instances/detail} returns for the
+     * same instance. Verified present: {@code instance_id}, {@code status}, {@code plan_time},
+     * {@code start_time}. Verified <em>absent</em>: {@code job_instance_name}, {@code end_time},
+     * {@code submit_time}, {@code execute_time}, {@code job_id} — including {@code end_time} on an
+     * instance whose status was already {@code success}. So a {@code GetJobRun} given an
+     * {@code instanceId} emits five fewer populated outputs than the same task with it omitted; that
+     * is the route's behaviour, not a mapping bug. {@link #listInstancesFirstPage} is deliberately
+     * <em>not</em> used to backfill them: it offers no {@code instance_id} filter, so matching a
+     * specific instance means paging until it turns up — unbounded requests, and unable to reach an
+     * instance old enough to have aged out of the list at all.
      */
     public static JobRun getInstance(
         AbstractConnection.HuaweiClientConfig config,
@@ -537,10 +523,18 @@ public final class DataArtsService {
         var response = invoke(config, endpoint, path, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
+            var detail = parseDlfError(response.body());
+            var hint = detail.contains("DLF.30137")
+                ? """
+                    no instance with that ID belongs to this job. The ID is the API's numeric \
+                    instance_id, which is not shown anywhere in the DataArts Studio console and has no \
+                    API of its own — the console's instanceId URL parameter is a different entity (the \
+                    DataArts Studio service instance). Obtain a usable value by running GetJobRun with \
+                    instanceId omitted, which resolves the latest instance."""
+                : "verify the instanceId and job name.";
             throw new IllegalStateException(
                 "DataArts Factory get instance " + instanceId + " for job '" + jobName +
-                "' failed (HTTP " + response.statusCode() + ")" + parseDlfError(response.body()) +
-                " — verify the instanceId and job name.");
+                "' failed (HTTP " + response.statusCode() + ")" + detail + " — " + hint);
         }
 
         var node = JacksonMapper.ofJson().readTree(response.body());
@@ -572,7 +566,6 @@ public final class DataArtsService {
             .endDate(instantOrNull(node, "end_date", "endDate"))
             .submittedDate(instantOrNull(node, "submitted_date", "submittedDate"))
             .parallel(intOrNull(node, "parallel"))
-            .type(intOrNull(node, "type"))
             .userName(textOrNull(node, "user_name", "userName"))
             .build();
     }
@@ -641,34 +634,65 @@ public final class DataArtsService {
 
         var sdkReq = sdkReqBuilder.build();
 
-        // The path segments and query values are percent-encoded exactly once here, with the same
-        // algorithm AKSKSigner applies internally (SignUtils#urlEncode — space -> %20, '*' -> %2A,
-        // '~' left literal). Building the wire URL any other way (e.g. java.net.URLEncoder alone,
-        // which leaves '*' unescaped and encodes space as '+') would disagree with the canonical
-        // request the signer computed from the same raw path/query above.
-        var wirePath = Arrays.stream(path.split("/", -1))
-            .map(DataArtsService::encodeUriComponent)
-            .collect(Collectors.joining("/"));
-        var wireQuery = queryParams.entrySet().stream()
-            .map(e -> encodeUriComponent(e.getKey()) + "=" + encodeUriComponent(e.getValue()))
-            .collect(Collectors.joining("&"));
-        var url = endpoint + wirePath + (wireQuery.isEmpty() ? "" : "?" + wireQuery);
-
-        // Sign with AK/SK if available; otherwise fall back to X-Auth-Token.
-        // Content-Type is NOT set here — AKSKSigner includes it in the signed headers map
-        // (from withContentType above), so the loop below supplies exactly one value that
-        // matches what was signed. Setting it here too would produce a doubled header on
-        // the wire and break the HMAC verification on the server.
         var jdkReqBuilder = java.net.http.HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(URI.create(buildWireUrl(endpoint, path, queryParams)))
             .timeout(Duration.ofSeconds(30));
 
         if (workspaceId != null && !workspaceId.isBlank()) {
             jdkReqBuilder.header("workspace", workspaceId);
         }
 
-        if (config.accessKeyId() != null && !config.accessKeyId().isBlank()
-                && config.secretAccessKey() != null && !config.secretAccessKey().isBlank()) {
+        applyAuthHeaders(jdkReqBuilder, sdkReq, config, securityToken, hasSecurityToken);
+
+        // POST with no body still needs a publisher; noBody() works for GET.
+        var bodyPublisher = body != null
+            ? BodyPublishers.ofString(body)
+            : ("GET".equals(method) ? BodyPublishers.noBody() : BodyPublishers.ofString(""));
+
+        var jdkReq = jdkReqBuilder
+            .method(method, bodyPublisher)
+            .build();
+
+        return HTTP_CLIENT.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * Builds the URL actually sent on the wire from the same RAW path and query the signer was given.
+     *
+     * <p>Path segments and query values are percent-encoded exactly once here, with the same algorithm
+     * {@link AKSKSigner} applies internally ({@code SignUtils#urlEncode}) — see
+     * {@link #encodeUriComponent}. Encoding them any other way (e.g. {@link URLEncoder} alone, which
+     * leaves {@code '*'} unescaped and turns a space into {@code '+'}) would disagree with the
+     * canonical request the signer computed from the same raw values, producing an opaque
+     * {@code APIGW.0301} signature mismatch.
+     */
+    private static String buildWireUrl(String endpoint, String path, Map<String, String> queryParams) {
+        var wirePath = Arrays.stream(path.split("/", -1))
+            .map(DataArtsService::encodeUriComponent)
+            .collect(Collectors.joining("/"));
+        var wireQuery = queryParams.entrySet().stream()
+            .map(e -> encodeUriComponent(e.getKey()) + "=" + encodeUriComponent(e.getValue()))
+            .collect(Collectors.joining("&"));
+        return endpoint + wirePath + (wireQuery.isEmpty() ? "" : "?" + wireQuery);
+    }
+
+    /**
+     * Applies the authentication headers to the outgoing request: AK/SK signing when a key pair is
+     * configured, otherwise a bare {@code X-Auth-Token}.
+     *
+     * @throws IllegalArgumentException when neither authentication method is configured
+     */
+    private static void applyAuthHeaders(
+        java.net.http.HttpRequest.Builder jdkReqBuilder,
+        HttpRequest sdkReq,
+        AbstractConnection.HuaweiClientConfig config,
+        @Nullable String securityToken,
+        boolean hasSecurityToken
+    ) {
+        var hasAkSk = config.accessKeyId() != null && !config.accessKeyId().isBlank()
+            && config.secretAccessKey() != null && !config.secretAccessKey().isBlank();
+
+        if (hasAkSk) {
             var signingCreds = new BasicCredentials()
                 .withAk(config.accessKeyId())
                 .withSk(config.secretAccessKey());
@@ -681,8 +705,8 @@ public final class DataArtsService {
             if (hasSecurityToken) {
                 jdkReqBuilder.header(SECURITY_TOKEN_HEADER, securityToken);
             }
-            // AKSKSigner does not always echo Content-Type back in its header map, even though
-            // withContentType() above feeds it into the canonical request. When it doesn't, nothing
+            // AKSKSigner does not always echo Content-Type back in its header map, even though the
+            // caller's withContentType() feeds it into the canonical request. When it doesn't, nothing
             // else sets the header and the API gateway rejects the call before DLF ever sees it:
             // `APIGW.0106 "Invalid header parameter: Content-Type, required"` on POST
             // /v2/{pid}/factory/supplement-data. Supplying it only when absent keeps exactly one
@@ -701,17 +725,6 @@ public final class DataArtsService {
                 "DataArts Studio requires either AK/SK credentials (accessKeyId + secretAccessKey) " +
                 "or a security token — configure at least one authentication method.");
         }
-
-        // POST with no body still needs a publisher; noBody() works for GET.
-        var bodyPublisher = body != null
-            ? BodyPublishers.ofString(body)
-            : ("GET".equals(method) ? BodyPublishers.noBody() : BodyPublishers.ofString(""));
-
-        var jdkReq = jdkReqBuilder
-            .method(method, bodyPublisher)
-            .build();
-
-        return HTTP_CLIENT.send(jdkReq, HttpResponse.BodyHandlers.ofString());
     }
 
     /**

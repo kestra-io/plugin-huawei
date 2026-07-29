@@ -34,6 +34,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -189,20 +190,26 @@ class DataArtsTasksTest {
             """.formatted(id, id, status);
     }
 
+    /**
+     * The single-instance ({@code instances/{id}}) response, which is a <b>strict subset</b> of the
+     * list response above — only these four fields, verified live on ap-southeast-3 (job_6336,
+     * instance 1479208) on 2026-07-29. {@code job_instance_name}, {@code end_time},
+     * {@code submit_time}, {@code execute_time} and {@code job_id} are all absent, {@code end_time}
+     * included even though the instance had already succeeded.
+     *
+     * <p>This fixture used to return the full list-shaped body, which is the "self-fulfilling stub"
+     * problem: the suite proved the mapper could read a payload the API never sends, and no test
+     * could have noticed that setting {@code instanceId} costs the caller five outputs.
+     */
     private String instanceDetailBody(long id, String status) {
         return """
             {
               "instance_id": %d,
-              "job_instance_name": "job_instance_%d",
               "status": "%s",
               "plan_time": 1700000000000,
-              "start_time": 1700000001000,
-              "end_time": 1700000060000,
-              "execute_time": 59000,
-              "submit_time": 1700000000500,
-              "job_id": 366647
+              "start_time": 1700000001000
             }
-            """.formatted(id, id, status);
+            """.formatted(id, status);
     }
 
     private StartJobRun.StartJobRunBuilder<?, ?> startTask() {
@@ -689,6 +696,44 @@ class DataArtsTasksTest {
         assertThat(ex.getMessage(), containsString("terminal"));
     }
 
+    /**
+     * {@code parallel} is bounded 1-5 client-side. Left to the API, an out-of-range value comes back
+     * as {@code DLF.3051 "The request parameter is invalid."}, which this task's error hint attributes
+     * to the job name or the date format — the two causes that actually produce it — and so would send
+     * the reader after the wrong property entirely.
+     */
+    @Test
+    void startJobRun_parallelOutOfRange_throwsBeforeSubmitting() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        for (var invalid : new Integer[]{0, -1, 6, 50}) {
+            var task = startTask().parallel(Property.ofValue(invalid)).build();
+
+            var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext),
+                "parallel=" + invalid + " should be rejected");
+            assertThat(ex.getMessage(), containsString("'parallel' must be between 1 and 5"));
+            assertThat(ex.getMessage(), containsString("was " + invalid));
+        }
+
+        // Nothing may reach the API: the point of validating client-side is to fail before submitting.
+        wireMock.verify(0, postRequestedFor(urlPathEqualTo(supplementDataPath())));
+    }
+
+    @Test
+    void startJobRun_parallelAtBounds_isAccepted() throws Exception {
+        for (var valid : new Integer[]{1, 5}) {
+            var runContext = runContextFactory.of(Collections.emptyMap());
+            startTask()
+                .parallel(Property.ofValue(valid))
+                .wait(Property.ofValue(false))
+                .build()
+                .run(runContext);
+
+            wireMock.verify(postRequestedFor(urlPathEqualTo(supplementDataPath()))
+                .withRequestBody(WireMock.containing("\"parallel\":" + valid)));
+        }
+    }
+
     @Test
     void startJobRun_failStatus_throws() {
         wireMock.stubFor(get(urlPathEqualTo(supplementDataPath()))
@@ -967,13 +1012,17 @@ class DataArtsTasksTest {
         assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
         assertThat(output.getStatus(), equalTo("success"));
         assertThat(output.getPlanTime(), is(Instant.ofEpochMilli(1700000000000L)));
-        // Fields that silently mapped to null while the mapper read camelCase keys.
-        assertThat(output.getJobInstanceName(), equalTo("job_instance_" + INSTANCE_ID));
-        // execute_time is an elapsed duration, not an epoch timestamp — 59 s here, matching
-        // end_time - start_time in the fixture.
-        assertThat(output.getExecuteTime(), equalTo(Duration.ofSeconds(59)));
-        assertThat(output.getSubmitTime(), equalTo(Instant.ofEpochMilli(1700000000500L)));
-        assertThat(output.getJobId(), equalTo(366647L));
+        assertThat(output.getStartTime(), is(Instant.ofEpochMilli(1700000001000L)));
+
+        // The five fields the by-ID route does not return. Asserted as null on purpose: this is the
+        // route's real shape (see instanceDetailBody), and it is the difference a flow author sees
+        // when they set instanceId instead of letting the task resolve the latest instance. Note
+        // endTime is absent even though status is 'success'.
+        assertThat(output.getJobInstanceName(), nullValue());
+        assertThat(output.getEndTime(), nullValue());
+        assertThat(output.getExecuteTime(), nullValue());
+        assertThat(output.getSubmitTime(), nullValue());
+        assertThat(output.getJobId(), nullValue());
     }
 
     @Test
@@ -999,6 +1048,57 @@ class DataArtsTasksTest {
         wireMock.verify(getRequestedFor(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
             .withHeader("X-Security-Token", WireMock.equalTo(token))
             .withHeader("Authorization", WireMock.containing("x-security-token")));
+    }
+
+    /**
+     * The token-only auth branch: with no AK/SK, the token goes out as {@code X-Auth-Token} (IAM's
+     * bearer-token scheme) and nothing is signed — so no {@code Authorization} header, and no
+     * {@code X-Security-Token}, which is the AK/SK-companion form of the same credential.
+     *
+     * <p>{@code Content-Type} is set unconditionally on this branch rather than only-when-absent:
+     * there is no signed-header map to inherit it from, and the gateway rejects a POST without it
+     * ({@code APIGW.0106}).
+     */
+    @Test
+    void getJobRun_tokenOnlyWithoutAkSk_sendsBearerTokenAndDoesNotSign() throws Exception {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        var token = "IAM-SUBJECT-TOKEN-xyz789";
+
+        var task = GetJobRun.builder()
+            .securityToken(Property.ofValue(token))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(INSTANCE_ID))
+            .build();
+
+        task.run(runContext);
+
+        wireMock.verify(getRequestedFor(urlPathEqualTo(instancePath(JOB_NAME, INSTANCE_ID)))
+            .withHeader("X-Auth-Token", WireMock.equalTo(token))
+            .withHeader("Content-Type", WireMock.equalTo("application/json"))
+            .withoutHeader("Authorization")
+            .withoutHeader("X-Security-Token"));
+    }
+
+    /**
+     * Neither AK/SK nor a token is a configuration error, and must name both options rather than
+     * failing somewhere inside the signer.
+     */
+    @Test
+    void getJobRun_noCredentialsAtAll_throwsNamingBothOptions() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetJobRun.builder()
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(INSTANCE_ID))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("accessKeyId"));
+        assertThat(ex.getMessage(), containsString("security token"));
     }
 
     @Test
@@ -1044,6 +1144,51 @@ class DataArtsTasksTest {
         assertThat(output.getJobName(), equalTo(getJobName));
         assertThat(output.getInstanceId(), equalTo(INSTANCE_ID));
         assertThat(output.getStatus(), equalTo("success"));
+        assertThat(output.getPlanTime(), is(Instant.ofEpochMilli(1700000000000L)));
+        assertThat(output.getStartTime(), is(Instant.ofEpochMilli(1700000001000L)));
+
+        // The snake_case-mapped fields are asserted here rather than on the by-ID test, because
+        // instances/detail is the only route that actually returns them. These are the fields that
+        // silently mapped to null while the mapper read camelCase keys, so the coverage has to live
+        // wherever a real payload carries them.
+        assertThat(output.getJobInstanceName(), equalTo("job_instance_" + INSTANCE_ID));
+        assertThat(output.getEndTime(), is(Instant.ofEpochMilli(1700000060000L)));
+        // execute_time is an elapsed duration, not an epoch timestamp — 59 s here, matching
+        // end_time - start_time in the fixture.
+        assertThat(output.getExecuteTime(), equalTo(Duration.ofSeconds(59)));
+        assertThat(output.getSubmitTime(), equalTo(Instant.ofEpochMilli(1700000000500L)));
+        assertThat(output.getJobId(), equalTo(366647L));
+    }
+
+    /**
+     * A nonexistent instance ID must surface DataArts' own DLF.30137 plus a hint saying where a
+     * usable ID comes from. Live-verified shape: HTTP 400, error_code DLF.30137, "Job instance does
+     * not exist." — which is also the evidence that the {id} segment is honoured rather than ignored.
+     */
+    @Test
+    void getJobRun_unknownInstanceId_throwsWithProvenanceHint() {
+        wireMock.stubFor(get(urlPathEqualTo(instancePath(JOB_NAME, 1L)))
+            .willReturn(aResponse()
+                .withStatus(400)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"error_code\":\"DLF.30137\",\"error_msg\":\"Job instance does not exist.\"}")));
+
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var task = GetJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(wireMockUrl()))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(1L))
+            .build();
+
+        var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString("DLF.30137"));
+        assertThat(ex.getMessage(), containsString("Job instance does not exist."));
+        // The actionable part: the console shows no numeric instance ID, so say where to get one.
+        assertThat(ex.getMessage(), containsString("instanceId omitted"));
     }
 
     @Test

@@ -15,7 +15,8 @@ import java.util.List;
  * names on the SDK's {@code SupplementDataRespRows} model: {@code name}, {@code job_list},
  * {@code status}, {@code start_date}, {@code end_date}, {@code submitted_date}, {@code parallel},
  * {@code type}, {@code user_name}. Same convention as {@code JobInstance}; see
- * {@link JobRun} for the failure mode that reading camelCase keys produces.
+ * {@link JobRun} for the failure mode that reading camelCase keys produces. Every one of those is
+ * mapped below except {@code type} — see the note where it would sit.
  *
  * <p>Unlike {@link JobRun}, a supplement-data instance is identified by a caller-chosen
  * {@code name} rather than a server-assigned numeric ID, which is why this model has no
@@ -46,8 +47,10 @@ public class SupplementDataRun {
     @Schema(title = "Number of instances executed in parallel")
     private final Integer parallel;
 
-    @Schema(title = "Supplement-data run type, as reported by DataArts Factory")
-    private final Integer type;
+    // `type` is deliberately absent. The wire payload carries it, but DataArts documents no meaning
+    // for the integer, no task surfaces it, and nothing here can say what a given value implies —
+    // mapping it would just add an output nobody can interpret. Add it back alongside a consumer and
+    // a documented meaning, not before.
 
     @Schema(title = "User who submitted the run")
     private final String userName;
