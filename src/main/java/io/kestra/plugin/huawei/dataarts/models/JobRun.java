@@ -23,8 +23,9 @@ public class JobRun {
 
             This is **not** the `instanceId` shown in the DataArts Studio console URL — that UUID
             identifies the DataArts Studio service instance, not a job run. The numeric job-run ID
-            is not displayed anywhere in the console; obtain it from `StartJobRun`'s output or from
-            `GetJobRun` without an `instanceId` (which resolves the latest run)."""
+            is not displayed anywhere in the console and has no API of its own, so the only way to
+            obtain one is `GetJobRun` with `instanceId` omitted, which resolves the latest run.
+            `StartJobRun` does not return one: it identifies its supplement-data run by `runName`."""
     )
     private final Long instanceId;
 

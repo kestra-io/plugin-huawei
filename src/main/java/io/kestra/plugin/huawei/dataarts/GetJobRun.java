@@ -33,8 +33,12 @@ import java.time.Instant;
         most recently created instance for the job is returned (resolved by querying the instance
         list and selecting the newest entry by plan/start time).
 
-        This task performs a single fetch without polling. To wait for completion, use `StartJobRun`
-        with `wait: true`.
+        This reports on plain job instances, whatever started them — a schedule, the console, or a
+        `StartJobRun` supplement-data run. It is not tied to `StartJobRun`: that task tracks its own
+        run by `runName`, and `wait: true` there polls the supplement-data run rather than the
+        individual instances it spawns.
+
+        This task performs a single fetch without polling.
         """
 )
 @Plugin(
@@ -57,13 +61,24 @@ import java.time.Instant;
                 """
         ),
         @Example(
-            title = "Get a specific job run by instance ID.",
+            title = "Follow one specific job run. The instance ID is not visible in the console and " +
+                "has no API of its own, so it is resolved once by a `GetJobRun` with `instanceId` " +
+                "omitted, then reused to re-read that same instance rather than whichever run is " +
+                "latest at the time.",
             full = true,
             code = """
                 id: dataarts_get_specific_run
                 namespace: company.team
 
                 tasks:
+                  - id: resolve_latest
+                    type: io.kestra.plugin.huawei.dataarts.GetJobRun
+                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
+                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
+                    region: eu-west-101
+                    projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
+                    jobName: my_etl_job
+
                   - id: get_run
                     type: io.kestra.plugin.huawei.dataarts.GetJobRun
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
@@ -71,7 +86,7 @@ import java.time.Instant;
                     region: eu-west-101
                     projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
                     jobName: my_etl_job
-                    instanceId: "{{ outputs.start_job.instanceId }}"
+                    instanceId: "{{ outputs.resolve_latest.instanceId }}"
                 """
         )
     }
@@ -89,9 +104,15 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
     @Schema(
         title = "Job run instance ID to fetch",
         description = """
-            When set, fetches the specific instance by ID. When omitted, the most recently started
-            instance for `jobName` is returned. Use the `instanceId` from a previous `StartJobRun`
-            output to track a specific run.
+            When set, fetches that specific instance. When omitted, the most recently started instance
+            for `jobName` is returned — which is the normal way to use this task.
+
+            The ID is the API's numeric `instance_id`. It is **not** the `instanceId` UUID in the
+            DataArts Studio console URL (that identifies the DataArts Studio service instance, an
+            unrelated entity), and it is not displayed anywhere in the console. Nor does `StartJobRun`
+            return one: that task creates a supplement-data run identified by `runName`, and the job
+            instances it spawns are separate entities. So the only source of a value for this property
+            is the `instanceId` output of a `GetJobRun` that ran with it omitted.
             """
     )
     @PluginProperty(group = "main")
