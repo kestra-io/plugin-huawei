@@ -16,6 +16,8 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 
 @SuperBuilder
 @ToString
@@ -25,33 +27,47 @@ import java.time.Duration;
 @Schema(
     title = "Stop an in-progress DataArts Factory job run",
     description = """
-        Stops a running DataArts Studio (DataArts Factory) job run instance by calling the
-        `POST /v1/{project_id}/jobs/{job_name}/instances/{instance_id}/stop` API.
+        Cancels a running supplement-data (PatchData) run — one created by `StartJobRun` — via
+        `POST /v2/{project_id}/factory/supplement-data/{instance_name}/stop`.
 
-        When `wait` is `true` (the default), the task polls until the instance status transitions to
-        `manual-stop` or another terminal state before returning. `maxDuration` bounds the polling
-        time to prevent indefinite hangs — the task fails with a timeout error if the stop is not
-        confirmed within the deadline.
+        **Scope**: this is the only stop route DataArts Factory publishes. There is no API to stop a
+        plain job instance, so a run triggered from the DataArts Studio console cannot be stopped
+        from Kestra — only one created by `StartJobRun`. Identify the run by the `runName` that task
+        returned.
+
+        When `wait` is `true` (the default), the task polls until the run reaches a terminal state
+        before returning. `maxDuration` bounds the polling so a run that never confirms the stop
+        fails with a timeout rather than hanging.
         """
 )
 @Plugin(
     examples = {
         @Example(
-            title = "Stop a specific job run and wait for confirmation.",
+            title = "Stop a run started earlier in the same flow.",
             full = true,
             code = """
                 id: dataarts_stop_job
                 namespace: company.team
 
                 tasks:
+                  - id: start_run
+                    type: io.kestra.plugin.huawei.dataarts.StartJobRun
+                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
+                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
+                    region: eu-west-101
+                    projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
+                    workspaceId: "{{ secret('HUAWEI_WORKSPACE_ID') }}"
+                    jobName: my_etl_job
+                    wait: false
+
                   - id: stop_run
                     type: io.kestra.plugin.huawei.dataarts.StopJobRun
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
                     secretAccessKey: "{{ secret('HUAWEI_SK') }}"
                     region: eu-west-101
                     projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
-                    jobName: my_etl_job
-                    instanceId: "{{ outputs.start_job.instanceId }}"
+                    workspaceId: "{{ secret('HUAWEI_WORKSPACE_ID') }}"
+                    runName: "{{ outputs.start_run.runName }}"
                     maxDuration: PT10M
                 """
         )
@@ -60,30 +76,18 @@ import java.time.Duration;
 public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJobRun.Output> {
 
     @Schema(
-        title = "Name of the DataArts Factory job",
-        description = "Must match the job name exactly as defined in the DataArts Studio console."
+        title = "Name of the supplement-data run to stop",
+        description = "The `runName` output of `StartJobRun`."
     )
     @NotNull
     @PluginProperty(group = "main")
-    private Property<String> jobName;
+    private Property<String> runName;
 
     @Schema(
-        title = "Job run instance ID to stop",
+        title = "Wait for the run to reach a terminal state after stopping",
         description = """
-            The numeric instance ID of the run to stop. Obtain from the `instanceId` output of
-            `StartJobRun` or `GetJobRun`.
-            """
-    )
-    @NotNull
-    @PluginProperty(group = "main")
-    private Property<Long> instanceId;
-
-    @Schema(
-        title = "Wait for the instance to reach a terminal state after stopping",
-        description = """
-            When `true` (the default), polls the instance status until it transitions to `manual-stop`
-            or another terminal state. Set to `false` to return immediately after the stop request is
-            accepted.
+            When `true` (the default), polls the run's status until it stops. Set to `false` to return
+            as soon as the stop request is accepted.
             """
     )
     @Builder.Default
@@ -93,9 +97,9 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     @Schema(
         title = "Maximum time to wait for the stop to be confirmed",
         description = """
-            ISO-8601 duration (e.g. `PT10M`, `PT1H`). When the deadline is reached before the
-            instance reaches a terminal state, the task fails with a timeout error. Only relevant
-            when `wait` is `true`. Defaults to 10 minutes.
+            ISO-8601 duration (e.g. `PT10M`, `PT1H`). When the deadline is reached before the run
+            reaches a terminal state, the task fails with a timeout error. Only relevant when
+            `wait` is `true`. Defaults to 10 minutes.
             """
     )
     @Builder.Default
@@ -112,10 +116,8 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
 
     @Override
     public Output run(RunContext runContext) throws Exception {
-        var rJobName = runContext.render(jobName).as(String.class).orElseThrow(
-            () -> new IllegalArgumentException("jobName is required"));
-        var rInstanceId = runContext.render(instanceId).as(Long.class).orElseThrow(
-            () -> new IllegalArgumentException("instanceId is required"));
+        var rRunName = runContext.render(runName).as(String.class).orElseThrow(
+            () -> new IllegalArgumentException("runName is required"));
         var rProjectId = resolvedProjectId(runContext);
         var rEndpoint = resolvedEndpoint(runContext);
         var rWorkspaceId = resolvedWorkspaceId(runContext);
@@ -125,46 +127,35 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
 
         var config = huaweiClientConfig(runContext);
 
-        runContext.logger().info("Stopping DataArts Factory job '{}' instance {}", rJobName, rInstanceId);
+        runContext.logger().info("Stopping DataArts Factory supplement-data run '{}'", rRunName);
 
-        DataArtsService.stopInstance(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
+        DataArtsService.stopSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
 
         if (!rWait) {
-            return Output.builder().jobName(rJobName).instanceId(rInstanceId).status("stopping").build();
+            return Output.builder().runName(rRunName).status("stopping").build();
         }
 
-        // Poll until the instance confirms the stop, bounded by maxDuration.
         var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
-        var current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
-        while (!DataArtsService.isTerminalState(current.getStatus())) {
-            runContext.logger().debug("Waiting for job '{}' instance {} to stop, status={}", rJobName, rInstanceId, current.getStatus());
-            try {
-                Thread.sleep(rInterval.toMillis());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                throw ie;
-            }
-            if (System.currentTimeMillis() > deadline) {
-                throw new IllegalStateException(
-                    "DataArts Factory job '" + rJobName + "' instance " + rInstanceId +
-                    " did not reach a terminal state within " + rMaxDuration +
-                    " — current status: " + current.getStatus() +
-                    ". Increase maxDuration or check the DataArts Studio console.");
-            }
-            current = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
-        }
+        var seed = DataArtsService.getSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
 
-        runContext.logger().info("Job '{}' instance {} stopped, final status={}", rJobName, rInstanceId, current.getStatus());
+        var current = DataArtsService.pollUntilTerminal(
+            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, seed, rInterval, deadline,
+            lastStatus -> "DataArts Factory supplement-data run '" + rRunName +
+                "' did not reach a terminal state within " + rMaxDuration +
+                " — last status: " + lastStatus +
+                ". Increase maxDuration or check the DataArts Studio console.");
+
+        runContext.logger().info("Supplement-data run '{}' stopped, final status={}", rRunName, current.getStatus());
 
         return Output.builder()
-            .jobName(current.getJobName())
-            .instanceId(current.getInstanceId())
+            .runName(current.getName())
             .status(current.getStatus())
-            .planTime(current.getPlanTime())
-            .startTime(current.getStartTime())
-            .endTime(current.getEndTime())
-            .lastUpdateTime(current.getLastUpdateTime())
-            .errorMessage(current.getErrorMessage())
+            .jobList(current.getJobList())
+            .startDate(current.getStartDate())
+            .endDate(current.getEndDate())
+            .submittedDate(current.getSubmittedDate())
+            .parallel(current.getParallel())
+            .userName(current.getUserName())
             .build();
     }
 
@@ -172,28 +163,28 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
     @Getter
     public static class Output implements io.kestra.core.models.tasks.Output {
 
-        @Schema(title = "Job name")
-        private final String jobName;
+        @Schema(title = "Name of the supplement-data run")
+        private final String runName;
 
-        @Schema(title = "Job run instance ID")
-        private final Long instanceId;
-
-        @Schema(title = "Final status of the job run after stopping")
+        @Schema(title = "Status of the run after stopping")
         private final String status;
 
-        @Schema(title = "Scheduled plan time (epoch milliseconds)")
-        private final Long planTime;
+        @Schema(title = "Jobs covered by the run")
+        private final List<String> jobList;
 
-        @Schema(title = "Actual start time (epoch milliseconds)")
-        private final Long startTime;
+        @Schema(title = "Start of the covered business-date range")
+        private final Instant startDate;
 
-        @Schema(title = "End time (epoch milliseconds)")
-        private final Long endTime;
+        @Schema(title = "End of the covered business-date range")
+        private final Instant endDate;
 
-        @Schema(title = "Last update time (epoch milliseconds)")
-        private final Long lastUpdateTime;
+        @Schema(title = "Time the run was submitted")
+        private final Instant submittedDate;
 
-        @Schema(title = "Error message when the job run failed; null otherwise")
-        private final String errorMessage;
+        @Schema(title = "Number of instances executed in parallel")
+        private final Integer parallel;
+
+        @Schema(title = "User the run was submitted as")
+        private final String userName;
     }
 }

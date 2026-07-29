@@ -16,6 +16,9 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.time.Duration;
+import java.time.Instant;
+
 @SuperBuilder
 @ToString
 @EqualsAndHashCode
@@ -30,8 +33,12 @@ import lombok.experimental.SuperBuilder;
         most recently created instance for the job is returned (resolved by querying the instance
         list and selecting the newest entry by plan/start time).
 
-        This task performs a single fetch without polling. To wait for completion, use `StartJobRun`
-        with `wait: true`.
+        This reports on plain job instances, whatever started them — a schedule, the console, or a
+        `StartJobRun` supplement-data run. It is not tied to `StartJobRun`: that task tracks its own
+        run by `runName`, and `wait: true` there polls the supplement-data run rather than the
+        individual instances it spawns.
+
+        This task performs a single fetch without polling.
         """
 )
 @Plugin(
@@ -54,13 +61,24 @@ import lombok.experimental.SuperBuilder;
                 """
         ),
         @Example(
-            title = "Get a specific job run by instance ID.",
+            title = "Follow one specific job run. The instance ID is not visible in the console and " +
+                "has no API of its own, so it is resolved once by a `GetJobRun` with `instanceId` " +
+                "omitted, then reused to re-read that same instance rather than whichever run is " +
+                "latest at the time.",
             full = true,
             code = """
                 id: dataarts_get_specific_run
                 namespace: company.team
 
                 tasks:
+                  - id: resolve_latest
+                    type: io.kestra.plugin.huawei.dataarts.GetJobRun
+                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
+                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
+                    region: eu-west-101
+                    projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
+                    jobName: my_etl_job
+
                   - id: get_run
                     type: io.kestra.plugin.huawei.dataarts.GetJobRun
                     accessKeyId: "{{ secret('HUAWEI_AK') }}"
@@ -68,7 +86,7 @@ import lombok.experimental.SuperBuilder;
                     region: eu-west-101
                     projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
                     jobName: my_etl_job
-                    instanceId: "{{ outputs.start_job.instanceId }}"
+                    instanceId: "{{ outputs.resolve_latest.instanceId }}"
                 """
         )
     }
@@ -86,9 +104,21 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
     @Schema(
         title = "Job run instance ID to fetch",
         description = """
-            When set, fetches the specific instance by ID. When omitted, the most recently started
-            instance for `jobName` is returned. Use the `instanceId` from a previous `StartJobRun`
-            output to track a specific run.
+            When set, fetches that specific instance. When omitted, the most recently started instance
+            for `jobName` is returned — which is the normal way to use this task.
+
+            The ID is the API's numeric `instance_id`. It is **not** the `instanceId` UUID in the
+            DataArts Studio console URL (that identifies the DataArts Studio service instance, an
+            unrelated entity), and it is not displayed anywhere in the console. Nor does `StartJobRun`
+            return one: that task creates a supplement-data run identified by `runName`, and the job
+            instances it spawns are separate entities. So the only source of a value for this property
+            is the `instanceId` output of a `GetJobRun` that ran with it omitted.
+
+            **Setting it yields fewer outputs.** The single-instance API returns a subset of what the
+            instance-list API does, so `endTime`, `executeTime`, `submitTime`, `jobInstanceName` and
+            `jobId` all come back empty here — verified against a live instance that had already
+            succeeded, so even `endTime` is absent. Leave `instanceId` unset unless you specifically
+            need a named instance rather than the latest one.
             """
     )
     @PluginProperty(group = "main")
@@ -125,12 +155,14 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         return Output.builder()
             .jobName(run.getJobName())
             .instanceId(run.getInstanceId())
+            .jobInstanceName(run.getJobInstanceName())
             .status(run.getStatus())
             .planTime(run.getPlanTime())
             .startTime(run.getStartTime())
             .endTime(run.getEndTime())
-            .lastUpdateTime(run.getLastUpdateTime())
-            .errorMessage(run.getErrorMessage())
+            .executeTime(run.getExecuteTime())
+            .submitTime(run.getSubmitTime())
+            .jobId(run.getJobId())
             .build();
     }
 
@@ -144,22 +176,28 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         @Schema(title = "Job run instance ID")
         private final Long instanceId;
 
+        @Schema(title = "Job run instance name, as shown in the console's job monitoring list")
+        private final String jobInstanceName;
+
         @Schema(title = "Current status of the job run")
         private final String status;
 
-        @Schema(title = "Scheduled plan time (epoch milliseconds)")
-        private final Long planTime;
+        @Schema(title = "Scheduled plan time")
+        private final Instant planTime;
 
-        @Schema(title = "Actual start time (epoch milliseconds)")
-        private final Long startTime;
+        @Schema(title = "Actual start time")
+        private final Instant startTime;
 
-        @Schema(title = "End time (epoch milliseconds); null if still running")
-        private final Long endTime;
+        @Schema(title = "End time; null if still running")
+        private final Instant endTime;
 
-        @Schema(title = "Last update time (epoch milliseconds)")
-        private final Long lastUpdateTime;
+        @Schema(title = "How long the instance took to execute")
+        private final Duration executeTime;
 
-        @Schema(title = "Error message when the job run failed; null otherwise")
-        private final String errorMessage;
+        @Schema(title = "Submission time")
+        private final Instant submitTime;
+
+        @Schema(title = "ID of the job this instance belongs to")
+        private final Long jobId;
     }
 }

@@ -27,7 +27,7 @@ public interface DataArtsConnectionInterface extends AbstractConnectionInterface
             private endpoint, a non-standard deployment, or in tests.
 
             When set, the `region` property is ignored for endpoint resolution. Format:
-            `https://dataarts.<region>.myhuaweicloud.com` (without trailing slash).
+            `https://dayu.<region>.myhuaweicloud.com` (without trailing slash).
             """
     )
     @PluginProperty(group = "connection")

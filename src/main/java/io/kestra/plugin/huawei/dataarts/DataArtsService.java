@@ -9,6 +9,7 @@ import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.huawei.AbstractConnection;
 import io.kestra.plugin.huawei.dataarts.models.JobRun;
+import io.kestra.plugin.huawei.dataarts.models.SupplementDataRun;
 import jakarta.annotation.Nullable;
 
 import java.io.IOException;
@@ -19,18 +20,32 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * Static REST helpers for the DataArts Factory V1 API.
+ * Static REST helpers for the DataArts Factory V2 API.
  *
  * <p>The Huawei v3 Java SDK does not generate typed methods for the DLF job lifecycle, so requests
  * are built manually and signed via the SDK core's {@link AKSKSigner}. The JDK {@link HttpClient}
  * handles transport.
+ *
+ * <p><b>API version</b>: all routes are {@code /v2/{project_id}/factory/...}. The {@code /v1/…}
+ * job-lifecycle paths this class previously used are not published on the API gateway — every
+ * method/path combination returns HTTP 404 {@code APIGW.0101} ("The API does not exist or has not
+ * been published in the environment"), verified against {@code dayu.tr-west-1.myhuaweicloud.com}.
+ * The v2 factory paths match the {@code HttpRequestDef} metadata embedded in
+ * {@code huaweicloud-sdk-dataartsstudio}'s {@code DataArtsStudioMeta}, which declares no {@code /v1/}
+ * routes at all. When changing a path here, confirm it against that metadata rather than the
+ * public API docs.
  *
  * <p><b>Transport exemption</b>: this class uses {@link java.net.http.HttpClient} (JDK) instead of
  * the Kestra internal HTTP client. The Huawei SDK's {@link AKSKSigner} requires a
@@ -49,6 +64,13 @@ public final class DataArtsService {
         "connection", "content-length", "expect", "host", "transfer-encoding", "upgrade", "via"
     );
 
+    // Carries STS temporary-credential tokens alongside AK/SK; must be signed *and* sent.
+    private static final String SECURITY_TOKEN_HEADER = "X-Security-Token";
+
+    // The API gateway declares Content-Type as a required header on the factory POST routes.
+    private static final String CONTENT_TYPE_HEADER = "Content-Type";
+    private static final String JSON_CONTENT_TYPE = "application/json";
+
     private DataArtsService() {
     }
 
@@ -57,78 +79,355 @@ public final class DataArtsService {
      * Returns {@code false} for {@code null} status (freshly-queued instances whose status
      * field has not yet been populated by the API).
      *
-     * <p>Per the DataArts Factory instance status enum, finished states are {@code success},
-     * {@code forceSuccess}, {@code ignoreSuccess}, {@code skip-by-depend}, {@code fail},
-     * {@code running-exception}, and {@code manual-stop}. {@code waiting}, {@code running},
-     * {@code waiting-confirm}, {@code freeze}, and {@code pause} are transient and not terminal.
+     * <p>The status enum, taken from the SDK's {@code JobInstance$StatusEnum}, is exactly:
+     * {@code waiting}, {@code running}, {@code success}, {@code fail}, {@code manual},
+     * {@code pause}, {@code skip}, {@code freeze}. Of those, {@code success}, {@code fail} and
+     * {@code skip} are terminal; {@code waiting}/{@code running} are in flight, and
+     * {@code manual}/{@code pause}/{@code freeze} await an operator, so polling them until
+     * {@code maxDuration} (rather than returning) is the intended behaviour.
+     *
+     * <p>{@code forceSuccess} and {@code ignoreSuccess} are deliberately absent: they are separate
+     * <em>boolean</em> fields on the instance, never status values, so matching them here was dead
+     * code. The hyphenated spellings previously listed ({@code skip-by-depend},
+     * {@code running-exception}, {@code manual-stop}) are not in the enum either — {@code skip} is
+     * the real spelling, and treating it as non-terminal made a skipped instance poll until timeout.
      */
     public static boolean isTerminalState(String status) {
         if (status == null) return false;
         return switch (status) {
-            case "success", "forceSuccess", "ignoreSuccess", "skip-by-depend",
-                 "fail", "running-exception", "manual-stop" -> true;
+            case "success", "fail", "skip" -> true;
             default -> false;
         };
     }
 
     /**
-     * Successful terminal state — job completed without error. Includes {@code forceSuccess} and
-     * {@code ignoreSuccess}, where an operator forced the instance to success or chose to ignore
-     * the failure of a non-critical node.
+     * Successful terminal state — job completed without error. {@code skip} is terminal but not a
+     * success: the instance never ran, so callers should surface it rather than treat it as done.
      */
     public static boolean isSuccessState(String status) {
-        return switch (status) {
-            case "success", "forceSuccess", "ignoreSuccess" -> true;
+        return "success".equals(status);
+    }
+
+    /**
+     * Terminal states for a <em>supplement-data</em> (PatchData) run.
+     *
+     * <p>Supplement-data statuses are <b>upper case</b> — {@code SUCCESS}, {@code RUNNING},
+     * {@code CANCEL} per the {@code status} filter documented on
+     * <a href="https://support.huaweicloud.com/intl/en-us/api-dataartsstudio/dataartsstudio_02_0192.html">
+     * Querying PatchData Instances</a>, and the response example there returns {@code "RUNNING"}.
+     * They are <em>not</em> the lower-case vocabulary a plain job instance uses
+     * ({@link #isTerminalState}), so the two must not be compared with each other.
+     *
+     * <p>Matching is case-insensitive and covers plausible spellings of the failure and cancellation
+     * states, since the doc enumerates only the three values accepted as a query filter and no SDK
+     * enum exists ({@code SupplementDataRespRows#status} is a plain {@code String}). An
+     * unrecognised status is treated as non-terminal, so the worst case is polling until
+     * {@code maxDuration} rather than reporting a wrong outcome; callers log every observed status at
+     * INFO so any value missing from this set can be recovered from a run's logs.
+     */
+    public static boolean isSupplementDataTerminalState(String status) {
+        if (status == null) return false;
+        // Locale.ROOT: this plugin explicitly targets tr-west-1, where a default (Turkish) locale
+        // would fold 'i' to 'İ' (U+0130) under String#toUpperCase() and break this match.
+        return switch (status.toUpperCase(Locale.ROOT)) {
+            case "SUCCESS", "FAIL", "FAILED", "CANCEL", "CANCELED", "CANCELLED", "STOP", "STOPPED" -> true;
             default -> false;
         };
     }
 
     /**
-     * Posts a start request for {@code jobName}.
-     *
-     * <p>DataArts Factory returns HTTP 204 with no body on success; no instance ID is produced.
-     * Call {@link #listInstances} immediately after to resolve the resulting instance.
-     *
-     * @param endpoint    base DataArts endpoint (no trailing slash)
-     * @param projectId   Huawei Cloud project ID
-     * @param workspaceId workspace header value (null or blank → header omitted)
-     * @param jobName     name of the job to start
-     * @param jobParams   optional job-level parameters (key=value map)
-     * @param startDate   optional start date string accepted by the API
+     * Successful terminal state for a supplement-data run. Upper case on the wire — see
+     * {@link #isSupplementDataTerminalState}.
      */
-    public static void startJob(
+    public static boolean isSupplementDataSuccessState(String status) {
+        return status != null && "SUCCESS".equalsIgnoreCase(status);
+    }
+
+    /**
+     * Polls a supplement-data run until it reaches a terminal state, and returns it.
+     *
+     * <p>Shared by {@code StartJobRun} (waiting for a run it just created) and {@code StopJobRun}
+     * (waiting for a stop to be confirmed), which polled identically apart from their timeout
+     * message.
+     *
+     * @param seed          the run's last known state, or {@code null} if it has not been read yet —
+     *                      an already-terminal seed returns immediately without an extra API call
+     * @param deadline      {@link System#currentTimeMillis()} value after which to give up. Checked
+     *                      after the sleep and before the refresh, so a run that goes terminal within
+     *                      the final interval is still observed
+     * @param timeoutMessage builds the timeout error message from the last observed status
+     *                      ({@code "unknown"} when the run was never readable)
+     * @return the run in its terminal state, never {@code null}
+     */
+    public static SupplementDataRun pollUntilTerminal(
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String projectId,
         @Nullable String workspaceId,
-        String jobName,
-        @Nullable Map<String, String> jobParams,
-        @Nullable Long startDate
+        String runName,
+        @Nullable SupplementDataRun seed,
+        Duration interval,
+        long deadline,
+        Function<String, String> timeoutMessage
     ) throws Exception {
-        var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/start";
-        var bodyMap = new LinkedHashMap<String, Object>();
-        if (jobParams != null && !jobParams.isEmpty()) {
-            bodyMap.put("jobParams", jobParams.entrySet().stream()
-                .map(e -> Map.of("name", e.getKey(), "value", e.getValue()))
-                .toList());
-        }
-        if (startDate != null) {
-            // The DataArts Factory start API expects the snake_case field "start_date" as a
-            // numeric yyyyMMdd date (e.g. 20241030); a camelCase "startDate" string is ignored.
-            bodyMap.put("start_date", startDate);
-        }
-        var body = bodyMap.isEmpty() ? "{}" : JacksonMapper.ofJson().writeValueAsString(bodyMap);
+        var current = seed;
 
+        while (current == null || !isSupplementDataTerminalState(current.getStatus())) {
+            sleepOrPropagate(interval);
+
+            if (System.currentTimeMillis() > deadline) {
+                throw new IllegalStateException(
+                    timeoutMessage.apply(current == null ? "unknown" : current.getStatus()));
+            }
+
+            var refreshed = getSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+            if (refreshed != null) {
+                current = refreshed;
+            }
+
+            // INFO rather than DEBUG: the supplement-data status vocabulary is undocumented, so these
+            // lines are how the real values get discovered from a run's logs.
+            runContext.logger().info("Supplement-data run '{}' status={}",
+                runName, current == null ? "not yet visible" : current.getStatus());
+        }
+
+        return current;
+    }
+
+    /**
+     * Sleeps for {@code interval}, propagating an interrupt instead of swallowing it.
+     *
+     * <p>Restores the interrupt flag that {@link Thread#sleep} clears before rethrowing, so a killed
+     * Kestra execution actually aborts the surrounding poll loop rather than continuing with the
+     * signal lost.
+     */
+    public static void sleepOrPropagate(Duration interval) throws InterruptedException {
+        try {
+            Thread.sleep(interval.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw e;
+        }
+    }
+
+    /**
+     * Creates a supplement-data (PatchData) instance, which is how this plugin triggers an
+     * on-demand job run.
+     *
+     * <p><b>Why supplement-data and not a job-trigger route</b>: DataArts Factory publishes no
+     * usable job-trigger API. {@code POST .../jobs/{name}/run-immediate} rejects every request body
+     * with {@code DLF.3051 "The request parameter is invalid."} — verified live on both
+     * {@code tr-west-1} (T-Systems EU sovereign) and {@code ap-southeast-3} (standard {@code .com}),
+     * on run-once and scheduled jobs alike, so it is not partition-specific. {@code POST
+     * .../jobs/{name}/start} only toggles a schedule and also returns {@code DLF.3051} on a run-once
+     * job. Neither route appears in {@code DataArtsStudioMeta}'s {@code HttpRequestDef} metadata at
+     * any API version: the complete {@code factory/jobs} route set is {@code jobs},
+     * {@code jobs/{job_name}/instances/detail}, {@code .../instances/retry}, {@code .../rename} and
+     * {@code .../tags}. The console's own Execute button uses the session-authenticated
+     * {@code /v1.0/{ws}/pipelines/run-pipelines} route, which 404s ({@code APIGW.0101}) on the public
+     * AK/SK gateway.
+     *
+     * <p>{@code POST /v2/{project_id}/factory/supplement-data} <em>is</em> declared in that metadata,
+     * together with a {@code GET} for status and a {@code POST .../{instance_name}/stop} — a complete
+     * create/poll/cancel triad. It also avoids run-immediate's resolve-the-new-instance race, because
+     * the caller supplies the instance {@code name} in the request body and can query it back
+     * verbatim.
+     *
+     * <p><b>Semantic caveat</b>: supplement-data is a <em>backfill</em> mechanism — it re-runs a job
+     * over a range of business dates. Running it over a single day is effectively "run now" for a
+     * date-parameterised job, but the resulting run appears in the console's Supplement Data
+     * monitoring view, not Job Monitoring, and is not a plain job instance.
+     *
+     * <p>{@code start_date}/{@code end_date} must already be in the {@code 2026-07-28T00:00:00 +00}
+     * form DataArts parses; the caller normalises them. See
+     * {@code StartJobRun.toWireDateTime}.
+     *
+     * @param name              caller-chosen instance name; used later to poll and to stop the run
+     * @param jobName           job to run
+     * @param startDate         start of the business-date range, in DataArts' wire form
+     * @param endDate           end of the business-date range, in DataArts' wire form
+     * @param parallel          number of instances to execute concurrently (null → omitted)
+     * @param dayGranularity    whether the range is day-granular (null → omitted)
+     * @param stopWhenFail      whether to abort remaining instances after a failure (null → omitted)
+     * @param runTimeWindow     {@code HH:mm-HH:mm} window the run is allowed to execute in
+     *                          (null → omitted, which means the API's own {@code 00:00-00:00} default)
+     */
+    public static void createSupplementData(
+        RunContext runContext,
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String name,
+        String jobName,
+        String startDate,
+        String endDate,
+        @Nullable Integer parallel,
+        @Nullable Boolean dayGranularity,
+        @Nullable Boolean stopWhenFail,
+        @Nullable String runTimeWindow
+    ) throws Exception {
+        var path = "/v2/" + projectId + "/factory/supplement-data";
+
+        var bodyMap = new LinkedHashMap<String, Object>();
+        bodyMap.put("name", name);
+        bodyMap.put("job_name", jobName);
+        bodyMap.put("start_date", startDate);
+        bodyMap.put("end_date", endDate);
+        if (parallel != null) bodyMap.put("parallel", parallel);
+        if (dayGranularity != null) bodyMap.put("is_day_granularity", dayGranularity);
+        if (stopWhenFail != null) bodyMap.put("is_stop_when_fail", stopWhenFail);
+        // Omitted unless the caller asks for a window. The API's documented default of 00:00-00:00
+        // reads like a zero-width window that would never execute, but a live run with the field
+        // absent executed all of its instances immediately, so it evidently means "unrestricted".
+        if (runTimeWindow != null) {
+            bodyMap.put("supplement_data_run_time", Map.of("time_of_day", runTimeWindow));
+        }
+
+        var body = JacksonMapper.ofJson().writeValueAsString(bodyMap);
         var response = invoke(config, endpoint, path, "POST", workspaceId, body);
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
+            var detail = parseDlfError(response.body());
+            // Each branch is one logical sentence; the trailing '\' suppresses the newline a text
+            // block would otherwise insert, so the message stays on one line at runtime while the
+            // source reads as prose. The shared " — " separator is added at the throw site.
+            String hint;
+            if (detail.contains("DLF.30111")) {
+                hint = """
+                    supplement-data only accepts a job that has a trigger: a cron schedule, an HTTP \
+                    trigger, or a parent job. A run-once / manually-triggered job is rejected. Since \
+                    DataArts publishes no other working job-trigger route, give the job a schedule in \
+                    the DataArts Studio console (Job Monitoring → the job → scheduling), then retry. \
+                    Note the schedule need not fire on its own for this task to work — it only has to \
+                    exist.""";
+            } else if (detail.contains("DLF.30121")) {
+                hint = """
+                    startDate and endDate are compared as timestamps and must be at least 2 seconds \
+                    apart. Note DataArts reports this same error for a value it could not parse at \
+                    all, because both ends then collapse to the same instant: check that the dates \
+                    sent (logged just above) are in the form 'yyyy-MM-ddTHH:mm:ss +00' that DataArts \
+                    requires, and not a form passed through verbatim from startDate/endDate.""";
+            } else if (detail.contains("DLF.3051")) {
+                hint = """
+                    DLF rejected the request body. Confirm the job name exists in the target \
+                    workspace, and that startDate/endDate are in the form 'yyyy-MM-ddTHH:mm:ss +00' \
+                    that DataArts requires.""";
+            } else {
+                hint = """
+                    check that the job name exists in this workspace, that the instance name is \
+                    unique, and that the credentials have permission to submit supplement data.""";
+            }
             throw new IllegalStateException(
-                "DataArts Factory start job '" + jobName + "' failed (HTTP " + response.statusCode() + ")" +
-                parseDlfError(response.body()) +
-                " — check that the job name is correct and the credentials have the dlf:jobs:start permission.");
+                "DataArts Factory create supplement-data run '" + name + "' for job '" + jobName +
+                "' failed (HTTP " + response.statusCode() + ")" + detail + " — " + hint);
         }
-        runContext.logger().debug("Start job '{}' request accepted (HTTP {})", jobName, response.statusCode());
+        runContext.logger().debug("Supplement-data run '{}' for job '{}' accepted (HTTP {})",
+            name, jobName, response.statusCode());
+    }
+
+    /**
+     * Fetches a supplement-data run by its caller-chosen {@code name}, or {@code null} when no run
+     * with that exact name exists yet.
+     *
+     * <p>The {@code name} query parameter is treated as a filter by the API rather than an exact
+     * key, so the returned rows are matched on {@code name} client-side — a prefix-matching
+     * implementation would otherwise be able to return a different run's status.
+     *
+     * <p>⚠ {@code page} is <b>0-based</b> (documented as "default 0, must be ≥ 0"), unlike the
+     * 1-based {@code offset} conventions elsewhere in Huawei's APIs. Requesting {@code page=1}
+     * asks for the <em>second</em> page, which for a name-filtered query returns an empty
+     * {@code rows} array — indistinguishable from "the run does not exist", which is exactly how it
+     * presented: every {@code StartJobRun} timed out waiting for a run that had been created
+     * successfully.
+     */
+    @Nullable
+    public static SupplementDataRun getSupplementData(
+        RunContext runContext,
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String name
+    ) throws Exception {
+        var path = "/v2/" + projectId + "/factory/supplement-data";
+        // Raw (unencoded) — invoke() adds these directly via addQueryParam so the SDK signs and the
+        // wire URL are encoded exactly once, consistently. Pre-encoding here (as this used to do)
+        // made the value encoded twice over in the signed canonical request while the wire URL
+        // stayed single-encoded, an opaque APIGW.0301 signature mismatch for a name containing a
+        // space or a non-ASCII character.
+        var queryParams = Map.of("name", name, "page", "0", "size", "100");
+
+        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
+
+        if (response.statusCode() != 200) {
+            throw new IllegalStateException(
+                "DataArts Factory list supplement-data runs failed (HTTP " + response.statusCode() + ")" +
+                parseDlfError(response.body()) +
+                " — verify the workspace and that the credentials have permission to read supplement data.");
+        }
+
+        var body = JacksonMapper.ofJson().readTree(response.body());
+        var rows = body.path("rows");
+        if (rows.isMissingNode() || !rows.isArray()) {
+            return null;
+        }
+        for (var row : rows) {
+            if (name.equals(textOrNull(row, "name"))) {
+                return nodeToSupplementDataRun(row);
+            }
+        }
+
+        // A miss is ambiguous — the run may not exist yet, or the query may be wrong (a 0-based
+        // `page` off-by-one silently returned an empty page for months). Reporting what the API
+        // actually returned makes the difference visible without another rebuild.
+        var names = new ArrayList<String>();
+        rows.forEach(row -> names.add(String.valueOf(textOrNull(row, "name"))));
+        runContext.logger().debug(
+            "Supplement-data query for name='{}' returned total={}, {} row(s): {}",
+            name, body.path("total").asText("?"), names.size(), names);
+        return null;
+    }
+
+    /**
+     * Sends a stop request for a supplement-data run, identified by the {@code name} it was created
+     * with.
+     *
+     * <p>This is the only stop route DataArts Factory publishes: there is no stop operation for a
+     * plain job instance. All of
+     * {@code POST|PUT /v2/{pid}/factory/jobs/{job}/instances/{id}/stop},
+     * {@code POST /v2/{pid}/factory/jobs/{job}/stop},
+     * {@code POST /v2/{pid}/factory/jobs/{job}/instances/stop} and
+     * {@code POST /v2/{pid}/factory/jobs/instances/{id}/stop} return {@code APIGW.0101} (not
+     * published), and {@code DataArtsStudioMeta} declares no factory-job stop route. Consequently a
+     * run triggered from the console cannot be stopped through this plugin — only one created by
+     * {@link #createSupplementData}.
+     */
+    public static void stopSupplementData(
+        RunContext runContext,
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String projectId,
+        @Nullable String workspaceId,
+        String name
+    ) throws Exception {
+        // Raw (unencoded) name: invoke() percent-encodes each path segment exactly once when it
+        // builds the wire URL, using the same algorithm AKSKSigner applies internally when it
+        // re-encodes the path for the canonical request it signs. Pre-encoding here (as this used to
+        // do, via a plain URLEncoder call) is wrong twice over — URLEncoder's '+' for space is not
+        // valid inside a path segment in the first place, and re-encoding an already-encoded segment
+        // during signing would produce yet another value, out of step with the wire request.
+        var path = "/v2/" + projectId + "/factory/supplement-data/" + name + "/stop";
+        var response = invoke(config, endpoint, path, "POST", workspaceId, "{}");
+
+        if (response.statusCode() != 204 && response.statusCode() != 200) {
+            throw new IllegalStateException(
+                "DataArts Factory stop supplement-data run '" + name + "' failed (HTTP " +
+                response.statusCode() + ")" + parseDlfError(response.body()) +
+                " — check that the run exists and is still in a stoppable state.");
+        }
+        runContext.logger().debug("Stop supplement-data run '{}' accepted (HTTP {})", name, response.statusCode());
     }
 
     /**
@@ -146,42 +445,6 @@ public final class DataArtsService {
         return fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, 0);
     }
 
-    /**
-     * Lists all job run instances for {@code jobName}, newest first (by planTime/startTime desc).
-     * Paginates automatically until all instances have been fetched or a page is shorter than limit.
-     *
-     * @param limit page size (1–100)
-     */
-    public static List<JobRun> listInstances(
-        AbstractConnection.HuaweiClientConfig config,
-        String endpoint,
-        String projectId,
-        @Nullable String workspaceId,
-        String jobName,
-        int limit
-    ) throws Exception {
-        var result = new ArrayList<JobRun>();
-        int offset = 0;
-
-        while (true) {
-            var page = fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, offset);
-            result.addAll(page);
-            if (page.size() < limit) {
-                break;
-            }
-            offset += limit;
-        }
-
-        // Sort newest first across all pages: the API does not guarantee stable ordering when
-        // results span multiple pages, so a client-side sort is required for correctness.
-        result.sort((a, b) -> {
-            var ta = a.getPlanTime() != null ? a.getPlanTime() : (a.getStartTime() != null ? a.getStartTime() : 0L);
-            var tb = b.getPlanTime() != null ? b.getPlanTime() : (b.getStartTime() != null ? b.getStartTime() : 0L);
-            return Long.compare(tb, ta);
-        });
-        return result;
-    }
-
     private static List<JobRun> fetchInstancePage(
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -191,15 +454,15 @@ public final class DataArtsService {
         int limit,
         int offset
     ) throws Exception {
-        var path = "/v1/" + projectId + "/jobs/instances/detail"
-            + "?jobName=" + urlEncode(jobName)
-            // preciseQuery=true forces an exact jobName match; without it the API does a
-            // substring match and could return instances of a differently-named job.
-            + "&preciseQuery=true"
-            + "&limit=" + limit
-            + "&offset=" + offset;
+        // v2 carries the job name as a path segment, so the exact-match behaviour the v1 route
+        // needed `jobName` + `preciseQuery=true` query params for is now inherent — a path segment
+        // cannot substring-match a differently-named job. jobName is passed raw (unencoded); invoke()
+        // is the single place path segments and query values get percent-encoded, for both the wire
+        // request and the signed canonical request.
+        var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/detail";
+        var queryParams = Map.of("limit", String.valueOf(limit), "offset", String.valueOf(offset));
 
-        var response = invoke(config, endpoint, path, "GET", workspaceId, null);
+        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -223,6 +486,30 @@ public final class DataArtsService {
 
     /**
      * Fetches the detail of a specific job run instance.
+     *
+     * <p><b>Live-verified 2026-07-29</b> on {@code ap-southeast-3} (job {@code job_6336}, instance
+     * {@code 1479208}), because this route is declared nowhere in {@code DataArtsStudioMeta} and was
+     * therefore suspected of being unpublished like {@code run-immediate}:
+     * <ul>
+     *   <li>It <b>is</b> published — HTTP 200 with an instance body. Absence from the SDK metadata is
+     *       not evidence a route is dead; the gateway serves routes the SDK never declares.</li>
+     *   <li>The {@code {instance_id}} segment is genuinely <b>honoured</b>, not ignored: asking for a
+     *       nonexistent instance ({@code 1}) returns HTTP 400 {@code DLF.30137 "Job instance does not
+     *       exist."} rather than falling back to the job's newest instance. Worth stating explicitly —
+     *       probing with the newest instance's own ID (the obvious test) cannot tell those two apart,
+     *       since both would return the same body.</li>
+     * </ul>
+     *
+     * <p>⚠ The response is a <b>strict subset</b> of what {@code instances/detail} returns for the
+     * same instance. Verified present: {@code instance_id}, {@code status}, {@code plan_time},
+     * {@code start_time}. Verified <em>absent</em>: {@code job_instance_name}, {@code end_time},
+     * {@code submit_time}, {@code execute_time}, {@code job_id} — including {@code end_time} on an
+     * instance whose status was already {@code success}. So a {@code GetJobRun} given an
+     * {@code instanceId} emits five fewer populated outputs than the same task with it omitted; that
+     * is the route's behaviour, not a mapping bug. {@link #listInstancesFirstPage} is deliberately
+     * <em>not</em> used to backfill them: it offers no {@code instance_id} filter, so matching a
+     * specific instance means paging until it turns up — unbounded requests, and unable to reach an
+     * instance old enough to have aged out of the list at all.
      */
     public static JobRun getInstance(
         AbstractConnection.HuaweiClientConfig config,
@@ -232,47 +519,56 @@ public final class DataArtsService {
         String jobName,
         long instanceId
     ) throws Exception {
-        var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/instances/" + instanceId;
+        var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/" + instanceId;
         var response = invoke(config, endpoint, path, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
+            var detail = parseDlfError(response.body());
+            var hint = detail.contains("DLF.30137")
+                ? """
+                    no instance with that ID belongs to this job. The ID is the API's numeric \
+                    instance_id, which is not shown anywhere in the DataArts Studio console and has no \
+                    API of its own — the console's instanceId URL parameter is a different entity (the \
+                    DataArts Studio service instance). Obtain a usable value by running GetJobRun with \
+                    instanceId omitted, which resolves the latest instance."""
+                : "verify the instanceId and job name.";
             throw new IllegalStateException(
                 "DataArts Factory get instance " + instanceId + " for job '" + jobName +
-                "' failed (HTTP " + response.statusCode() + ")" + parseDlfError(response.body()) +
-                " — verify the instanceId and job name.");
+                "' failed (HTTP " + response.statusCode() + ")" + detail + " — " + hint);
         }
 
         var node = JacksonMapper.ofJson().readTree(response.body());
         return nodeToJobRun(jobName, node);
     }
 
-    /**
-     * Sends a stop request for a specific job run instance.
-     *
-     * <p>Returns HTTP 204 on success.
-     */
-    public static void stopInstance(
-        RunContext runContext,
-        AbstractConnection.HuaweiClientConfig config,
-        String endpoint,
-        String projectId,
-        @Nullable String workspaceId,
-        String jobName,
-        long instanceId
-    ) throws Exception {
-        var path = "/v1/" + projectId + "/jobs/" + urlEncode(jobName) + "/instances/" + instanceId + "/stop";
-        var response = invoke(config, endpoint, path, "POST", workspaceId, "{}");
-
-        if (response.statusCode() != 204 && response.statusCode() != 200) {
-            throw new IllegalStateException(
-                "DataArts Factory stop instance " + instanceId + " for job '" + jobName +
-                "' failed (HTTP " + response.statusCode() + ")" + parseDlfError(response.body()) +
-                " — check that the instance is in a stoppable state.");
-        }
-        runContext.logger().debug("Stop instance {} for job '{}' accepted (HTTP {})", instanceId, jobName, response.statusCode());
-    }
-
     // ── Internal helpers ─────────────────────────────────────────────────────────
+
+    /**
+     * Maps one {@code supplement-data} {@code rows[]} element onto {@link SupplementDataRun}.
+     *
+     * <p>Wire format is snake_case, per the {@code @JsonProperty} names on the SDK's
+     * {@code SupplementDataRespRows}: {@code name}, {@code job_list}, {@code status},
+     * {@code start_date}, {@code end_date}, {@code submitted_date}, {@code parallel}, {@code type},
+     * {@code user_name}. camelCase spellings are kept as fallbacks, as in {@link #nodeToJobRun}.
+     */
+    private static SupplementDataRun nodeToSupplementDataRun(JsonNode node) {
+        var jobList = new ArrayList<String>();
+        var jobListNode = firstPresent(node, "job_list", "jobList");
+        if (jobListNode != null && jobListNode.isArray()) {
+            jobListNode.forEach(j -> jobList.add(j.asText()));
+        }
+
+        return SupplementDataRun.builder()
+            .name(textOrNull(node, "name"))
+            .jobList(jobList)
+            .status(textOrNull(node, "status"))
+            .startDate(instantOrNull(node, "start_date", "startDate"))
+            .endDate(instantOrNull(node, "end_date", "endDate"))
+            .submittedDate(instantOrNull(node, "submitted_date", "submittedDate"))
+            .parallel(intOrNull(node, "parallel"))
+            .userName(textOrNull(node, "user_name", "userName"))
+            .build();
+    }
 
     private static HttpResponse<String> invoke(
         AbstractConnection.HuaweiClientConfig config,
@@ -282,72 +578,71 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         @Nullable String body
     ) throws IOException, InterruptedException {
-        var url = endpoint + path;
+        return invoke(config, endpoint, path, Map.of(), method, workspaceId, body);
+    }
 
-        // Build the SDK HttpRequest for signing — path must not include the host.
-        // Extract path+query from the full URL for the signer (it derives the host from endpoint).
-        var pathOnly = path.contains("?") ? path.substring(0, path.indexOf('?')) : path;
-        var query = path.contains("?") ? path.substring(path.indexOf('?') + 1) : "";
-
+    /**
+     * @param path        RAW (unencoded) path, no query string — e.g. a caller-chosen run name goes
+     *                     straight into the path exactly as given, never pre-encoded. See
+     *                     {@code queryParams} for why.
+     * @param queryParams RAW (unencoded) query key/value pairs, added via {@code addQueryParam} so
+     *                     {@link AKSKSigner} is the only thing that percent-encodes them for the
+     *                     canonical request it signs. Pre-encoding a value here (as this used to do)
+     *                     made the signed canonical query string doubly-encoded while the wire URL
+     *                     below stayed singly-encoded — an opaque {@code APIGW.0301} signature
+     *                     mismatch for any value containing a space or a non-ASCII character. The
+     *                     same reasoning applies to path segments: {@link AKSKSigner} always
+     *                     re-encodes them from the raw path when it builds the canonical URI, so the
+     *                     path given here must be raw too, and {@link #encodeUriComponent} is what
+     *                     encodes it — once — for the request actually sent below.
+     */
+    private static HttpResponse<String> invoke(
+        AbstractConnection.HuaweiClientConfig config,
+        String endpoint,
+        String path,
+        Map<String, String> queryParams,
+        String method,
+        @Nullable String workspaceId,
+        @Nullable String body
+    ) throws IOException, InterruptedException {
         var sdkReqBuilder = HttpRequest.newBuilder()
             .withEndpoint(endpoint)
-            .withPath(pathOnly)
+            .withPath(path)
             .withMethod(HttpMethod.valueOf(method))
             .withContentType("application/json");
 
-        if (!query.isBlank()) {
-            // addQueryParam expects List<String>; the query is already encoded so we re-parse it
-            for (var kv : query.split("&")) {
-                var eq = kv.indexOf('=');
-                if (eq > 0) {
-                    var k = kv.substring(0, eq);
-                    var v = kv.substring(eq + 1);
-                    sdkReqBuilder.addQueryParam(k, List.of(v));
-                }
-            }
-        }
+        queryParams.forEach((k, v) -> sdkReqBuilder.addQueryParam(k, List.of(v)));
 
         // Always sign the exact body bytes that will be sent on the wire so HMAC-SHA256 matches.
         if (body != null) {
             sdkReqBuilder.withBodyAsString(body);
         }
 
+        // Temporary (STS) credentials only resolve when X-Security-Token accompanies the AK/SK —
+        // without it IAM's permanent-key lookup misses and the gateway answers
+        // `APIGW.0301 / ak <ak> not exist`. AKSKSigner#sign ignores BasicCredentials#withSecurityToken
+        // entirely: the SDK injects this header in BasicCredentials#syncProcessAuthRequest, which the
+        // manual signing path here never calls. Add it *before* signing (verified: SignedHeaders then
+        // becomes `host;x-sdk-date;x-security-token`) and again on the JDK request below, because the
+        // map returned by sign() holds only Authorization/Host/X-Sdk-Date and would otherwise leave
+        // the signature covering a header that never reaches the wire.
+        var securityToken = config.securityToken();
+        var hasSecurityToken = securityToken != null && !securityToken.isBlank();
+        if (hasSecurityToken) {
+            sdkReqBuilder.addHeader(SECURITY_TOKEN_HEADER, securityToken);
+        }
+
         var sdkReq = sdkReqBuilder.build();
 
-        // Sign with AK/SK if available; otherwise fall back to X-Auth-Token.
-        // Content-Type is NOT set here — AKSKSigner includes it in the signed headers map
-        // (from withContentType above), so the loop below supplies exactly one value that
-        // matches what was signed. Setting it here too would produce a doubled header on
-        // the wire and break the HMAC verification on the server.
         var jdkReqBuilder = java.net.http.HttpRequest.newBuilder()
-            .uri(URI.create(url))
+            .uri(URI.create(buildWireUrl(endpoint, path, queryParams)))
             .timeout(Duration.ofSeconds(30));
 
         if (workspaceId != null && !workspaceId.isBlank()) {
             jdkReqBuilder.header("workspace", workspaceId);
         }
 
-        if (config.accessKeyId() != null && !config.accessKeyId().isBlank()
-                && config.secretAccessKey() != null && !config.secretAccessKey().isBlank()) {
-            var signingCreds = new BasicCredentials()
-                .withAk(config.accessKeyId())
-                .withSk(config.secretAccessKey());
-            if (config.securityToken() != null) {
-                signingCreds.withSecurityToken(config.securityToken());
-            }
-            var signedHeaders = AKSKSigner.getInstance().sign(sdkReq, signingCreds);
-            // JDK HttpRequest.Builder rejects restricted headers (Host, Connection, …) that the
-            // signer adds for canonical request computation. The JDK sets Host automatically.
-            signedHeaders.entrySet().stream()
-                .filter(e -> !RESTRICTED_HEADERS.contains(e.getKey().toLowerCase()))
-                .forEach(e -> jdkReqBuilder.header(e.getKey(), e.getValue()));
-        } else if (config.securityToken() != null && !config.securityToken().isBlank()) {
-            jdkReqBuilder.header("X-Auth-Token", config.securityToken());
-        } else {
-            throw new IllegalArgumentException(
-                "DataArts Studio requires either AK/SK credentials (accessKeyId + secretAccessKey) " +
-                "or a security token — configure at least one authentication method.");
-        }
+        applyAuthHeaders(jdkReqBuilder, sdkReq, config, securityToken, hasSecurityToken);
 
         // POST with no body still needs a publisher; noBody() works for GET.
         var bodyPublisher = body != null
@@ -361,27 +656,174 @@ public final class DataArtsService {
         return HTTP_CLIENT.send(jdkReq, HttpResponse.BodyHandlers.ofString());
     }
 
+    /**
+     * Builds the URL actually sent on the wire from the same RAW path and query the signer was given.
+     *
+     * <p>Path segments and query values are percent-encoded exactly once here, with the same algorithm
+     * {@link AKSKSigner} applies internally ({@code SignUtils#urlEncode}) — see
+     * {@link #encodeUriComponent}. Encoding them any other way (e.g. {@link URLEncoder} alone, which
+     * leaves {@code '*'} unescaped and turns a space into {@code '+'}) would disagree with the
+     * canonical request the signer computed from the same raw values, producing an opaque
+     * {@code APIGW.0301} signature mismatch.
+     */
+    private static String buildWireUrl(String endpoint, String path, Map<String, String> queryParams) {
+        var wirePath = Arrays.stream(path.split("/", -1))
+            .map(DataArtsService::encodeUriComponent)
+            .collect(Collectors.joining("/"));
+        var wireQuery = queryParams.entrySet().stream()
+            .map(e -> encodeUriComponent(e.getKey()) + "=" + encodeUriComponent(e.getValue()))
+            .collect(Collectors.joining("&"));
+        return endpoint + wirePath + (wireQuery.isEmpty() ? "" : "?" + wireQuery);
+    }
+
+    /**
+     * Applies the authentication headers to the outgoing request: AK/SK signing when a key pair is
+     * configured, otherwise a bare {@code X-Auth-Token}.
+     *
+     * @throws IllegalArgumentException when neither authentication method is configured
+     */
+    private static void applyAuthHeaders(
+        java.net.http.HttpRequest.Builder jdkReqBuilder,
+        HttpRequest sdkReq,
+        AbstractConnection.HuaweiClientConfig config,
+        @Nullable String securityToken,
+        boolean hasSecurityToken
+    ) {
+        var hasAkSk = config.accessKeyId() != null && !config.accessKeyId().isBlank()
+            && config.secretAccessKey() != null && !config.secretAccessKey().isBlank();
+
+        if (hasAkSk) {
+            var signingCreds = new BasicCredentials()
+                .withAk(config.accessKeyId())
+                .withSk(config.secretAccessKey());
+            var signedHeaders = AKSKSigner.getInstance().sign(sdkReq, signingCreds);
+            // JDK HttpRequest.Builder rejects restricted headers (Host, Connection, …) that the
+            // signer adds for canonical request computation. The JDK sets Host automatically.
+            signedHeaders.entrySet().stream()
+                .filter(e -> !RESTRICTED_HEADERS.contains(e.getKey().toLowerCase(Locale.ROOT)))
+                .forEach(e -> jdkReqBuilder.header(e.getKey(), e.getValue()));
+            if (hasSecurityToken) {
+                jdkReqBuilder.header(SECURITY_TOKEN_HEADER, securityToken);
+            }
+            // AKSKSigner does not always echo Content-Type back in its header map, even though the
+            // caller's withContentType() feeds it into the canonical request. When it doesn't, nothing
+            // else sets the header and the API gateway rejects the call before DLF ever sees it:
+            // `APIGW.0106 "Invalid header parameter: Content-Type, required"` on POST
+            // /v2/{pid}/factory/supplement-data. Supplying it only when absent keeps exactly one
+            // value on the wire — a second, duplicate value would be comma-joined into
+            // "application/json, application/json" and break signature verification.
+            if (!containsHeaderIgnoreCase(signedHeaders, CONTENT_TYPE_HEADER)) {
+                jdkReqBuilder.header(CONTENT_TYPE_HEADER, JSON_CONTENT_TYPE);
+            }
+        } else if (hasSecurityToken) {
+            jdkReqBuilder.header("X-Auth-Token", securityToken);
+            // Nothing is signed on this path, so the header is set unconditionally — the gateway
+            // requires it on POST regardless of the authentication method.
+            jdkReqBuilder.header(CONTENT_TYPE_HEADER, JSON_CONTENT_TYPE);
+        } else {
+            throw new IllegalArgumentException(
+                "DataArts Studio requires either AK/SK credentials (accessKeyId + secretAccessKey) " +
+                "or a security token — configure at least one authentication method.");
+        }
+    }
+
+    /**
+     * Case-insensitive header-name lookup. HTTP header names are case-insensitive, and the SDK's
+     * signer is not guaranteed to use any particular casing, so a plain {@code containsKey} would
+     * miss a {@code content-type} entry and produce a duplicate header.
+     */
+    private static boolean containsHeaderIgnoreCase(Map<String, String> headers, String name) {
+        return headers.keySet().stream().anyMatch(k -> k.equalsIgnoreCase(name));
+    }
+
+    /**
+     * Maps one {@code instances/detail} array element onto {@link JobRun}.
+     *
+     * <p>The wire format is <b>snake_case</b> — verified against the {@code @JsonProperty} names on
+     * the SDK's own {@code JobInstance} model: {@code instance_id}, {@code job_instance_name},
+     * {@code plan_time}, {@code start_time}, {@code end_time}, {@code execute_time},
+     * {@code submit_time}, {@code job_id}, {@code status}. Reading camelCase keys here silently
+     * yielded {@code null} for every field except {@code status} (spelled identically in both
+     * conventions), which made every task emit a two-field output and left
+     * {@code StartJobRun.resolveNewestInstance} unable to ever match its {@code instanceId >
+     * waterMark} filter. The camelCase spellings are kept as fallbacks so a route that does return
+     * them still maps.
+     *
+     * <p>{@code jobName} comes from the caller rather than the payload: the single-instance route
+     * does not echo it back, and the caller always knows it.
+     */
     private static JobRun nodeToJobRun(String jobName, JsonNode node) {
         return JobRun.builder()
             .jobName(jobName)
-            .instanceId(longOrNull(node, "instanceId"))
+            .instanceId(longOrNull(node, "instance_id", "instanceId"))
+            .jobInstanceName(textOrNull(node, "job_instance_name", "jobInstanceName"))
             .status(textOrNull(node, "status"))
-            .planTime(longOrNull(node, "planTime"))
-            .startTime(longOrNull(node, "startTime"))
-            .endTime(longOrNull(node, "endTime"))
-            .lastUpdateTime(longOrNull(node, "lastUpdateTime"))
-            .errorMessage(textOrNull(node, "errorMessage"))
+            .planTime(instantOrNull(node, "plan_time", "planTime"))
+            .startTime(instantOrNull(node, "start_time", "startTime"))
+            .endTime(instantOrNull(node, "end_time", "endTime"))
+            .executeTime(durationOrNull(node, "execute_time", "executeTime"))
+            .submitTime(instantOrNull(node, "submit_time", "submitTime"))
+            .jobId(longOrNull(node, "job_id", "jobId"))
             .build();
     }
 
-    private static String textOrNull(JsonNode node, String field) {
-        var n = node.path(field);
-        return n.isMissingNode() || n.isNull() ? null : n.asText();
+    /**
+     * Returns the first of {@code fields} that is present and non-null, as text; null if none match.
+     */
+    private static String textOrNull(JsonNode node, String... fields) {
+        var n = firstPresent(node, fields);
+        return n == null ? null : n.asText();
     }
 
-    private static Long longOrNull(JsonNode node, String field) {
-        var n = node.path(field);
-        return n.isMissingNode() || n.isNull() ? null : n.asLong();
+    /**
+     * Returns the first of {@code fields} that is present and non-null, as a long; null if none match.
+     */
+    private static Long longOrNull(JsonNode node, String... fields) {
+        var n = firstPresent(node, fields);
+        return n == null ? null : n.asLong();
+    }
+
+    /**
+     * Returns the first of {@code fields} that is present and non-null as an {@link Instant}, reading
+     * it as epoch milliseconds; null if none match.
+     *
+     * <p>DataArts reports every timestamp as a 13-digit epoch millisecond number. Exposing those raw
+     * made outputs unreadable ({@code endTime: 1785227336000}), so they are converted at the boundary
+     * and surface as ISO-8601 — matching how other Kestra plugins type timestamp outputs.
+     */
+    private static Instant instantOrNull(JsonNode node, String... fields) {
+        var millis = longOrNull(node, fields);
+        return millis == null ? null : Instant.ofEpochMilli(millis);
+    }
+
+    /**
+     * Reads a millisecond count as a {@link Duration}; null if absent.
+     *
+     * <p>Used for {@code execute_time}, which despite its name is an elapsed duration rather than a
+     * timestamp: a live instance reported {@code execute_time: 4000} alongside
+     * {@code end_time - start_time == 4000}, i.e. 4 seconds.
+     */
+    private static Duration durationOrNull(JsonNode node, String... fields) {
+        var millis = longOrNull(node, fields);
+        return millis == null ? null : Duration.ofMillis(millis);
+    }
+
+    /**
+     * Returns the first of {@code fields} that is present and non-null, as an int; null if none match.
+     */
+    private static Integer intOrNull(JsonNode node, String... fields) {
+        var n = firstPresent(node, fields);
+        return n == null ? null : n.asInt();
+    }
+
+    private static JsonNode firstPresent(JsonNode node, String... fields) {
+        for (var field : fields) {
+            var n = node.path(field);
+            if (!n.isMissingNode() && !n.isNull()) {
+                return n;
+            }
+        }
+        return null;
     }
 
     /**
@@ -408,7 +850,20 @@ public final class DataArtsService {
         return "";
     }
 
-    private static String urlEncode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    /**
+     * Percent-encodes a single path segment or query value exactly the way the Huawei Cloud SDK's
+     * {@code AKSKSigner} does internally ({@code SignUtils#urlEncode(String, boolean)}, verified via
+     * {@code javap} on {@code huaweicloud-sdk-core}): {@link URLEncoder}'s UTF-8 form-encoding,
+     * normalised to proper RFC 3986 form — space becomes {@code %20} rather than the {@code '+'}
+     * {@link URLEncoder} alone would produce (wrong inside a path segment), {@code '*'} becomes
+     * {@code %2A}, and {@code '~'} is left unescaped. This is the only place a path segment or query
+     * value gets encoded on the wire-request side, matching the one encoding pass the SDK applies on
+     * the signing side from the same raw string.
+     */
+    private static String encodeUriComponent(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8)
+            .replace("+", "%20")
+            .replace("*", "%2A")
+            .replace("%7E", "~");
     }
 }
