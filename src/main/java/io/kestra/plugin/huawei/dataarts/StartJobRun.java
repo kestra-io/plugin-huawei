@@ -187,7 +187,11 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59, 59);
 
     /**
-     * Bounds on {@code parallel}, per the maximum DataArts documents for a PatchData instance.
+     * Bounds on {@code parallel}, quoting the API reference for
+     * <a href="https://support.huaweicloud.com/intl/en-us/api-dataartsstudio/dataartsstudio_02_0199.html">
+     * Creating a PatchData Instance</a>: "Number of parallel periods of the PatchData instance. The
+     * value ranges from 1 to 5." The same page marks the field mandatory, which is why it is always
+     * sent rather than omitted when left at its default.
      *
      * <p>Checked client-side rather than left to the API: an out-of-range value would otherwise come
      * back as {@code DLF.3051 "The request parameter is invalid."}, which this task's error handling
