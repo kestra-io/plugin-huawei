@@ -25,7 +25,13 @@ import java.util.Map;
 @NoArgsConstructor
 @Schema(
     title = "Put an item into a GeminiDB (DynamoDB-compatible) table",
-    description = "Creates or replaces an item — an upsert when the key already exists."
+    description = """
+        Creates or replaces an item — an upsert when the key already exists.
+
+        Authenticate with the instance's database account — `accessKeyId: rwuser` and the instance
+        admin password as `secretAccessKey`. Huawei IAM AK/SK credentials are not accepted by the
+        DynamoDB-compatible data plane.
+        """
 )
 @Plugin(
     examples = {
@@ -39,9 +45,9 @@ import java.util.Map;
                 tasks:
                   - id: put_item
                     type: io.kestra.plugin.huawei.geminidb.PutItem
-                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
-                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-                    endpoint: "https://192.168.0.10:8635"
+                    accessKeyId: rwuser
+                    secretAccessKey: "{{ secret('GEMINIDB_ADMIN_PASSWORD') }}"
+                    endpoint: "http://192.168.0.10:8000"
                     tableName: persons
                     item:
                       id: "1"

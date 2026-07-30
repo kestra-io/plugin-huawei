@@ -37,6 +37,10 @@ import java.util.Map;
         Reads a single response page: items beyond `limit` (or GeminiDB's own page-size limit) are
         not automatically paginated across `LastEvaluatedKey`. A log message is emitted whenever the
         response was truncated so a partial result set isn't missed silently.
+
+        Authenticate with the instance's database account — `accessKeyId: rwuser` and the instance
+        admin password as `secretAccessKey`. Huawei IAM AK/SK credentials are not accepted by the
+        DynamoDB-compatible data plane.
         """
 )
 @Plugin(
@@ -51,9 +55,9 @@ import java.util.Map;
                 tasks:
                   - id: scan
                     type: io.kestra.plugin.huawei.geminidb.Scan
-                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
-                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-                    endpoint: "https://192.168.0.10:8635"
+                    accessKeyId: rwuser
+                    secretAccessKey: "{{ secret('GEMINIDB_ADMIN_PASSWORD') }}"
+                    endpoint: "http://192.168.0.10:8000"
                     tableName: persons
                 """
         ),
@@ -67,9 +71,9 @@ import java.util.Map;
                 tasks:
                   - id: scan
                     type: io.kestra.plugin.huawei.geminidb.Scan
-                    accessKeyId: "{{ secret('HUAWEI_AK') }}"
-                    secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-                    endpoint: "https://192.168.0.10:8635"
+                    accessKeyId: rwuser
+                    secretAccessKey: "{{ secret('GEMINIDB_ADMIN_PASSWORD') }}"
+                    endpoint: "http://192.168.0.10:8000"
                     tableName: persons
                     filterExpression: "lastname = :lastname"
                     expressionAttributeValues:

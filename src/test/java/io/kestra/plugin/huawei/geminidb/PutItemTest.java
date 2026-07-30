@@ -2,16 +2,21 @@ package io.kestra.plugin.huawei.geminidb;
 
 import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
+import io.kestra.plugin.huawei.TemporaryCredentialsConfig;
 import org.junit.jupiter.api.Test;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 class PutItemTest extends AbstractGeminiDbTest {
 
@@ -35,24 +40,45 @@ class PutItemTest extends AbstractGeminiDbTest {
         assertThat(response.item().get("lastname").s(), equalTo("Doe"));
     }
 
+    // GeminiDB's DynamoDB-compatible data plane authenticates against the instance's own database
+    // account (`rwuser` + admin password) and never consults IAM, so an STS security token has
+    // nothing to authenticate against. dynamodb-local accepts any credential and would happily let
+    // this through, which is exactly why the rejection has to be asserted here rather than trusted
+    // to surface at runtime — on real GeminiDB it comes back as an undiagnosable
+    // `AccessDeniedException: auth failed`.
     @Test
-    void putItem_withSecurityToken_usesSessionCredentials() throws Exception {
-        var id = IdUtils.create();
+    void putItem_withSecurityToken_isRejectedUpFront() {
         var runContext = runContextFactory.of(Collections.emptyMap());
 
         var task = applyGeminiDbConfig(PutItem.builder())
             .securityToken(Property.ofValue("dummy-session-token"))
-            .item(Property.ofValue(Map.of("id", id, "firstname", "Jane")))
+            .item(Property.ofValue(Map.of("id", IdUtils.create(), "firstname", "Jane")))
             .build();
 
-        var output = task.run(runContext);
-        assertThat(output, nullValue());
+        var exception = assertThrows(IllegalArgumentException.class, () -> task.run(runContext));
+        assertThat(exception.getMessage(), containsString("does not support 'securityToken'"));
+        assertThat(exception.getMessage(), containsString("rwuser"));
+    }
 
-        var response = rawClient.getItem(builder -> builder
-            .tableName(testTableName)
-            .key(Map.of("id", AttributeValue.fromS(id))));
+    // Same guard, reached via `temporaryCredentials` instead of a direct `securityToken`. This path
+    // used to run the live IAM STS exchange (huaweiClientConfig(runContext)) before the rejection —
+    // wasted latency plus an opaque IAM error on failure instead of this actionable one — so the
+    // check is bounded by a short timeout: if the up-front guard ever regresses, this test fails
+    // fast on the timeout rather than hanging on (or actually reaching) a live Huawei IAM endpoint.
+    @Test
+    void putItem_withTemporaryCredentials_isRejectedUpFrontWithoutIamCall() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
 
-        assertThat(response.item().get("firstname").s(), equalTo("Jane"));
+        var task = applyGeminiDbConfig(PutItem.builder())
+            .temporaryCredentials(Property.ofValue(TemporaryCredentialsConfig.builder().build()))
+            .item(Property.ofValue(Map.of("id", IdUtils.create(), "firstname", "Jane")))
+            .build();
+
+        var exception = assertTimeoutPreemptively(Duration.ofSeconds(5), () ->
+            assertThrows(IllegalArgumentException.class, () -> task.run(runContext)));
+        assertThat(exception.getMessage(), containsString("does not support 'securityToken'"));
+        assertThat(exception.getMessage(), containsString("temporaryCredentials"));
+        assertThat(exception.getMessage(), containsString("rwuser"));
     }
 
     @Test
