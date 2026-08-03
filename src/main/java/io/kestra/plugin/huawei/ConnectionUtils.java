@@ -14,6 +14,7 @@ import com.huaweicloud.sdk.iam.v3.region.IamRegion;
 import io.kestra.core.http.HttpRequest;
 import io.kestra.core.http.client.HttpClient;
 import io.kestra.core.http.client.configurations.HttpConfiguration;
+import io.kestra.core.http.client.configurations.TimeoutConfiguration;
 import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
 import io.kestra.core.serializers.JacksonMapper;
@@ -170,8 +171,10 @@ public final class ConnectionUtils {
             rProjectName != null ? rProjectName : region);
 
         var httpConfig = HttpConfiguration.builder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .readTimeout(Duration.ofSeconds(30))
+            .timeout(TimeoutConfiguration.builder()
+                .connectTimeout(Property.ofValue(Duration.ofSeconds(10)))
+                .readIdleTimeout(Property.ofValue(Duration.ofSeconds(30)))
+                .build())
             .allowFailed(Property.ofValue(true))
             .build();
 
