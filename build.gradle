@@ -220,21 +220,6 @@ configurations.testRuntimeClasspath {
     resolutionStrategy.force "ch.qos.logback:logback-core:1.3.12"
 }
 
-configurations {
-    agent {
-        canBeResolved = true
-        canBeConsumed = true
-    }
-}
-
-dependencies {
-    agent "org.aspectj:aspectjweaver:1.9.25.1"
-}
-
-test {
-    jvmArgs = ["-javaagent:${configurations.agent.singleFile}"]
-}
-
 /**********************************************************************************************************************\
  * Jacoco
  **********************************************************************************************************************/
