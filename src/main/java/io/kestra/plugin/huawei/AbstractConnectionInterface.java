@@ -62,20 +62,16 @@ public interface AbstractConnectionInterface {
             uses the returned temporary AK/SK + security token instead of the static `accessKeyId`
             and `secretAccessKey` properties.
 
-            Configure once via `pluginDefaults` to apply transparently to every task in a namespace
-            without per-task credential wiring:
+            Set it on each task that should exchange credentials, alongside the task's other
+            connection properties:
 
             ```yaml
-            pluginDefaults:
-              - type: io.kestra.plugin.huawei.obs
-                values:
-                  region: eu-west-101
-                  temporaryCredentials:
-                    authMethod: PASSWORD
-                    username: my-iam-user
-                    password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
-                    domainName: my-account-domain
-                    durationSeconds: 3600
+            temporaryCredentials:
+              authMethod: PASSWORD
+              username: my-iam-user
+              password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
+              domainName: my-account-domain
+              durationSeconds: 3600
             ```
 
             **Long-running tasks:** the exchange runs once at execution start. For `RealtimeTrigger`

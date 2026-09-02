@@ -44,8 +44,7 @@ import java.time.Instant;
         `expirationTime`; refresh before that deadline.
 
         **Escape-hatch task:** for zero-wiring workflows, prefer the `temporaryCredentials` block on
-        the connection layer (configurable via `pluginDefaults`) so credentials are obtained inline
-        without manual output references. Use this task only when you need the raw credential values
+        the connection layer so credentials are obtained inline without manual output references. Use this task only when you need the raw credential values
         in subsequent steps or external systems.
         """
 )

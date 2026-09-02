@@ -8,17 +8,7 @@ FunctionGraph tasks authenticate using AK/SK request signing (Huawei Cloud HMAC-
 
 Secret properties: `accessKeyId`, `secretAccessKey`, `securityToken`.
 
-Configure shared defaults via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.functiongraph
-    values:
-      region: eu-west-101
-      projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-```
+Set `region`, `projectId`, `accessKeyId`, and `secretAccessKey` on each task.
 
 ### `endpointSuffix`
 

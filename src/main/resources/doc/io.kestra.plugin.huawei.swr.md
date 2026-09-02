@@ -8,16 +8,7 @@ SWR tasks authenticate using AK/SK request signing (Huawei Cloud HMAC-SHA256). P
 
 Secret properties: `accessKeyId`, `secretAccessKey`, `securityToken`.
 
-Configure shared defaults via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.swr
-    values:
-      region: eu-west-101
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-```
+Set `region`, `accessKeyId`, and `secretAccessKey` on each task.
 
 ### `endpointSuffix`
 

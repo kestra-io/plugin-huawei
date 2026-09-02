@@ -23,16 +23,7 @@ Tasks and triggers for Huawei Cloud services, spanning object storage, identity 
 
 Most tasks authenticate with an access key and secret key. Provide them via [Kestra secrets](https://kestra.io/docs/concepts/secret) rather than inline values. When using temporary credentials, also supply the security token.
 
-OBS tasks can obtain short-lived credentials automatically through the `temporaryCredentials` block, set once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.obs
-    values:
-      region: eu-west-101
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-```
+OBS tasks can obtain short-lived credentials automatically through the `temporaryCredentials` block, set on each task. Otherwise set `region`, `accessKeyId`, and `secretAccessKey` on each task.
 
 ## Region
 

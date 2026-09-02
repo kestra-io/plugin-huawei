@@ -10,16 +10,7 @@ GeminiDB tasks authenticate using AK/SK request signing (AWS SigV4, the protocol
 
 Secret properties: `accessKeyId`, `secretAccessKey`, `securityToken`.
 
-Configure shared defaults via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.geminidb
-    values:
-      endpoint: "https://192.168.0.10:8635"
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-```
+Set `endpoint`, `accessKeyId`, and `secretAccessKey` on each task.
 
 ### `endpoint`
 

@@ -11,18 +11,7 @@ The IAM plugin itself does not use long-lived AK/SK credentials — it produces 
 
 Secret properties: `password` (PASSWORD method), `token` (TOKEN method), `domainName` (treated as sensitive because it identifies the account).
 
-Always provide secrets via [Kestra secrets](https://kestra.io/docs/concepts/secret):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.iam
-    values:
-      region: eu-west-101
-      authMethod: PASSWORD
-      username: my-iam-user
-      password: "{{ secret('HUAWEI_IAM_PASSWORD') }}"
-      domainName: "{{ secret('HUAWEI_DOMAIN_NAME') }}"
-```
+Always provide secrets via [Kestra secrets](https://kestra.io/docs/concepts/secret). Set `region`, `authMethod`, `username`, `password`, and `domainName` on each task.
 
 ### `endpointSuffix`
 
@@ -30,7 +19,7 @@ Controls the domain suffix used to derive the IAM endpoint URL (`https://iam.<re
 
 ### Inline `temporaryCredentials` vs `GetTemporaryCredentials`
 
-The preferred approach is the `temporaryCredentials` nested block on any connection-aware task (OBS, DMS, …). Set it once via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) and every task in the namespace obtains fresh STS credentials automatically without manual output wiring.
+The preferred approach is the `temporaryCredentials` nested block on any connection-aware task (OBS, DMS, …). Set it on each task and that task obtains fresh STS credentials automatically without manual output wiring.
 
 Use `GetTemporaryCredentials` only when you need the raw credential values in subsequent steps or in external systems.
 

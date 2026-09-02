@@ -10,18 +10,7 @@ All tasks require `projectId` — the Huawei Cloud project ID of the region wher
 
 Secret properties: `accessKeyId`, `secretAccessKey`, `securityToken`.
 
-Configure shared defaults via [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.dataarts
-    values:
-      region: eu-west-101
-      projectId: "{{ secret('HUAWEI_PROJECT_ID') }}"
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-      workspaceId: "{{ secret('HUAWEI_WORKSPACE_ID') }}"
-```
+Set `region`, `projectId`, `accessKeyId`, `secretAccessKey`, and `workspaceId` on each task.
 
 ### `workspaceId`
 
