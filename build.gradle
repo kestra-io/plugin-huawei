@@ -77,7 +77,7 @@ dependencies {
     // The former standalone rocketmq-acl module (AclClientRPCHook, SessionCredentials) was folded
     // into rocketmq-client from 5.4.0 onward, so no separate acl artifact is declared.
     // Exclude logging dependencies to defer to Kestra's binding.
-    implementation("org.apache.rocketmq:rocketmq-client:5.5.0") {
+    implementation("org.apache.rocketmq:rocketmq-client:5.5.1") {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
     }
