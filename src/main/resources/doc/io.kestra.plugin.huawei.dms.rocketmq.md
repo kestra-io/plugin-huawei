@@ -6,16 +6,7 @@ Publishes and consumes messages on [Huawei Cloud DMS for RocketMQ](https://www.h
 
 DMS for RocketMQ uses AK/SK (access key / secret key) credentials passed to the client via an `AclClientRPCHook`. Set `accessKeyId` and `secretAccessKey` on every task. For instances without ACL enabled, omit both properties and the client connects without credentials.
 
-Always provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret) and configure them in [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults):
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.dms.rocketmq
-    values:
-      accessKeyId: "{{ secret('HUAWEI_AK') }}"
-      secretAccessKey: "{{ secret('HUAWEI_SK') }}"
-      nameServerAddr: "dms-instance-id.rocketmq.eu-west-101.myhuaweicloud.com:8100"
-```
+Always provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret). Set `accessKeyId`, `secretAccessKey`, and `nameServerAddr` (the instance's `host:port`, for example `dms-instance-id.rocketmq.eu-west-101.myhuaweicloud.com:8100`) on each task.
 
 When the DMS instance uses instance isolation, also set `instanceId` (the DMS instance ID shown in the console). This maps to the RocketMQ namespace and ensures topics are scoped to the correct instance.
 

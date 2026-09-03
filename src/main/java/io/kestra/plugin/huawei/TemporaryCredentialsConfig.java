@@ -14,7 +14,7 @@ import lombok.experimental.SuperBuilder;
 /**
  * Inline IAM credential-exchange configuration, embedded in the connection layer.
  *
- * <p>When set on any OBS or DMS task (directly or via {@code pluginDefaults}), the connection layer
+ * <p>When set on any OBS or DMS task, the connection layer
  * will call the Huawei IAM STS API once per task execution and supply the resulting temporary
  * AK/SK + security token to the task, with no manual credential wiring required.
  *

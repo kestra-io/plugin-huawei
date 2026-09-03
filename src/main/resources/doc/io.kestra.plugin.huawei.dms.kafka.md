@@ -6,18 +6,7 @@ Sends and receives messages on [Huawei Cloud DMS for Kafka](https://www.huaweicl
 
 DMS for Kafka uses SASL authentication with a username and password tied to the DMS instance. Set `saslMechanism` to `PLAIN` (default) or `SCRAM_SHA_512`, then supply `username` and `password`.
 
-Always provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret) and configure them in [plugin defaults](https://kestra.io/docs/workflow-components/plugin-defaults) to avoid repeating them on every task:
-
-```yaml
-pluginDefaults:
-  - type: io.kestra.plugin.huawei.dms.kafka
-    values:
-      bootstrapServers: "dms-instance-id.kafka.eu-west-101.myhuaweicloud.com:9093"
-      saslMechanism: PLAIN
-      username: "{{ secret('DMS_KAFKA_USERNAME') }}"
-      password: "{{ secret('DMS_KAFKA_PASSWORD') }}"
-      sslEnabled: true
-```
+Always provide credentials via [Kestra secrets](https://kestra.io/docs/concepts/secret). Set `bootstrapServers` (the instance's `host:port`, for example `dms-instance-id.kafka.eu-west-101.myhuaweicloud.com:9093`), `saslMechanism`, `username`, `password`, and `sslEnabled` on each task.
 
 For VPC-internal clusters without authentication, set `saslMechanism: NONE`.
 

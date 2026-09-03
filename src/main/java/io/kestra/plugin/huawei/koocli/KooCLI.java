@@ -36,8 +36,8 @@ import java.util.Map;
         plugin's connection properties (access key, secret key, region, and security token), so
         commands run authenticated against the configured `region` without passing `--cli-region`
         or credentials manually. Secret values are never exposed on the command line or in logs.
-        Short-lived STS credentials via `temporaryCredentials` are supported too; configure it once
-        with plugin defaults and every task obtains fresh credentials without per-task wiring.
+        Short-lived STS credentials via `temporaryCredentials` are supported too; set it on the task
+        and it obtains fresh credentials without manual output wiring.
 
         **Output format:** KooCLI has no global output setting. Pass `--cli-output=json` (or `table`,
         `tsv`) per command when needed.
