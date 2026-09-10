@@ -1,34 +1,35 @@
 package io.kestra.plugin.huawei;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.huaweicloud.sdk.core.auth.BasicCredentials;
 import com.huaweicloud.sdk.core.auth.GlobalCredentials;
+import com.huaweicloud.sdk.core.exception.SdkException;
+import com.huaweicloud.sdk.core.exception.ServiceResponseException;
 import com.huaweicloud.sdk.iam.v3.IAMCredentials;
 import com.huaweicloud.sdk.iam.v3.IamClient;
+import com.huaweicloud.sdk.iam.v3.model.AuthScope;
+import com.huaweicloud.sdk.iam.v3.model.AuthScopeDomain;
+import com.huaweicloud.sdk.iam.v3.model.AuthScopeProject;
 import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByTokenRequest;
 import com.huaweicloud.sdk.iam.v3.model.CreateTemporaryAccessKeyByTokenRequestBody;
 import com.huaweicloud.sdk.iam.v3.model.IdentityToken;
+import com.huaweicloud.sdk.iam.v3.model.KeystoneCreateUserTokenByPasswordRequest;
+import com.huaweicloud.sdk.iam.v3.model.KeystoneCreateUserTokenByPasswordRequestBody;
+import com.huaweicloud.sdk.iam.v3.model.PwdAuth;
+import com.huaweicloud.sdk.iam.v3.model.PwdIdentity;
+import com.huaweicloud.sdk.iam.v3.model.PwdPassword;
+import com.huaweicloud.sdk.iam.v3.model.PwdPasswordUser;
+import com.huaweicloud.sdk.iam.v3.model.PwdPasswordUserDomain;
 import com.huaweicloud.sdk.iam.v3.model.TokenAuth;
 import com.huaweicloud.sdk.iam.v3.model.TokenAuthIdentity;
 import com.huaweicloud.sdk.iam.v3.region.IamRegion;
-import io.kestra.core.http.HttpRequest;
-import io.kestra.core.http.client.HttpClient;
-import io.kestra.core.http.client.configurations.HttpConfiguration;
-import io.kestra.core.http.client.configurations.TimeoutConfiguration;
-import io.kestra.core.models.property.Property;
 import io.kestra.core.runners.RunContext;
-import io.kestra.core.serializers.JacksonMapper;
 import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.AuthMethod;
 import io.kestra.plugin.huawei.iam.GetTemporaryCredentials.TokenScope;
 import jakarta.annotation.Nullable;
 
-import java.net.URI;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Static factory for Huawei Cloud SDK credentials and clients.
@@ -37,10 +38,11 @@ import java.util.Map;
  * the plugin's {@link AbstractConnection.HuaweiClientConfig} into typed SDK objects so task
  * implementations stay free of credential-wiring boilerplate.
  *
- * <p><b>Transport exemption</b>: {@link #obtainTokenByPassword} uses {@link java.net.http.HttpClient}
- * (JDK) instead of the Kestra internal HTTP client. The {@code POST /v3/auth/tokens} call is an
- * unauthenticated bootstrap — no valid credential exists yet to supply to a Kestra-managed client —
- * so a bare JDK client is the only viable transport here.
+ * <p>{@link #obtainTokenByPassword} authenticates via the IAM SDK's
+ * {@code keystoneCreateUserTokenByPassword} call ({@code POST /v3/auth/tokens}). That endpoint is an
+ * unauthenticated Keystone-style login — it ignores the AK/SK signature the SDK client still attaches
+ * to every request, so the client is built with a well-formed placeholder credential rather than a
+ * real one, which does not exist yet at this bootstrap stage.
  */
 public final class ConnectionUtils {
 
@@ -138,11 +140,19 @@ public final class ConnectionUtils {
     }
 
     /**
-     * Obtains an IAM session token via {@code POST /v3/auth/tokens}.
+     * A well-formed but meaningless AK/SK pair for the password-bootstrap {@link IamClient}.
      *
-     * <p>This is an unauthenticated endpoint (it IS the login), so the Huawei SDK cannot be used —
-     * there is no valid credential to supply to the client builder before the call succeeds.
-     * Kestra's HTTP client is used instead, constructed per-call inside try-with-resources.
+     * <p>{@code POST /v3/auth/tokens} is the login call itself — no real credential exists yet — but
+     * {@code AKSKSigner} rejects a blank ak/sk client-side before the request is even sent, so a
+     * non-blank placeholder is required even though the target endpoint ignores the signature.
+     */
+    private static GlobalCredentials passwordBootstrapCredentials() {
+        return new GlobalCredentials().withAk("iam-password-bootstrap-ak").withSk("iam-password-bootstrap-sk");
+    }
+
+    /**
+     * Obtains an IAM session token via the IAM SDK's {@code keystoneCreateUserTokenByPassword} call
+     * ({@code POST /v3/auth/tokens}).
      */
     private static String obtainTokenByPassword(
         RunContext runContext,
@@ -167,37 +177,18 @@ public final class ConnectionUtils {
         var rScope = runContext.render(config.getScope()).as(TokenScope.class).orElse(TokenScope.PROJECT);
         var rProjectName = runContext.render(config.getProjectName()).as(String.class).orElse(null);
 
-        var requestBody = buildPasswordAuthBody(rUsername, rPassword, rDomainName, rScope,
+        var request = buildKeystoneRequest(rUsername, rPassword, rDomainName, rScope,
             rProjectName != null ? rProjectName : region);
 
-        var httpConfig = HttpConfiguration.builder()
-            .timeout(TimeoutConfiguration.builder()
-                .connectTimeout(Property.ofValue(Duration.ofSeconds(10)))
-                .readIdleTimeout(Property.ofValue(Duration.ofSeconds(30)))
-                .build())
-            .allowFailed(Property.ofValue(true))
-            .build();
+        try {
+            var client = IamClient.newBuilder()
+                .withCredential(passwordBootstrapCredentials())
+                .withEndpoint(iamBaseUrl)
+                .build();
 
-        var request = HttpRequest.builder()
-            .method("POST")
-            .uri(URI.create(iamBaseUrl + "/v3/auth/tokens"))
-            .body(HttpRequest.StringRequestBody.builder()
-                .content(requestBody)
-                .contentType("application/json")
-                .build())
-            .build();
+            var response = client.keystoneCreateUserTokenByPassword(request);
 
-        try (var httpClient = new HttpClient(runContext, httpConfig)) {
-            var httpResponse = httpClient.request(request, String.class);
-
-            if (httpResponse.getStatus().getCode() != 201) {
-                throw new IllegalStateException(
-                    "IAM password authentication failed (HTTP " + httpResponse.getStatus().getCode() + ")" +
-                    parseIamError(httpResponse.getBody()) +
-                    " — check that username, password, and domainName are correct and the user is not locked");
-            }
-
-            var xSubjectToken = httpResponse.getHeaders().firstValue("X-Subject-Token").orElse(null);
+            var xSubjectToken = response.getXSubjectToken();
             if (xSubjectToken == null || xSubjectToken.isBlank()) {
                 throw new IllegalStateException(
                     "IAM /v3/auth/tokens returned 201 but the X-Subject-Token response header is missing");
@@ -205,73 +196,65 @@ public final class ConnectionUtils {
 
             runContext.logger().debug("IAM session token obtained via password authentication");
             return xSubjectToken;
+        } catch (ServiceResponseException e) {
+            var message = "IAM password authentication failed (HTTP " + e.getHttpStatusCode() + ")" +
+                describeIamError(e) +
+                " — check that username, password, and domainName are correct and the user is not locked";
+            // Only chain the SDK exception as cause when it carries a structured errorCode. When
+            // errorCode is null, ServiceResponseException#getMessage() echoes the raw, unparseable
+            // response body verbatim — the very content describeIamError deliberately withholds from
+            // our message — so re-exposing it through the cause chain would defeat that safeguard.
+            throw e.getErrorCode() != null
+                ? new IllegalStateException(message, e)
+                : new IllegalStateException(message);
+        } catch (SdkException e) {
+            throw new IllegalStateException("IAM password authentication failed: " + e.getMessage(), e);
         }
     }
 
-    private static String buildPasswordAuthBody(
-        String username, String password, String domainName, TokenScope scope, String projectName
-    ) throws Exception {
-        var scopeNode = switch (scope) {
-            case PROJECT -> Map.of("project", Map.of("name", projectName));
-            case DOMAIN -> Map.of("domain", Map.of("name", domainName));
+    private static KeystoneCreateUserTokenByPasswordRequest buildKeystoneRequest(
+        String username, String password, String domainName, TokenScope scope, String resolvedProjectName
+    ) {
+        var user = new PwdPasswordUser()
+            .withName(username)
+            .withPassword(password)
+            .withDomain(new PwdPasswordUserDomain().withName(domainName));
+
+        var identity = new PwdIdentity()
+            .withMethods(List.of(PwdIdentity.MethodsEnum.PASSWORD))
+            .withPassword(new PwdPassword().withUser(user));
+
+        var authScope = switch (scope) {
+            case PROJECT -> new AuthScope().withProject(new AuthScopeProject().withName(resolvedProjectName));
+            case DOMAIN -> new AuthScope().withDomain(new AuthScopeDomain().withName(domainName));
         };
-        var user = new LinkedHashMap<String, Object>();
-        user.put("name", username);
-        user.put("password", password);
-        user.put("domain", Map.of("name", domainName));
-        var body = Map.of(
-            "auth", Map.of(
-                "identity", Map.of(
-                    "methods", List.of("password"),
-                    "password", Map.of("user", user)
-                ),
-                "scope", scopeNode
-            )
-        );
-        return JacksonMapper.ofJson().writeValueAsString(body);
+
+        var auth = new PwdAuth().withIdentity(identity).withScope(authScope);
+        var body = new KeystoneCreateUserTokenByPasswordRequestBody().withAuth(auth);
+        return new KeystoneCreateUserTokenByPasswordRequest().withBody(body);
     }
 
     /**
-     * Parses Huawei IAM error JSON ({@code {"error":{"code":...,"message":...,"title":...}}}) and
-     * returns a formatted detail string to append to exception messages.
+     * Formats the structured {@code code}/{@code message} the SDK extracted from the IAM error body,
+     * if any.
      *
-     * <p>Only the three safe structured fields are included — the raw body is never exposed to
-     * avoid leaking any request data that the IAM endpoint might echo back.
+     * <p>{@link ServiceResponseException#getErrorCode()} is only populated when the response body was
+     * valid JSON matching a recognized error shape (including IAM's Keystone-style nested
+     * {@code {"error":{"code":...,"message":...}}}) — never from an unparseable or plain-text body,
+     * which the SDK otherwise falls back to echoing verbatim into {@code errorMsg}. Gating on
+     * {@code errorCode != null} keeps that raw, potentially sensitive body out of the exception
+     * message, matching the previous hand-rolled parser's behavior.
      */
-    private static String parseIamError(String body) {
-        if (body == null || body.isBlank()) {
+    private static String describeIamError(ServiceResponseException e) {
+        if (e.getErrorCode() == null) {
             return "";
         }
-        try {
-            var root = JacksonMapper.ofJson().readTree(body);
-            var error = root.path("error");
-            if (!error.isMissingNode()) {
-                var sb = new StringBuilder(": ");
-                var message = textOrNull(error.path("message"));
-                var code = textOrNull(error.path("code"));
-                var title = textOrNull(error.path("title"));
-                if (message != null) {
-                    sb.append(message);
-                }
-                if (code != null) {
-                    sb.append(message != null ? " [" : "[").append("code=").append(code);
-                    if (title != null) {
-                        sb.append(", title=").append(title);
-                    }
-                    sb.append(']');
-                } else if (title != null) {
-                    sb.append(message != null ? " [" : "[").append(title).append(']');
-                }
-                return sb.length() > 2 ? sb.toString() : "";
-            }
-        } catch (Exception ignored) {
-            // unparseable body — omit from message to avoid leaking content
+        var sb = new StringBuilder(": ");
+        if (e.getErrorMsg() != null) {
+            sb.append(e.getErrorMsg());
         }
-        return "";
-    }
-
-    private static String textOrNull(JsonNode node) {
-        return node.isMissingNode() || node.isNull() ? null : node.asText();
+        sb.append(e.getErrorMsg() != null ? " [" : "[").append("code=").append(e.getErrorCode()).append(']');
+        return sb.toString();
     }
 
     private static CreateTemporaryAccessKeyByTokenRequest buildStsRequest(String tokenValue, int duration) {
