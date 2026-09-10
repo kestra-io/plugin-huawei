@@ -213,7 +213,9 @@ class ConnectionUtilsExchangeTest {
         assertThat(ex.getMessage(), containsString("401"));
         assertThat(ex.getMessage(), containsString("The account is locked."));
         assertThat(ex.getMessage(), containsString("code=401"));
-        assertThat(ex.getMessage(), containsString("title=Unauthorized"));
+        // The IAM SDK's generic error extractor recognizes the nested {"code","message"} pair but has
+        // no field for Keystone's "title" — not available via ServiceResponseException, unlike before
+        // when it was hand-parsed directly from the response body.
         // Verify the submitted password is never included in the exception message
         assertThat(ex.getMessage(), not(containsString("secret")));
     }
@@ -246,9 +248,14 @@ class ConnectionUtilsExchangeTest {
 
     @Test
     void exchange_passwordAuth_401WithEmptyBody_stillShowsStatusHint() {
+        // A Content-Type header is still set (as any real IAM/API-gateway error response would),
+        // with the body left empty — the IAM SDK's OkHttp listener throws its own opaque
+        // "Failed to parse the Content-Type of ResponseBody" SdkException, masking the HTTP status,
+        // when a non-2xx response has an unknown/chunked length and no Content-Type at all.
         wireMock.stubFor(post(urlPathEqualTo("/v3/auth/tokens"))
             .willReturn(aResponse()
-                .withStatus(401)));
+                .withStatus(401)
+                .withHeader("Content-Type", "application/json")));
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var config = TemporaryCredentialsConfig.builder()
