@@ -29,6 +29,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -244,6 +245,9 @@ class ConnectionUtilsExchangeTest {
         assertThat(ex.getMessage(), containsString("403"));
         assertThat(ex.getMessage(), not(containsString("Access denied by policy.")));
         assertThat(ex.getMessage(), not(containsString("my-password")));
+        // With no structured errorCode the SDK exception is not chained as cause, so the raw body
+        // it echoes into getMessage() cannot leak through the cause chain either.
+        assertThat(ex.getCause(), is(nullValue()));
     }
 
     @Test

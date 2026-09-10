@@ -197,10 +197,16 @@ public final class ConnectionUtils {
             runContext.logger().debug("IAM session token obtained via password authentication");
             return xSubjectToken;
         } catch (ServiceResponseException e) {
-            throw new IllegalStateException(
-                "IAM password authentication failed (HTTP " + e.getHttpStatusCode() + ")" +
+            var message = "IAM password authentication failed (HTTP " + e.getHttpStatusCode() + ")" +
                 describeIamError(e) +
-                " — check that username, password, and domainName are correct and the user is not locked", e);
+                " — check that username, password, and domainName are correct and the user is not locked";
+            // Only chain the SDK exception as cause when it carries a structured errorCode. When
+            // errorCode is null, ServiceResponseException#getMessage() echoes the raw, unparseable
+            // response body verbatim — the very content describeIamError deliberately withholds from
+            // our message — so re-exposing it through the cause chain would defeat that safeguard.
+            throw e.getErrorCode() != null
+                ? new IllegalStateException(message, e)
+                : new IllegalStateException(message);
         } catch (SdkException e) {
             throw new IllegalStateException("IAM password authentication failed: " + e.getMessage(), e);
         }
