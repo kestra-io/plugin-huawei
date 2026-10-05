@@ -15,6 +15,7 @@ import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -156,7 +157,7 @@ public abstract class AbstractDmsKafka extends AbstractConnection implements Dms
     }
 
     /** Creates a byte-array consumer using the shared connection properties. */
-    protected KafkaConsumer<byte[], byte[]> consumer(RunContext runContext, String groupId) throws IllegalVariableEvaluationException {
+    protected Consumer<byte[], byte[]> consumer(RunContext runContext, String groupId) throws IllegalVariableEvaluationException {
         var props = kafkaProperties(runContext);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());

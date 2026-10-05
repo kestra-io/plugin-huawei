@@ -159,7 +159,7 @@ public class RealtimeTrigger extends AbstractTrigger
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
-    private final AtomicReference<org.apache.kafka.clients.consumer.KafkaConsumer<byte[], byte[]>> kafkaConsumerRef =
+    private final AtomicReference<org.apache.kafka.clients.consumer.Consumer<byte[], byte[]>> kafkaConsumerRef =
         new AtomicReference<>();
 
     @Override

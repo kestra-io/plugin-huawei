@@ -19,8 +19,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -142,7 +142,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     @Getter(AccessLevel.NONE)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    private final AtomicReference<KafkaConsumer<byte[], byte[]>> consumerRef = new AtomicReference<>();
+    private final AtomicReference<Consumer<byte[], byte[]>> consumerRef = new AtomicReference<>();
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -219,7 +219,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         }
     }
 
-    private void commitOffsets(KafkaConsumer<byte[], byte[]> consumer, Map<TopicPartition, OffsetAndMetadata> offsets, RunContext runContext) {
+    private void commitOffsets(Consumer<byte[], byte[]> consumer, Map<TopicPartition, OffsetAndMetadata> offsets, RunContext runContext) {
         try {
             consumer.commitSync(offsets);
         } catch (WakeupException e) {
@@ -242,7 +242,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     @Override
     public void stop() {
         this.isActive.set(false);
-        Optional.ofNullable(consumerRef.get()).ifPresent(KafkaConsumer::wakeup);
+        Optional.ofNullable(consumerRef.get()).ifPresent(Consumer::wakeup);
     }
 
     private boolean isFinished(Integer rMax, Duration rDuration, int count, ZonedDateTime start) {
@@ -260,7 +260,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
      * meaning the topic is fully drained. An empty assignment (before the first poll triggers
      * group coordination) is treated as not-yet-drained to avoid a false early exit.
      */
-    private boolean isDrained(KafkaConsumer<byte[], byte[]> consumer) {
+    private boolean isDrained(Consumer<byte[], byte[]> consumer) {
         var assignment = consumer.assignment();
         if (assignment.isEmpty()) {
             return false;
