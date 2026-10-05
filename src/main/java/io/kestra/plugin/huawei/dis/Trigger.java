@@ -27,6 +27,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
 @ToString
@@ -154,7 +155,7 @@ public class Trigger extends AbstractDisTrigger
         var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
         Consume.PollResult result;
         try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            result = Consume.poll(runContext, client, rStreamName, partitionIds, watermark, config, output);
+            result = Consume.poll(runContext, client, rStreamName, partitionIds, watermark, config, output, new AtomicBoolean(true));
             output.flush();
         }
 

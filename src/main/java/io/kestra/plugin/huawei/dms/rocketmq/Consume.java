@@ -12,6 +12,7 @@ import io.kestra.core.serializers.FileSerde;
 import io.kestra.plugin.huawei.dms.rocketmq.models.Message;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -28,6 +29,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @SuperBuilder
 @ToString
@@ -82,78 +84,100 @@ public class Consume extends AbstractDmsRocketMq implements RunnableTask<Consume
     @PluginProperty(group = "execution")
     private Property<Duration> maxDuration;
 
+    @Builder.Default
+    @Getter(AccessLevel.NONE)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private final AtomicBoolean isActive = new AtomicBoolean(true);
+
     @Override
     public Output run(RunContext runContext) throws Exception {
-        if (maxRecords == null && maxDuration == null) {
-            throw new IllegalArgumentException("'maxRecords' or 'maxDuration' must be set to avoid an infinite loop");
-        }
-
-        var rTopic = runContext.render(topic).as(String.class).orElseThrow();
-        var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
-        var rTags = runContext.render(tags).as(String.class).orElse("*");
-        var rSerdeType = runContext.render(serdeType).as(RocketMqSerdeType.class).orElse(RocketMqSerdeType.STRING);
-
-        var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
-        var total = 0;
-
-        DefaultMQPullConsumer consumer = buildPullConsumer(runContext, rGroupId);
-        try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
-            consumer.start();
-            Set<MessageQueue> mqs = consumer.fetchSubscribeMessageQueues(rTopic);
-            var started = ZonedDateTime.now();
-
-            outer:
-            for (var mq : mqs) {
-                var offset = consumer.fetchConsumeOffset(mq, false);
-                if (offset < 0) {
-                    offset = 0;
-                }
-
-                while (true) {
-                    var pullResult = consumer.pull(mq, rTags, offset, 32);
-                    if (pullResult.getPullStatus() == PullStatus.FOUND) {
-                        for (var msg : pullResult.getMsgFoundList()) {
-                            var body = rSerdeType.deserialize(msg.getBody());
-                            FileSerde.write(output, Message.builder()
-                                .messageId(msg.getMsgId())
-                                .body(body)
-                                .topic(msg.getTopic())
-                                .tags(msg.getTags())
-                                .keys(msg.getKeys())
-                                .bornTimestamp(msg.getBornTimestamp())
-                                .build());
-                            total++;
-                            if (isFinished(runContext, total, started)) {
-                                consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
-                                break outer;
-                            }
-                        }
-                        consumer.updateConsumeOffset(mq, pullResult.getNextBeginOffset());
-                        offset = pullResult.getNextBeginOffset();
-                    } else if (pullResult.getPullStatus() == PullStatus.NO_NEW_MSG ||
-                        pullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {
-                        break;
-                    } else {
-                        break;
-                    }
-
-                    if (isFinished(runContext, total, started)) {
-                        break outer;
-                    }
-                }
+        try {
+            if (maxRecords == null && maxDuration == null) {
+                throw new IllegalArgumentException("'maxRecords' or 'maxDuration' must be set to avoid an infinite loop");
             }
-            output.flush();
+
+            var rTopic = runContext.render(topic).as(String.class).orElseThrow();
+            var rGroupId = runContext.render(groupId).as(String.class).orElseThrow();
+            var rTags = runContext.render(tags).as(String.class).orElse("*");
+            var rSerdeType = runContext.render(serdeType).as(RocketMqSerdeType.class).orElse(RocketMqSerdeType.STRING);
+
+            var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
+            var total = 0;
+
+            DefaultMQPullConsumer consumer = buildPullConsumer(runContext, rGroupId);
+            try (var output = new BufferedOutputStream(new FileOutputStream(tempFile), FileSerde.BUFFER_SIZE)) {
+                consumer.start();
+                Set<MessageQueue> mqs = consumer.fetchSubscribeMessageQueues(rTopic);
+                var started = ZonedDateTime.now();
+
+                outer:
+                for (var mq : mqs) {
+                    if (!this.isActive.get()) {
+                        break;
+                    }
+                    var offset = consumer.fetchConsumeOffset(mq, false);
+                    if (offset < 0) {
+                        offset = 0;
+                    }
+
+                    while (this.isActive.get()) {
+                        var pullResult = consumer.pull(mq, rTags, offset, 32);
+                        if (pullResult.getPullStatus() == PullStatus.FOUND) {
+                            for (var msg : pullResult.getMsgFoundList()) {
+                                var body = rSerdeType.deserialize(msg.getBody());
+                                FileSerde.write(output, Message.builder()
+                                    .messageId(msg.getMsgId())
+                                    .body(body)
+                                    .topic(msg.getTopic())
+                                    .tags(msg.getTags())
+                                    .keys(msg.getKeys())
+                                    .bornTimestamp(msg.getBornTimestamp())
+                                    .build());
+                                total++;
+                                consumer.updateConsumeOffset(mq, msg.getQueueOffset() + 1);
+                                if (isFinished(runContext, total, started) || !this.isActive.get()) {
+                                    break outer;
+                                }
+                            }
+                            offset = pullResult.getNextBeginOffset();
+                        } else if (pullResult.getPullStatus() == PullStatus.NO_NEW_MSG ||
+                            pullResult.getPullStatus() == PullStatus.NO_MATCHED_MSG) {
+                            break;
+                        } else {
+                            break;
+                        }
+
+                        if (isFinished(runContext, total, started) || !this.isActive.get()) {
+                            break outer;
+                        }
+                    }
+                }
+                output.flush();
+            } finally {
+                consumer.shutdown();
+            }
+
+            runContext.metric(Counter.of("dms.rocketmq.consume.count", total));
+            runContext.logger().debug("Consumed {} messages from DMS RocketMQ topic {}", total, rTopic);
+
+            return Output.builder()
+                .messagesCount(total)
+                .uri(runContext.storage().putFile(tempFile))
+                .build();
         } finally {
-            consumer.shutdown();
+            this.isActive.set(true);
         }
+    }
 
-        runContext.metric(Counter.of("dms.rocketmq.consume.count", total));
-        runContext.logger().debug("Consumed {} messages from DMS RocketMQ topic {}", total, rTopic);
+    @Override
+    public void kill() {
+        stop();
+    }
 
-        return Output.builder()
-            .messagesCount(total)
-            .uri(runContext.storage().putFile(tempFile))
-            .build();
+    @Override
+    public void stop() {
+        this.isActive.set(false);
     }
 
     private boolean isFinished(RunContext runContext, int count, ZonedDateTime start) throws Exception {
