@@ -182,7 +182,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
                             FileSerde.write(output, toMessage(record, rKeySerdeType, rValueSerdeType));
                             total++;
                             lastOffsets.put(new TopicPartition(record.topic(), record.partition()), new OffsetAndMetadata(record.offset() + 1));
-                            if (!this.isActive.get()) {
+                            if (!this.isActive.get() || (rMaxRecords != null && total >= rMaxRecords)) {
                                 break;
                             }
                         }
