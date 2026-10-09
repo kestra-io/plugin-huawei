@@ -105,7 +105,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         title = "Stop after consuming this many records",
         description = """
             Upper bound on the number of records to consume. The task may return fewer records if the topic
-            is drained before this limit is reached. At least one of `maxRecords` or `maxDuration` must be set.
+            is drained before this limit is reached. Must be at least 1. At least one of `maxRecords` or `maxDuration` must be set.
             """
     )
     @PluginProperty(group = "execution")
@@ -157,6 +157,9 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
             var rValueSerdeType = runContext.render(valueSerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
             var rPollDuration = runContext.render(pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5));
             var rMaxRecords = runContext.render(maxRecords).as(Integer.class).orElse(null);
+            if (rMaxRecords != null && rMaxRecords < 1) {
+                throw new IllegalArgumentException("'maxRecords' must be at least 1 (was " + rMaxRecords + ").");
+            }
             var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(null);
 
             var tempFile = runContext.workingDir().createTempFile(".ion").toFile();

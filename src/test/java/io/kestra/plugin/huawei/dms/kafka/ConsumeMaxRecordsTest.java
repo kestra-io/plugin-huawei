@@ -20,14 +20,14 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-/**
- * Broker-free regression test: a single poll() returning more records than {@code maxRecords}
- * must neither write nor commit the surplus.
- */
+// Broker-free: one poll() returning more than maxRecords must neither write nor commit the surplus.
 @KestraTest
 class ConsumeMaxRecordsTest {
 
@@ -40,7 +40,7 @@ class ConsumeMaxRecordsTest {
     void consume_singleBatchLargerThanMaxRecords_writesAndCommitsOnlyMaxRecords() throws Exception {
         var partition = new TopicPartition(TOPIC, 0);
         var mock = new MockConsumer<byte[], byte[]>(OffsetResetStrategy.EARLIEST) {
-            // Keep the mock usable after the task's try-with-resources closes it, so committed() can be asserted.
+            // No-op so committed() stays readable after the task closes the consumer.
             @Override
             public void close() {
             }
@@ -67,13 +67,30 @@ class ConsumeMaxRecordsTest {
         var output = task.run(runContextFactory.of(Collections.emptyMap()));
 
         assertThat(output.getMessagesCount(), equalTo(2));
-        assertThat(mock.committed(java.util.Set.of(partition)).get(partition).offset(), equalTo(2L));
+        assertThat(mock.committed(Set.of(partition)).get(partition).offset(), equalTo(2L));
+    }
+
+    @Test
+    void consume_maxRecordsBelowOne_isRejectedBeforePolling() {
+        var mock = new MockConsumer<byte[], byte[]>(OffsetResetStrategy.EARLIEST);
+        var task = MockedConsume.builder()
+            .mock(mock)
+            .topic(Property.ofValue(TOPIC))
+            .groupId(Property.ofValue("group"))
+            .maxRecords(Property.ofValue(0))
+            .build();
+
+        var ex = assertThrows(IllegalArgumentException.class, () -> task.run(runContextFactory.of(Collections.emptyMap())));
+
+        assertThat(ex.getMessage(), containsString("'maxRecords' must be at least 1"));
+        assertThat(mock.subscription().isEmpty(), equalTo(true));
     }
 
     @SuperBuilder
     @NoArgsConstructor
     @ToString
     @EqualsAndHashCode(callSuper = true)
+    // Must stay public: a non-public task class breaks Kestra's plugin scan and the whole test context.
     public static class MockedConsume extends Consume {
         private MockConsumer<byte[], byte[]> mock;
 
