@@ -21,6 +21,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.common.errors.WakeupException;
 import org.reactivestreams.Publisher;
 import org.slf4j.LoggerFactory;
@@ -159,7 +160,7 @@ public class RealtimeTrigger extends AbstractTrigger
 
     @Builder.Default
     @Getter(AccessLevel.NONE)
-    private final AtomicReference<org.apache.kafka.clients.consumer.KafkaConsumer<byte[], byte[]>> kafkaConsumerRef =
+    private final AtomicReference<Consumer<byte[], byte[]>> kafkaConsumerRef =
         new AtomicReference<>();
 
     @Override

@@ -19,8 +19,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
+import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -105,7 +105,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         title = "Stop after consuming this many records",
         description = """
             Upper bound on the number of records to consume. The task may return fewer records if the topic
-            is drained before this limit is reached. At least one of `maxRecords` or `maxDuration` must be set.
+            is drained before this limit is reached. Must be at least 1. At least one of `maxRecords` or `maxDuration` must be set.
             """
     )
     @PluginProperty(group = "execution")
@@ -142,7 +142,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     @Getter(AccessLevel.NONE)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    private final AtomicReference<KafkaConsumer<byte[], byte[]>> consumerRef = new AtomicReference<>();
+    private final AtomicReference<Consumer<byte[], byte[]>> consumerRef = new AtomicReference<>();
 
     @Override
     public Output run(RunContext runContext) throws Exception {
@@ -157,6 +157,9 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
             var rValueSerdeType = runContext.render(valueSerdeType).as(SerdeType.class).orElse(SerdeType.STRING);
             var rPollDuration = runContext.render(pollDuration).as(Duration.class).orElse(Duration.ofSeconds(5));
             var rMaxRecords = runContext.render(maxRecords).as(Integer.class).orElse(null);
+            if (rMaxRecords != null && rMaxRecords < 1) {
+                throw new IllegalArgumentException("'maxRecords' must be at least 1 (was " + rMaxRecords + ").");
+            }
             var rMaxDuration = runContext.render(maxDuration).as(Duration.class).orElse(null);
 
             var tempFile = runContext.workingDir().createTempFile(".ion").toFile();
@@ -182,7 +185,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
                             FileSerde.write(output, toMessage(record, rKeySerdeType, rValueSerdeType));
                             total++;
                             lastOffsets.put(new TopicPartition(record.topic(), record.partition()), new OffsetAndMetadata(record.offset() + 1));
-                            if (!this.isActive.get()) {
+                            if (!this.isActive.get() || (rMaxRecords != null && total >= rMaxRecords)) {
                                 break;
                             }
                         }
@@ -219,7 +222,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
         }
     }
 
-    private void commitOffsets(KafkaConsumer<byte[], byte[]> consumer, Map<TopicPartition, OffsetAndMetadata> offsets, RunContext runContext) {
+    private void commitOffsets(Consumer<byte[], byte[]> consumer, Map<TopicPartition, OffsetAndMetadata> offsets, RunContext runContext) {
         try {
             consumer.commitSync(offsets);
         } catch (WakeupException e) {
@@ -242,7 +245,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
     @Override
     public void stop() {
         this.isActive.set(false);
-        Optional.ofNullable(consumerRef.get()).ifPresent(KafkaConsumer::wakeup);
+        Optional.ofNullable(consumerRef.get()).ifPresent(Consumer::wakeup);
     }
 
     private boolean isFinished(Integer rMax, Duration rDuration, int count, ZonedDateTime start) {
@@ -260,7 +263,7 @@ public class Consume extends AbstractDmsKafka implements RunnableTask<Consume.Ou
      * meaning the topic is fully drained. An empty assignment (before the first poll triggers
      * group coordination) is treated as not-yet-drained to avoid a false early exit.
      */
-    private boolean isDrained(KafkaConsumer<byte[], byte[]> consumer) {
+    private boolean isDrained(Consumer<byte[], byte[]> consumer) {
         var assignment = consumer.assignment();
         if (assignment.isEmpty()) {
             return false;
