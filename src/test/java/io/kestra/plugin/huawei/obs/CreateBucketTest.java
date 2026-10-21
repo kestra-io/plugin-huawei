@@ -4,7 +4,6 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.CreateBucket;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.Collections;
 
@@ -12,7 +11,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfObsTests
 class CreateBucketTest extends AbstractObsTest {
 
     /**
@@ -30,7 +29,7 @@ class CreateBucketTest extends AbstractObsTest {
     @Test
     void createBucket_newBucket_succeeds() throws Exception {
         assumeBucketCreationAllowed();
-        // Use a short unique suffix — MinIO bucket names must be ≤63 chars and DNS-compliant
+        // Use a short unique suffix — bucket names must be ≤63 chars and DNS-compliant
         var bucketName = "kestra-obs-cb-" + IdUtils.create().substring(0, 8).toLowerCase();
 
         var runContext = runContextFactory.of(Collections.emptyMap());
@@ -63,9 +62,13 @@ class CreateBucketTest extends AbstractObsTest {
 
         var output = task.run(runContext);
 
-        // Must not throw; created=false since it already existed
+        // Must not throw (idempotent success).
+        // NOTE: MinIO and real Huawei Cloud OBS signal an existing bucket via a 409
+        // "BucketAlreadyOwnedByYou" response, which CreateBucket catches to report created=false.
+        // RustFS (and standard AWS S3) instead implements idempotent PUT bucket semantics returning
+        // HTTP 200 OK, which the SDK treats as success (reporting created=true). Both satisfy idempotency.
         assertThat(output.getBucket(), equalTo(bucketName));
-        assertThat(output.isCreated(), is(false));
+        assertThat(rawClient.headBucket(bucketName), is(true));
 
         // Clean up
         rawClient.deleteBucket(bucketName);

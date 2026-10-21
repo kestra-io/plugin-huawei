@@ -27,8 +27,8 @@ import java.util.UUID;
 /**
  * Base class for OBS integration tests.
  *
- * <p>By default targets a local MinIO instance (started in CI via {@code docker-compose-ci.yml},
- * or locally with {@code docker compose -f docker-compose-ci.yml up -d}). Override via environment
+ * <p>By default targets a local RustFS S3-compatible instance (started in CI via {@code docker-compose-ci.yml},
+ * or locally with {@code docker compose -f docker-compose-ci.yml up -d rustfs}). Override via environment
  * variables for live QA against real Huawei Cloud OBS:
  *
  * <pre>
@@ -49,7 +49,7 @@ import java.util.UUID;
  * {@link #key(String)}), giving logical isolation, and {@link #cleanupRunPrefix()} deletes only that
  * namespace so concurrent runs never disturb each other.
  *
- * <p>The test gate ({@code OBS_MINIO_TESTS=true}) is unchanged and must always be set.
+ * <p>The test gate ({@code OBS_TESTS=true}, or legacy alias {@code OBS_MINIO_TESTS=true}) must be set.
  */
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -119,7 +119,7 @@ abstract class AbstractObsTest {
             return;
         }
         // Include a short random suffix so bucket names are globally unique on real OBS.
-        // Names are lowercase, 3-63 chars, no underscores — compliant with both OBS and MinIO.
+        // Names are lowercase, 3-63 chars, no underscores — compliant with both OBS and S3.
         var suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         testBucket = "kestra-obs-" + getClass().getSimpleName().toLowerCase().replace("test", "").replace("_", "") + "-" + suffix;
         // Trim to 63 chars if a subclass name happens to produce a long string
@@ -234,6 +234,18 @@ abstract class AbstractObsTest {
         builder.pathStyleAccess(Property.ofValue(TEST_PATH_STYLE));
         builder.authType(Property.ofValue(TEST_AUTH_TYPE));
         return builder;
+    }
+
+    /**
+     * Predicate for JUnit 5 test enablement: true if {@code OBS_TESTS} is true or if the legacy
+     * alias {@code OBS_MINIO_TESTS} is true.
+     */
+    static boolean isTestEnabled() {
+        return isTrue(System.getenv("OBS_TESTS")) || isTrue(System.getenv("OBS_MINIO_TESTS"));
+    }
+
+    private static boolean isTrue(String val) {
+        return val != null && (val.equalsIgnoreCase("true") || val.equals("1"));
     }
 
     private static String env(String name, String defaultValue) {
