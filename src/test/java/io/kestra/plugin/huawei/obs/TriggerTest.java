@@ -10,6 +10,7 @@ import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.Trigger;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.time.ZonedDateTime;
 import java.util.Collections;
@@ -18,7 +19,7 @@ import java.util.List;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfObsTests
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class TriggerTest extends AbstractObsTest {
 
     @Inject

@@ -49,7 +49,7 @@ import java.util.UUID;
  * {@link #key(String)}), giving logical isolation, and {@link #cleanupRunPrefix()} deletes only that
  * namespace so concurrent runs never disturb each other.
  *
- * <p>The test gate ({@code OBS_TESTS=true}, or legacy alias {@code OBS_MINIO_TESTS=true}) must be set.
+ * <p>The test gate ({@code OBS_TESTS=true}) must be set.
  */
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -160,7 +160,8 @@ abstract class AbstractObsTest {
      * Best-effort deletion of everything under this run's {@link #runPrefix}, once after all the class's
      * test methods.
      *
-     * <p>The OBS integration tests were written for a disposable MinIO container; when repointed at a
+     * <p>The OBS integration tests were written for a disposable local RustFS / S3-compatible fallback
+     * container; when repointed at a
      * shared, persistent bucket (via {@code OBS_TEST_BUCKET}, as CI does against real Huawei Cloud OBS)
      * they would otherwise accumulate forever. Because every key is namespaced under {@link #runPrefix},
      * a single prefix sweep removes seeded and task-produced objects alike without any per-test tracking,
@@ -237,15 +238,17 @@ abstract class AbstractObsTest {
     }
 
     /**
-     * Predicate for JUnit 5 test enablement: true if {@code OBS_TESTS} is true or if the legacy
-     * alias {@code OBS_MINIO_TESTS} is true.
+     * Returns true if tests are running against real Huawei Cloud OBS rather than the local
+     * RustFS / S3-compatible fallback container.
      */
-    static boolean isTestEnabled() {
-        return isTrue(System.getenv("OBS_TESTS")) || isTrue(System.getenv("OBS_MINIO_TESTS"));
-    }
-
-    private static boolean isTrue(String val) {
-        return val != null && (val.equalsIgnoreCase("true") || val.equals("1"));
+    static boolean isRealObs() {
+        return (TEST_BUCKET_OVERRIDE != null && !TEST_BUCKET_OVERRIDE.isBlank())
+            || TEST_AUTH_TYPE == AuthType.OBS
+            || (!TEST_ENDPOINT.contains("localhost") && !TEST_ENDPOINT.contains("127.0.0.1"))
+            || (System.getenv("OBS_ENDPOINT") != null
+                && !System.getenv("OBS_ENDPOINT").isBlank()
+                && !System.getenv("OBS_ENDPOINT").contains("localhost")
+                && !System.getenv("OBS_ENDPOINT").contains("127.0.0.1"));
     }
 
     private static String env(String name, String defaultValue) {

@@ -4,6 +4,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.CreateBucket;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.Collections;
 
@@ -11,7 +12,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-@EnabledIfObsTests
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class CreateBucketTest extends AbstractObsTest {
 
     /**
@@ -63,11 +64,16 @@ class CreateBucketTest extends AbstractObsTest {
         var output = task.run(runContext);
 
         // Must not throw (idempotent success).
-        // NOTE: MinIO and real Huawei Cloud OBS signal an existing bucket via a 409
-        // "BucketAlreadyOwnedByYou" response, which CreateBucket catches to report created=false.
-        // RustFS (and standard AWS S3) instead implements idempotent PUT bucket semantics returning
-        // HTTP 200 OK, which the SDK treats as success (reporting created=true). Both satisfy idempotency.
+        // Real Huawei Cloud OBS returns HTTP 409 "BucketAlreadyOwnedByYou", which CreateBucket
+        // catches to report created=false. RustFS (and standard AWS S3) instead implements
+        // idempotent PUT bucket semantics returning HTTP 200 OK, which reports created=true.
+        // Both satisfy idempotency; we assert created=false on real OBS and created=true on RustFS.
         assertThat(output.getBucket(), equalTo(bucketName));
+        if (isRealObs()) {
+            assertThat(output.isCreated(), is(false));
+        } else {
+            assertThat(output.isCreated(), is(true));
+        }
         assertThat(rawClient.headBucket(bucketName), is(true));
 
         // Clean up

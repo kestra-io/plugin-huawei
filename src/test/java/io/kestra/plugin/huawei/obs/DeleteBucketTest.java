@@ -6,6 +6,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.DeleteBucket;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.util.Collections;
 
@@ -14,7 +15,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-@EnabledIfObsTests
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class DeleteBucketTest extends AbstractObsTest {
 
     /**
@@ -54,7 +55,7 @@ class DeleteBucketTest extends AbstractObsTest {
         assumeBucketDeletionAllowed();
         var bucketName = uniqueBucketName();
         // Intentionally do not create the bucket.
-        // NOTE: S3-compatible servers (RustFS, MinIO) surface absence via "NoSuchBucket" error code on
+        // NOTE: S3-compatible servers (e.g. RustFS) surface absence via "NoSuchBucket" error code on
         // the deleteBucket call itself. Real OBS instead fires a HEAD <bucket>?apiversion region-probe first
         // and returns HTTP 404 (null error code) for a non-existent bucket — that path cannot be exercised
         // against S3-compatible servers. Both are handled by the broadened catch condition in DeleteBucket.

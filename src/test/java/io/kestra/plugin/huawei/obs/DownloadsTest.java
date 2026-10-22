@@ -4,6 +4,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.Downloads;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
@@ -11,7 +12,7 @@ import java.util.Collections;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfObsTests
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class DownloadsTest extends AbstractObsTest {
 
     @Test

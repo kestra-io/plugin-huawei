@@ -239,8 +239,6 @@ Then run:
 OBS_TESTS=true ./gradlew test
 ```
 
-(The legacy gate `OBS_MINIO_TESTS=true` is also supported as a backward-compatible alias.)
-
 **DMS Kafka integration tests** require a Kafka broker:
 
 ```bash
@@ -255,7 +253,7 @@ docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv rocketmq-broker
 DMS_ROCKETMQ_TESTS=true DMS_ROCKETMQ_NAME_SERVER=localhost:9876 ./gradlew test
 ```
 
-All tests above are guarded by environment variable gates (`@EnabledIfObsTests`, `@EnabledIfEnvironmentVariable`) so they are skipped unless the matching gate variable is set.
+All tests above are guarded by environment variable gates (`@EnabledIfEnvironmentVariable`) so they are skipped unless the matching gate variable is set.
 
 **GeminiDB tests** run against DynamoDB Local (GeminiDB's DynamoDB-compatible data-plane API has no Huawei-specific test double, but DynamoDB Local speaks the exact same wire protocol) and require **no env gate** — they always run as part of the default-path suite:
 

@@ -38,7 +38,6 @@ if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; th
   echo "Huawei Cloud credentials detected — targeting real Huawei Cloud OBS (eu-west-101)."
   {
     echo "OBS_TESTS=true"
-    echo "OBS_MINIO_TESTS=true"
     echo "OBS_TEST_ENDPOINT=https://obs.eu-west-101.myhuaweicloud.eu"
     echo "OBS_TEST_ACCESS_KEY=${HUAWEI_ACCESS_KEY}"
     echo "OBS_TEST_SECRET_KEY=${HUAWEI_SECRET_ACCESS_KEY}"
@@ -50,19 +49,18 @@ if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; th
   } >> "$GITHUB_ENV"
 else
   echo "No Huawei Cloud credentials — falling back to local S3 server (RustFS) for OBS integration tests."
-  if docker compose -f docker-compose-ci.yml up -d rustfs 2>&1; then
-    if wait_healthy rustfs 24 5; then
-      echo "RustFS is healthy — enabling OBS integration tests."
-      {
-        echo "OBS_TESTS=true"
-        echo "OBS_MINIO_TESTS=true"
-      } >> "$GITHUB_ENV"
-    else
-      echo "RustFS did not become healthy — OBS integration tests will be skipped."
-    fi
-  else
-    echo "RustFS container failed to start — OBS integration tests will be skipped."
+  if ! docker compose -f docker-compose-ci.yml up -d rustfs 2>&1; then
+    echo "RustFS container failed to start." >&2
+    docker compose -f docker-compose-ci.yml logs rustfs || true
+    exit 1
   fi
+  if ! wait_healthy rustfs 24 5; then
+    echo "RustFS did not become healthy — failing CI setup." >&2
+    docker compose -f docker-compose-ci.yml logs rustfs || true
+    exit 1
+  fi
+  echo "RustFS is healthy — enabling OBS integration tests."
+  echo "OBS_TESTS=true" >> "$GITHUB_ENV"
 fi
 
 # DMS for Kafka — use the local Kafka container from docker-compose-ci.yml.

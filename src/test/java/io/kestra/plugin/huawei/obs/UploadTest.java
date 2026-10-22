@@ -4,6 +4,7 @@ import io.kestra.core.models.property.Property;
 import io.kestra.core.utils.IdUtils;
 import io.kestra.plugin.huawei.obs.Upload;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.io.ByteArrayInputStream;
 import java.net.URI;
@@ -14,7 +15,7 @@ import java.util.Map;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfObsTests
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class UploadTest extends AbstractObsTest {
 
     @Test
