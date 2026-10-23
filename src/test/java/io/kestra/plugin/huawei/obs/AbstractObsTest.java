@@ -27,8 +27,8 @@ import java.util.UUID;
 /**
  * Base class for OBS integration tests.
  *
- * <p>By default targets a local MinIO instance (started in CI via {@code docker-compose-ci.yml},
- * or locally with {@code docker compose -f docker-compose-ci.yml up -d}). Override via environment
+ * <p>By default targets a local RustFS S3-compatible instance (started in CI via {@code docker-compose-ci.yml},
+ * or locally with {@code docker compose -f docker-compose-ci.yml up -d rustfs}). Override via environment
  * variables for live QA against real Huawei Cloud OBS:
  *
  * <pre>
@@ -49,7 +49,7 @@ import java.util.UUID;
  * {@link #key(String)}), giving logical isolation, and {@link #cleanupRunPrefix()} deletes only that
  * namespace so concurrent runs never disturb each other.
  *
- * <p>The test gate ({@code OBS_MINIO_TESTS=true}) is unchanged and must always be set.
+ * <p>The test gate ({@code OBS_TESTS=true}) must be set.
  */
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -119,7 +119,7 @@ abstract class AbstractObsTest {
             return;
         }
         // Include a short random suffix so bucket names are globally unique on real OBS.
-        // Names are lowercase, 3-63 chars, no underscores — compliant with both OBS and MinIO.
+        // Names are lowercase, 3-63 chars, no underscores — compliant with both OBS and S3.
         var suffix = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
         testBucket = "kestra-obs-" + getClass().getSimpleName().toLowerCase().replace("test", "").replace("_", "") + "-" + suffix;
         // Trim to 63 chars if a subclass name happens to produce a long string
@@ -160,7 +160,8 @@ abstract class AbstractObsTest {
      * Best-effort deletion of everything under this run's {@link #runPrefix}, once after all the class's
      * test methods.
      *
-     * <p>The OBS integration tests were written for a disposable MinIO container; when repointed at a
+     * <p>The OBS integration tests were written for a disposable local RustFS / S3-compatible fallback
+     * container; when repointed at a
      * shared, persistent bucket (via {@code OBS_TEST_BUCKET}, as CI does against real Huawei Cloud OBS)
      * they would otherwise accumulate forever. Because every key is namespaced under {@link #runPrefix},
      * a single prefix sweep removes seeded and task-produced objects alike without any per-test tracking,
@@ -234,6 +235,20 @@ abstract class AbstractObsTest {
         builder.pathStyleAccess(Property.ofValue(TEST_PATH_STYLE));
         builder.authType(Property.ofValue(TEST_AUTH_TYPE));
         return builder;
+    }
+
+    /**
+     * Returns true if tests are running against real Huawei Cloud OBS rather than the local
+     * RustFS / S3-compatible fallback container.
+     */
+    static boolean isRealObs() {
+        return (TEST_BUCKET_OVERRIDE != null && !TEST_BUCKET_OVERRIDE.isBlank())
+            || TEST_AUTH_TYPE == AuthType.OBS
+            || (!TEST_ENDPOINT.contains("localhost") && !TEST_ENDPOINT.contains("127.0.0.1"))
+            || (System.getenv("OBS_ENDPOINT") != null
+                && !System.getenv("OBS_ENDPOINT").isBlank()
+                && !System.getenv("OBS_ENDPOINT").contains("localhost")
+                && !System.getenv("OBS_ENDPOINT").contains("127.0.0.1"));
     }
 
     private static String env(String name, String defaultValue) {

@@ -13,7 +13,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class CopyTest extends AbstractObsTest {
 
     @Test

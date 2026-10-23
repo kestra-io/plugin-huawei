@@ -19,7 +19,7 @@ import java.util.List;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class TriggerTest extends AbstractObsTest {
 
     @Inject

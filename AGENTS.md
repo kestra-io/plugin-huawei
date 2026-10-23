@@ -41,7 +41,7 @@ Single-module plugin. Source packages under `io.kestra.plugin.huawei`:
 Infrastructure dependencies (Docker Compose services):
 
 - `app` (`docker-compose.yml`) — Kestra application for manual plugin testing
-- `minio` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
+- `rustfs` (`docker-compose-ci.yml`) — S3-compatible object storage for integration tests (ports 9000/9001, credentials minioadmin/minioadmin); started in CI by `.github/setup-unit.sh`, kept out of the production `docker-compose.yml`
 - `kafka` (`docker-compose-ci.yml`) — KRaft-mode Kafka broker for DMS Kafka integration tests (port 9092, no auth)
 - `rocketmq-namesrv` / `rocketmq-broker` (`docker-compose-ci.yml`) — Apache RocketMQ 4.9.4 for DMS RocketMQ integration tests (namesrv port 9876, broker port 10911); the 5.5.0 client is backward-compatible with the 4.x broker
 - `dynamodb-local` (`docker-compose-ci.yml`) — `amazon/dynamodb-local` standing in for GeminiDB's DynamoDB-compatible data-plane API in unit tests (port 8000, in-memory, shared DB); started unconditionally by `.github/setup-unit.sh` so the default-path GeminiDB tests run without any env gate
@@ -227,16 +227,16 @@ A second overload `huaweiClientConfig(RunContext, String iamEndpointOverride)` a
 
 ### Integration Tests
 
-**OBS integration tests** require MinIO. Start it with:
+**OBS integration tests** require an S3-compatible server (RustFS). Start it with:
 
 ```bash
-docker compose -f docker-compose-ci.yml up -d minio
+docker compose -f docker-compose-ci.yml up -d rustfs
 ```
 
 Then run:
 
 ```bash
-OBS_MINIO_TESTS=true ./gradlew test
+OBS_TESTS=true ./gradlew test
 ```
 
 **DMS Kafka integration tests** require a Kafka broker:
@@ -253,7 +253,7 @@ docker compose -f docker-compose-ci.yml up -d rocketmq-namesrv rocketmq-broker
 DMS_ROCKETMQ_TESTS=true DMS_ROCKETMQ_NAME_SERVER=localhost:9876 ./gradlew test
 ```
 
-All tests above are guarded by `@EnabledIfEnvironmentVariable` so they are skipped unless the matching gate variable is set.
+All tests above are guarded by environment variable gates (`@EnabledIfEnvironmentVariable`) so they are skipped unless the matching gate variable is set.
 
 **GeminiDB tests** run against DynamoDB Local (GeminiDB's DynamoDB-compatible data-plane API has no Huawei-specific test double, but DynamoDB Local speaks the exact same wire protocol) and require **no env gate** — they always run as part of the default-path suite:
 
@@ -264,7 +264,7 @@ docker compose -f docker-compose-ci.yml up -d dynamodb-local
 
 Point at a real GeminiDB instance instead by setting `GEMINIDB_TEST_ENDPOINT` (plus `GEMINIDB_TEST_ACCESS_KEY`, `GEMINIDB_TEST_SECRET_KEY`, `GEMINIDB_TEST_REGION`). Against a real instance those two credential variables are the **database account**, not IAM: `GEMINIDB_TEST_ACCESS_KEY=rwuser` and `GEMINIDB_TEST_SECRET_KEY=<instance admin password>` (see Local rules). A separate `GEMINIDB_TESTS=true` gate is reserved for any future live-cloud-only test; none exists yet since DynamoDB Local already exercises the same code path.
 
-To run OBS tests against a live Huawei Cloud OBS endpoint instead of MinIO, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`, and optionally `OBS_TEST_BUCKET` to reuse a pre-created bucket).
+To run OBS tests against a live Huawei Cloud OBS endpoint instead of local RustFS, set `OBS_TEST_ENDPOINT` (plus `OBS_TEST_ACCESS_KEY`, `OBS_TEST_SECRET_KEY`, `OBS_TEST_AUTH_TYPE`, `OBS_TEST_PATH_STYLE`, and optionally `OBS_TEST_BUCKET` to reuse a pre-created bucket).
 
 IAM/WireMock tests run without any env gate:
 
@@ -275,7 +275,7 @@ IAM/WireMock tests run without any env gate:
 In CI, `.github/setup-unit.sh` decides the target:
 
 - When the org secrets `HUAWEI_ACCESS_KEY` / `HUAWEI_SECRET_ACCESS_KEY` are present (provisioned by `kestra-io/flows-engineering`, `terraform/huawei-unittest.tf`; visibility `all` for `kestra-io/plugin-*`), it points the tests at **real Huawei Cloud OBS** (region `eu-west-101`, pre-created bucket `kestra-unit-test`) by exporting the `OBS_TEST_*` variables and the gate to `$GITHUB_ENV`. Because the IAM user uses that single bucket, `CreateBucketTest`/`DeleteBucketTest` self-skip (via `OBS_TEST_BUCKET`) and the rest rely on per-test prefix isolation.
-- Otherwise (e.g. fork PRs without secret access), it falls back to local **MinIO** via `docker compose -f docker-compose-ci.yml up -d`.
+- Otherwise (e.g. fork PRs without secret access), it falls back to local S3-compatible **RustFS** via `docker compose -f docker-compose-ci.yml up -d rustfs`.
 
 The reusable `plugins.yml` workflow exposes all GitHub secrets as env vars (via `secrets-to-env-action`) before running `setup-unit.sh`, which is how the script reads the `HUAWEI_*` secrets.
 

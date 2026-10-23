@@ -15,7 +15,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class DeleteBucketTest extends AbstractObsTest {
 
     /**
@@ -55,10 +55,10 @@ class DeleteBucketTest extends AbstractObsTest {
         assumeBucketDeletionAllowed();
         var bucketName = uniqueBucketName();
         // Intentionally do not create the bucket.
-        // NOTE: MinIO surfaces absence via "NoSuchBucket" error code on the deleteBucket call
-        // itself. Real OBS instead fires a HEAD <bucket>?apiversion region-probe first and returns
-        // HTTP 404 (null error code) for a non-existent bucket — that path cannot be exercised
-        // against MinIO. Both are handled by the broadened catch condition in DeleteBucket.
+        // NOTE: S3-compatible servers (e.g. RustFS) surface absence via "NoSuchBucket" error code on
+        // the deleteBucket call itself. Real OBS instead fires a HEAD <bucket>?apiversion region-probe first
+        // and returns HTTP 404 (null error code) for a non-existent bucket — that path cannot be exercised
+        // against S3-compatible servers. Both are handled by the broadened catch condition in DeleteBucket.
 
         var runContext = runContextFactory.of(Collections.emptyMap());
         var task = applyObsConfig(DeleteBucket.builder())

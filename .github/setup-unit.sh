@@ -1,37 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# OBS integration tests run against either real Huawei Cloud OBS (preferred, in CI) or a
-# local MinIO instance (fallback, for forks/PRs where org secrets are unavailable).
-#
-# The org secrets HUAWEI_ACCESS_KEY / HUAWEI_SECRET_ACCESS_KEY are provisioned by
-# kestra-io/flows-engineering (terraform/huawei-unittest.tf) with visibility "all" for
-# kestra-io/plugin-* repos, and are exposed here as env vars by the secrets-to-env step in
-# the reusable plugins.yml workflow. The dedicated IAM user has "OBS OperateAccess" and the
-# pre-created bucket "kestra-unit-test" lives in region eu-west-101 (1-day object lifecycle).
-#
-# Test-time configuration is bridged to the OBS_TEST_* contract read by AbstractObsTest and
-# written to $GITHUB_ENV so it persists into the subsequent "gradle check" step.
-
-if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; then
-  echo "Huawei Cloud credentials detected — targeting real Huawei Cloud OBS (eu-west-101)."
-  {
-    echo "OBS_MINIO_TESTS=true"
-    echo "OBS_TEST_ENDPOINT=https://obs.eu-west-101.myhuaweicloud.eu"
-    echo "OBS_TEST_ACCESS_KEY=${HUAWEI_ACCESS_KEY}"
-    echo "OBS_TEST_SECRET_KEY=${HUAWEI_SECRET_ACCESS_KEY}"
-    echo "OBS_TEST_AUTH_TYPE=OBS"
-    echo "OBS_TEST_PATH_STYLE=false"
-    # Pre-created shared bucket: the IAM user relies on it, so CreateBucket/DeleteBucket tests
-    # self-skip and the remaining tests rely on per-test prefix isolation.
-    echo "OBS_TEST_BUCKET=kestra-unit-test"
-  } >> "$GITHUB_ENV"
-else
-  echo "No Huawei Cloud credentials — falling back to local MinIO for OBS integration tests."
-  docker compose -f docker-compose-ci.yml up -d minio
-  echo "OBS_MINIO_TESTS=true" >> "$GITHUB_ENV"
-fi
-
 # Helper: wait for a Docker Compose service to reach the "healthy" state.
 # Usage: wait_healthy <service> <retries> <sleep_seconds>
 wait_healthy() {
@@ -52,6 +21,47 @@ wait_healthy() {
   done
   return 1
 }
+
+# OBS integration tests run against either real Huawei Cloud OBS (preferred, in CI) or a
+# local S3-compatible server (RustFS fallback, for forks/PRs where org secrets are unavailable).
+#
+# The org secrets HUAWEI_ACCESS_KEY / HUAWEI_SECRET_ACCESS_KEY are provisioned by
+# kestra-io/flows-engineering (terraform/huawei-unittest.tf) with visibility "all" for
+# kestra-io/plugin-* repos, and are exposed here as env vars by the secrets-to-env step in
+# the reusable plugins.yml workflow. The dedicated IAM user has "OBS OperateAccess" and the
+# pre-created bucket "kestra-unit-test" lives in region eu-west-101 (1-day object lifecycle).
+#
+# Test-time configuration is bridged to the OBS_TEST_* contract read by AbstractObsTest and
+# written to $GITHUB_ENV so it persists into the subsequent "gradle check" step.
+
+if [ -n "${HUAWEI_ACCESS_KEY:-}" ] && [ -n "${HUAWEI_SECRET_ACCESS_KEY:-}" ]; then
+  echo "Huawei Cloud credentials detected — targeting real Huawei Cloud OBS (eu-west-101)."
+  {
+    echo "OBS_TESTS=true"
+    echo "OBS_TEST_ENDPOINT=https://obs.eu-west-101.myhuaweicloud.eu"
+    echo "OBS_TEST_ACCESS_KEY=${HUAWEI_ACCESS_KEY}"
+    echo "OBS_TEST_SECRET_KEY=${HUAWEI_SECRET_ACCESS_KEY}"
+    echo "OBS_TEST_AUTH_TYPE=OBS"
+    echo "OBS_TEST_PATH_STYLE=false"
+    # Pre-created shared bucket: the IAM user relies on it, so CreateBucket/DeleteBucket tests
+    # self-skip and the remaining tests rely on per-test prefix isolation.
+    echo "OBS_TEST_BUCKET=kestra-unit-test"
+  } >> "$GITHUB_ENV"
+else
+  echo "No Huawei Cloud credentials — falling back to local S3 server (RustFS) for OBS integration tests."
+  if ! docker compose -f docker-compose-ci.yml up -d rustfs 2>&1; then
+    echo "RustFS container failed to start." >&2
+    docker compose -f docker-compose-ci.yml logs rustfs || true
+    exit 1
+  fi
+  if ! wait_healthy rustfs 24 5; then
+    echo "RustFS did not become healthy — failing CI setup." >&2
+    docker compose -f docker-compose-ci.yml logs rustfs || true
+    exit 1
+  fi
+  echo "RustFS is healthy — enabling OBS integration tests."
+  echo "OBS_TESTS=true" >> "$GITHUB_ENV"
+fi
 
 # DMS for Kafka — use the local Kafka container from docker-compose-ci.yml.
 # docker compose up is allowed to fail (bad image, no disk space, etc.) — we just skip.

@@ -12,7 +12,7 @@ import java.util.Collections;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class DownloadsTest extends AbstractObsTest {
 
     @Test

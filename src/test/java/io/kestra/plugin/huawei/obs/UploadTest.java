@@ -15,7 +15,7 @@ import java.util.Map;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 
-@EnabledIfEnvironmentVariable(named = "OBS_MINIO_TESTS", matches = "true")
+@EnabledIfEnvironmentVariable(named = "OBS_TESTS", matches = "true")
 class UploadTest extends AbstractObsTest {
 
     @Test
