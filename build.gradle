@@ -44,6 +44,10 @@ configurations.all {
     resolutionStrategy.capabilitiesResolution.withCapability("org.lz4:lz4-java") {
         selectHighestVersion()
     }
+
+    // The Kestra platform BOM is an enforcedPlatform and pins kafka-clients to 4.1.1, which silently
+    // downgrades the declared 4.3.1 (JWT validation auth bypass, fixed in 4.1.2). Force the declared version.
+    resolutionStrategy.force "org.apache.kafka:kafka-clients:4.3.1"
 }
 
 dependencies {
