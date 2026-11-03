@@ -44,6 +44,9 @@ configurations.all {
     resolutionStrategy.capabilitiesResolution.withCapability("org.lz4:lz4-java") {
         selectHighestVersion()
     }
+
+    // SEC-0161: platform BOM pins kafka-clients 4.1.1, remove once it ships >= 4.1.2.
+    resolutionStrategy.force "org.apache.kafka:kafka-clients:4.3.1"
 }
 
 dependencies {
@@ -68,7 +71,7 @@ dependencies {
     }
 
     // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
-    implementation("org.apache.kafka:kafka-clients:4.3.1") {
+    implementation("org.apache.kafka:kafka-clients") {
         exclude group: "org.slf4j"
     }
 
