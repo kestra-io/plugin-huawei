@@ -82,9 +82,12 @@ dependencies {
     // The former standalone rocketmq-acl module (AclClientRPCHook, SessionCredentials) was folded
     // into rocketmq-client from 5.4.0 onward, so no separate acl artifact is declared.
     // Exclude logging dependencies to defer to Kestra's binding.
+    // Exclude rocksdbjni: only used by broker-side config storage in rocketmq-common, never loaded by the
+    // client. It is dual-licensed GPL-2.0/Apache-2.0 and flagged by Trivy (SEC-0300), and adds 57 MB of native libs.
     implementation("org.apache.rocketmq:rocketmq-client:5.5.1") {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
+        exclude group: "org.rocksdb", module: "rocksdbjni"
     }
 
     // Huawei Cloud Java SDK v3 — modular SDK for IAM and other Huawei Cloud services.
