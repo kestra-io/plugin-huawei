@@ -52,7 +52,7 @@ configurations.all {
     resolutionStrategy.force "com.google.guava:guava:33.7.2-jre"
 
     // SEC-0370: kafka-clients pulls snappy-java 1.1.10.7, remove once the platform ships >= 1.1.10.9.
-    resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.9"
+    resolutionStrategy.force "org.xerial.snappy:snappy-java:1.1.10.12"
 }
 
 dependencies {
