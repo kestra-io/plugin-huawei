@@ -93,6 +93,9 @@ dependencies {
     implementation("org.apache.rocketmq:rocketmq-client:5.5.1") {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
+        // SEC-2117 (CVE-2023-6378): rocketmq-logback-classic is a relocated copy of logback-classic 1.3.5 with
+        // the vulnerable SocketReceiver. The client only uses the slf4j bridge, which falls back to a NOP logger.
+        exclude group: "io.github.aliyunmq", module: "rocketmq-logback-classic"
         exclude group: "org.rocksdb", module: "rocksdbjni"
     }
 
