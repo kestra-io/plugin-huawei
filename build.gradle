@@ -79,11 +79,17 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
 
-    // Huawei OBS SDK — shaded bundle, no BOM conflicts; exclude transitive slf4j to defer to Kestra's binding.
+    // Huawei OBS SDK — the unbundled artifact: the `-bundle` variant embeds a relocated Jackson copy under
+    // `shade/fasterxml` that platform forces cannot reach (SEC-2092/SEC-2093), whereas here Jackson, okhttp and okio
+    // are regular dependencies managed by the platform BOM and the Jackson forces above. Exclude transitive slf4j to
+    // defer to Kestra's binding, and log4j-core: the SDK only reaches log4j-api reflectively (falling back to its
+    // own BasicLogger) and references log4j-core solely from the optional Log4j2Configurator, which this plugin
+    // never calls, so no logging backend is shipped.
     // `implementation` (not `api`): the SDK is an internal detail bundled into the shadow JAR, not part of
     // the plugin's public API, so it must not leak onto consumers' compile classpath or the Kestra classloader.
-    implementation("com.huaweicloud:esdk-obs-java-bundle:3.26.9") {
+    implementation("com.huaweicloud:esdk-obs-java:3.26.9") {
         exclude group: "org.slf4j"
+        exclude group: "org.apache.logging.log4j", module: "log4j-core"
     }
 
     // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
