@@ -11,6 +11,7 @@ import io.kestra.plugin.huawei.AbstractConnectionInterface;
 import io.kestra.plugin.huawei.TemporaryCredentialsConfig;
 import io.kestra.plugin.scripts.exec.AbstractExecScript;
 import io.kestra.plugin.scripts.exec.scripts.models.ScriptOutput;
+import io.kestra.plugin.scripts.exec.scripts.runners.CommandsWrapper;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
@@ -278,6 +279,10 @@ public class KooCLI extends AbstractExecScript implements RunnableTask<ScriptOut
 
     @Override
     public ScriptOutput run(RunContext runContext) throws Exception {
+        return commandsWrapper(runContext).run();
+    }
+
+    CommandsWrapper commandsWrapper(RunContext runContext) throws Exception {
         var clientConfig = huaweiClientConfig(runContext);
         var rInstallScriptUrl = runContext.render(this.installScriptUrl).as(String.class).orElse(null);
         var resolvedInstallScriptUrl = resolveInstallScriptUrl(rInstallScriptUrl, clientConfig.region());
@@ -295,9 +300,10 @@ public class KooCLI extends AbstractExecScript implements RunnableTask<ScriptOut
         return this.commands(runContext)
             .withWarningOnStdErr(true)
             .withInterpreter(Property.ofValue(List.of("/bin/sh", "-c")))
+            // beforeCommands is not carried over by commands(runContext); it must be passed explicitly.
+            .withBeforeCommands(this.beforeCommands)
             .withCommands(Property.ofValue(allCommands))
-            .withEnv(buildEnv(runContext, clientConfig))
-            .run();
+            .withEnv(buildEnv(runContext, clientConfig));
     }
 
     private Map<String, String> buildEnv(

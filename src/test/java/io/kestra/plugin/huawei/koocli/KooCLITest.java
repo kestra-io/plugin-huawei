@@ -296,6 +296,21 @@ class KooCLITest {
         assertThrows(IllegalArgumentException.class, () -> buildInstallCommand("ftp://example.com/install.sh"));
     }
 
+    @Test
+    void commandsWrapper_passesBeforeCommands() throws Exception {
+        var task = KooCLI.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .beforeCommands(Property.ofValue(List.of("echo BEFORE_RAN")))
+            .commands(Property.ofValue(List.of("echo koocli-ok")))
+            .build();
+        var runContext = runContextFactory.of(Collections.emptyMap());
+
+        var wrapper = task.commandsWrapper(runContext);
+
+        assertThat(runContext.render(wrapper.getBeforeCommands()).asList(String.class), contains("echo BEFORE_RAN"));
+    }
+
     // ── Integration tests (require Docker + network; gated by env var) ──────────
 
     @Test
