@@ -56,6 +56,13 @@ configurations.all {
 
     // SEC-0139: RocketMQ pulls at.yawk.lz4:lz4-java 1.10.3, remove once the platform ships >= 1.11.4.
     resolutionStrategy.force "at.yawk.lz4:lz4-java:1.11.4"
+
+    // SEC-2092 / SEC-2093: platform BOM pins Jackson 2.21.1, remove once it ships >= 2.21.7.
+    // jackson-annotations is intentionally left alone: it is versioned 2.21 (no 2.21.x patch releases).
+    resolutionStrategy.force "com.fasterxml.jackson.core:jackson-core:2.21.7"
+    resolutionStrategy.force "com.fasterxml.jackson.core:jackson-databind:2.21.7"
+    resolutionStrategy.force "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.21.7"
+    resolutionStrategy.force "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.21.7"
 }
 
 dependencies {
@@ -72,11 +79,17 @@ dependencies {
     compileOnly group: "io.kestra", name: "core", version: kestraVersion
     compileOnly group: "io.kestra", name: "script", version: kestraVersion
 
-    // Huawei OBS SDK — shaded bundle, no BOM conflicts; exclude transitive slf4j to defer to Kestra's binding.
+    // Huawei OBS SDK — the unbundled artifact: the `-bundle` variant embeds a relocated Jackson copy under
+    // `shade/fasterxml` that platform forces cannot reach (SEC-2092/SEC-2093), whereas here Jackson, okhttp and okio
+    // are regular dependencies managed by the platform BOM and the Jackson forces above. Exclude transitive slf4j to
+    // defer to Kestra's binding, and log4j-core: the SDK only reaches log4j-api reflectively (falling back to its
+    // own BasicLogger) and references log4j-core solely from the optional Log4j2Configurator, which this plugin
+    // never calls, so no logging backend is shipped.
     // `implementation` (not `api`): the SDK is an internal detail bundled into the shadow JAR, not part of
     // the plugin's public API, so it must not leak onto consumers' compile classpath or the Kestra classloader.
-    implementation("com.huaweicloud:esdk-obs-java-bundle:3.26.9") {
+    implementation("com.huaweicloud:esdk-obs-java:3.26.9") {
         exclude group: "org.slf4j"
+        exclude group: "org.apache.logging.log4j", module: "log4j-core"
     }
 
     // DMS for Kafka — uses the standard Apache Kafka wire protocol; no Huawei SDK needed.
@@ -93,6 +106,9 @@ dependencies {
     implementation("org.apache.rocketmq:rocketmq-client:5.5.1") {
         exclude group: "ch.qos.logback"
         exclude group: "org.slf4j"
+        // SEC-2117 (CVE-2023-6378): rocketmq-logback-classic is a relocated copy of logback-classic 1.3.5 with
+        // the vulnerable SocketReceiver. The client only uses the slf4j bridge, which falls back to a NOP logger.
+        exclude group: "io.github.aliyunmq", module: "rocketmq-logback-classic"
         exclude group: "org.rocksdb", module: "rocksdbjni"
     }
 
