@@ -59,7 +59,7 @@ configurations.all {
 
     // SEC-2092 / SEC-2093: platform BOM pins Jackson 2.21.1, remove once it ships >= 2.21.7.
     // jackson-annotations is intentionally left alone: it is versioned 2.21 (no 2.21.x patch releases).
-    resolutionStrategy.force "com.fasterxml.jackson.core:jackson-core:2.21.7"
+    resolutionStrategy.force "com.fasterxml.jackson.core:jackson-core:2.23.0"
     resolutionStrategy.force "com.fasterxml.jackson.core:jackson-databind:2.21.7"
     resolutionStrategy.force "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.21.7"
     resolutionStrategy.force "com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.21.7"
