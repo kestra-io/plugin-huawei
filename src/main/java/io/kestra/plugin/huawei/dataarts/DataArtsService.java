@@ -52,12 +52,11 @@ import java.util.stream.Collectors;
  * {@link com.huaweicloud.sdk.core.http.HttpRequest} to compute the HMAC-SHA256 canonical request;
  * the Kestra client does not expose a compatible request type, so the raw JDK client is the only
  * viable transport here.
+ *
+ * <p>The JDK client is created per request and closed after use (see {@code invoke}), so this
+ * class holds no shared state, in line with Kestra's stateless tasks guideline.
  */
 public final class DataArtsService {
-
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
 
     // JDK's HttpRequest.Builder rejects these header names — filter them from signed headers.
     private static final Set<String> RESTRICTED_HEADERS = Set.of(
@@ -653,7 +652,11 @@ public final class DataArtsService {
             .method(method, bodyPublisher)
             .build();
 
-        return HTTP_CLIENT.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+        try (var client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()) {
+            return client.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+        }
     }
 
     /**
