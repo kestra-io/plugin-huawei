@@ -136,18 +136,20 @@ public class GetJobRun extends AbstractDataArts implements RunnableTask<GetJobRu
         var config = huaweiClientConfig(runContext);
 
         JobRun run;
-        if (rInstanceId != null) {
-            runContext.logger().debug("Fetching instance {} for job '{}'", rInstanceId, rJobName);
-            run = DataArtsService.getInstance(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
-        } else {
-            runContext.logger().debug("Resolving latest instance for job '{}'", rJobName);
-            var instances = DataArtsService.listInstancesFirstPage(config, rEndpoint, rProjectId, rWorkspaceId, rJobName, 1);
-            if (instances.isEmpty()) {
-                throw new IllegalStateException(
-                    "No job run instances found for job '" + rJobName +
-                    "' — the job may not have been started yet, or all instances have been purged.");
+        try (var client = DataArtsService.newHttpClient()) {
+            if (rInstanceId != null) {
+                runContext.logger().debug("Fetching instance {} for job '{}'", rInstanceId, rJobName);
+                run = DataArtsService.getInstance(client, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, rInstanceId);
+            } else {
+                runContext.logger().debug("Resolving latest instance for job '{}'", rJobName);
+                var instances = DataArtsService.listInstancesFirstPage(client, config, rEndpoint, rProjectId, rWorkspaceId, rJobName, 1);
+                if (instances.isEmpty()) {
+                    throw new IllegalStateException(
+                        "No job run instances found for job '" + rJobName +
+                            "' — the job may not have been started yet, or all instances have been purged.");
+                }
+                run = instances.getFirst();
             }
-            run = instances.getFirst();
         }
 
         runContext.logger().info("Job '{}' instanceId={} status={}", rJobName, run.getInstanceId(), run.getStatus());

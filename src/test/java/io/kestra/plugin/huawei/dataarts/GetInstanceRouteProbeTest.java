@@ -95,45 +95,47 @@ class GetInstanceRouteProbeTest {
         // Control: instances/detail is verified-working and the only source of a real instance_id
         // (the console shows none, and it has no API of its own). A failure here means credentials,
         // workspace or signing are wrong, and nothing below would mean anything.
-        var instances = DataArtsService.listInstancesFirstPage(config, endpoint, projectId, workspaceId, jobName, 10);
-        var control = instances.stream().filter(i -> i.getInstanceId() != null).findFirst().orElse(null);
-        if (control == null) {
-            fail("Control step returned no instance carrying an instance_id — cannot probe the by-ID " +
-                "route. Pick a DATAARTS_JOB_NAME that has already run at least once.");
+        try (var client = DataArtsService.newHttpClient()) {
+            var instances = DataArtsService.listInstancesFirstPage(client, config, endpoint, projectId, workspaceId, jobName, 10);
+            var control = instances.stream().filter(i -> i.getInstanceId() != null).findFirst().orElse(null);
+            if (control == null) {
+                fail("Control step returned no instance carrying an instance_id — cannot probe the by-ID " +
+                    "route. Pick a DATAARTS_JOB_NAME that has already run at least once.");
+            }
+
+            // The list route populates the full model. Asserted so a regression here is distinguishable
+            // from the by-ID route's own thinness below.
+            assertNotNull(control.getJobInstanceName(), "instances/detail should return job_instance_name");
+            assertNotNull(control.getJobId(), "instances/detail should return job_id");
+
+            // 1. Published, and returns the instance that was asked for.
+            var run = DataArtsService.getInstance(client, config, endpoint, projectId, workspaceId, jobName, control.getInstanceId());
+            assertEquals(control.getInstanceId(), run.getInstanceId(), "by-ID route returned a different instance");
+            assertNotNull(run.getStatus(), "by-ID route should return status");
+            assertNotNull(run.getPlanTime(), "by-ID route should return plan_time");
+
+            // 2. Strict subset of the list shape. These five are absent on the live route — end_time
+            //    included, even for an instance already reporting success. If any becomes non-null,
+            //    Huawei has enriched the response and the docs that warn about this are now wrong.
+            assertNull(run.getJobInstanceName(), "by-ID route unexpectedly returned job_instance_name — " +
+                "the response shape has changed; update GetJobRun's instanceId docs and AGENTS.md");
+            assertNull(run.getEndTime(), "by-ID route unexpectedly returned end_time — response shape changed");
+            assertNull(run.getSubmitTime(), "by-ID route unexpectedly returned submit_time — response shape changed");
+            assertNull(run.getExecuteTime(), "by-ID route unexpectedly returned execute_time — response shape changed");
+            assertNull(run.getJobId(), "by-ID route unexpectedly returned job_id — response shape changed");
+
+            // 3. The {instance_id} segment is honoured rather than ignored.
+            var ex = assertThrows(
+                IllegalStateException.class,
+                () -> DataArtsService.getInstance(
+                    client, config, endpoint, projectId, workspaceId, jobName, NONEXISTENT_INSTANCE_ID),
+                "A nonexistent instance ID must fail. Succeeding would mean the {instance_id} segment is " +
+                    "ignored and the route just returns the latest instance — which would make " +
+                    "GetJobRun's instanceId property silently report the wrong run.");
+            assertTrue(
+                ex.getMessage().contains("DLF.30137"),
+                "Expected DLF.30137 (\"Job instance does not exist.\") for a nonexistent instance, got: " +
+                    ex.getMessage());
         }
-
-        // The list route populates the full model. Asserted so a regression here is distinguishable
-        // from the by-ID route's own thinness below.
-        assertNotNull(control.getJobInstanceName(), "instances/detail should return job_instance_name");
-        assertNotNull(control.getJobId(), "instances/detail should return job_id");
-
-        // 1. Published, and returns the instance that was asked for.
-        var run = DataArtsService.getInstance(config, endpoint, projectId, workspaceId, jobName, control.getInstanceId());
-        assertEquals(control.getInstanceId(), run.getInstanceId(), "by-ID route returned a different instance");
-        assertNotNull(run.getStatus(), "by-ID route should return status");
-        assertNotNull(run.getPlanTime(), "by-ID route should return plan_time");
-
-        // 2. Strict subset of the list shape. These five are absent on the live route — end_time
-        //    included, even for an instance already reporting success. If any becomes non-null,
-        //    Huawei has enriched the response and the docs that warn about this are now wrong.
-        assertNull(run.getJobInstanceName(), "by-ID route unexpectedly returned job_instance_name — " +
-            "the response shape has changed; update GetJobRun's instanceId docs and AGENTS.md");
-        assertNull(run.getEndTime(), "by-ID route unexpectedly returned end_time — response shape changed");
-        assertNull(run.getSubmitTime(), "by-ID route unexpectedly returned submit_time — response shape changed");
-        assertNull(run.getExecuteTime(), "by-ID route unexpectedly returned execute_time — response shape changed");
-        assertNull(run.getJobId(), "by-ID route unexpectedly returned job_id — response shape changed");
-
-        // 3. The {instance_id} segment is honoured rather than ignored.
-        var ex = assertThrows(
-            IllegalStateException.class,
-            () -> DataArtsService.getInstance(
-                config, endpoint, projectId, workspaceId, jobName, NONEXISTENT_INSTANCE_ID),
-            "A nonexistent instance ID must fail. Succeeding would mean the {instance_id} segment is " +
-                "ignored and the route just returns the latest instance — which would make " +
-                "GetJobRun's instanceId property silently report the wrong run.");
-        assertTrue(
-            ex.getMessage().contains("DLF.30137"),
-            "Expected DLF.30137 (\"Job instance does not exist.\") for a nonexistent instance, got: " +
-                ex.getMessage());
     }
 }

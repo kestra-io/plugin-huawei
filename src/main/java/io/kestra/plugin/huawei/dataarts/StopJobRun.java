@@ -129,34 +129,36 @@ public class StopJobRun extends AbstractDataArts implements RunnableTask<StopJob
 
         runContext.logger().info("Stopping DataArts Factory supplement-data run '{}'", rRunName);
 
-        DataArtsService.stopSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
+        try (var client = DataArtsService.newHttpClient()) {
+            DataArtsService.stopSupplementData(client, runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
 
-        if (!rWait) {
-            return Output.builder().runName(rRunName).status("stopping").build();
+            if (!rWait) {
+                return Output.builder().runName(rRunName).status("stopping").build();
+            }
+
+            var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
+            var seed = DataArtsService.getSupplementData(client, runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
+
+            var current = DataArtsService.pollUntilTerminal(
+                client, runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, seed, rInterval, deadline,
+                lastStatus -> "DataArts Factory supplement-data run '" + rRunName +
+                    "' did not reach a terminal state within " + rMaxDuration +
+                    " — last status: " + lastStatus +
+                    ". Increase maxDuration or check the DataArts Studio console.");
+
+            runContext.logger().info("Supplement-data run '{}' stopped, final status={}", rRunName, current.getStatus());
+
+            return Output.builder()
+                .runName(current.getName())
+                .status(current.getStatus())
+                .jobList(current.getJobList())
+                .startDate(current.getStartDate())
+                .endDate(current.getEndDate())
+                .submittedDate(current.getSubmittedDate())
+                .parallel(current.getParallel())
+                .userName(current.getUserName())
+                .build();
         }
-
-        var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
-        var seed = DataArtsService.getSupplementData(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName);
-
-        var current = DataArtsService.pollUntilTerminal(
-            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, seed, rInterval, deadline,
-            lastStatus -> "DataArts Factory supplement-data run '" + rRunName +
-                "' did not reach a terminal state within " + rMaxDuration +
-                " — last status: " + lastStatus +
-                ". Increase maxDuration or check the DataArts Studio console.");
-
-        runContext.logger().info("Supplement-data run '{}' stopped, final status={}", rRunName, current.getStatus());
-
-        return Output.builder()
-            .runName(current.getName())
-            .status(current.getStatus())
-            .jobList(current.getJobList())
-            .startDate(current.getStartDate())
-            .endDate(current.getEndDate())
-            .submittedDate(current.getSubmittedDate())
-            .parallel(current.getParallel())
-            .userName(current.getUserName())
-            .build();
     }
 
     @Builder
