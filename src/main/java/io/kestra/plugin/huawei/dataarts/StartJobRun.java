@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -33,7 +34,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
-import java.net.http.HttpClient;
 
 @SuperBuilder
 @ToString
