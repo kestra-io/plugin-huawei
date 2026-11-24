@@ -55,10 +55,6 @@ import java.util.stream.Collectors;
  */
 public final class DataArtsService {
 
-    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .build();
-
     // JDK's HttpRequest.Builder rejects these header names — filter them from signed headers.
     private static final Set<String> RESTRICTED_HEADERS = Set.of(
         "connection", "content-length", "expect", "host", "transfer-encoding", "upgrade", "via"
@@ -72,6 +68,12 @@ public final class DataArtsService {
     private static final String JSON_CONTENT_TYPE = "application/json";
 
     private DataArtsService() {
+    }
+
+    public static HttpClient newHttpClient() {
+        return HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .build();
     }
 
     /**
@@ -160,6 +162,7 @@ public final class DataArtsService {
      * @return the run in its terminal state, never {@code null}
      */
     public static SupplementDataRun pollUntilTerminal(
+        HttpClient client,
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -181,7 +184,7 @@ public final class DataArtsService {
                     timeoutMessage.apply(current == null ? "unknown" : current.getStatus()));
             }
 
-            var refreshed = getSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+            var refreshed = getSupplementData(client, runContext, config, endpoint, projectId, workspaceId, runName);
             if (refreshed != null) {
                 current = refreshed;
             }
@@ -254,6 +257,7 @@ public final class DataArtsService {
      *                          (null → omitted, which means the API's own {@code 00:00-00:00} default)
      */
     public static void createSupplementData(
+        HttpClient client,
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -286,7 +290,7 @@ public final class DataArtsService {
         }
 
         var body = JacksonMapper.ofJson().writeValueAsString(bodyMap);
-        var response = invoke(config, endpoint, path, "POST", workspaceId, body);
+        var response = invoke(client, config, endpoint, path, "POST", workspaceId, body);
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
             var detail = parseDlfError(response.body());
@@ -344,6 +348,7 @@ public final class DataArtsService {
      */
     @Nullable
     public static SupplementDataRun getSupplementData(
+        HttpClient client,
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -359,7 +364,7 @@ public final class DataArtsService {
         // space or a non-ASCII character.
         var queryParams = Map.of("name", name, "page", "0", "size", "100");
 
-        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
+        var response = invoke(client, config, endpoint, path, queryParams, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -405,6 +410,7 @@ public final class DataArtsService {
      * {@link #createSupplementData}.
      */
     public static void stopSupplementData(
+        HttpClient client,
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
@@ -419,7 +425,7 @@ public final class DataArtsService {
         // valid inside a path segment in the first place, and re-encoding an already-encoded segment
         // during signing would produce yet another value, out of step with the wire request.
         var path = "/v2/" + projectId + "/factory/supplement-data/" + name + "/stop";
-        var response = invoke(config, endpoint, path, "POST", workspaceId, "{}");
+        var response = invoke(client, config, endpoint, path, "POST", workspaceId, "{}");
 
         if (response.statusCode() != 204 && response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -435,6 +441,7 @@ public final class DataArtsService {
      * Use this when only the most-recent instance is needed to avoid O(n/limit) requests.
      */
     public static List<JobRun> listInstancesFirstPage(
+        HttpClient client,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String projectId,
@@ -442,10 +449,11 @@ public final class DataArtsService {
         String jobName,
         int limit
     ) throws Exception {
-        return fetchInstancePage(config, endpoint, projectId, workspaceId, jobName, limit, 0);
+        return fetchInstancePage(client, config, endpoint, projectId, workspaceId, jobName, limit, 0);
     }
 
     private static List<JobRun> fetchInstancePage(
+        HttpClient client,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String projectId,
@@ -462,7 +470,7 @@ public final class DataArtsService {
         var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/detail";
         var queryParams = Map.of("limit", String.valueOf(limit), "offset", String.valueOf(offset));
 
-        var response = invoke(config, endpoint, path, queryParams, "GET", workspaceId, null);
+        var response = invoke(client, config, endpoint, path, queryParams, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             throw new IllegalStateException(
@@ -512,6 +520,7 @@ public final class DataArtsService {
      * instance old enough to have aged out of the list at all.
      */
     public static JobRun getInstance(
+        HttpClient client,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String projectId,
@@ -520,7 +529,7 @@ public final class DataArtsService {
         long instanceId
     ) throws Exception {
         var path = "/v2/" + projectId + "/factory/jobs/" + jobName + "/instances/" + instanceId;
-        var response = invoke(config, endpoint, path, "GET", workspaceId, null);
+        var response = invoke(client, config, endpoint, path, "GET", workspaceId, null);
 
         if (response.statusCode() != 200) {
             var detail = parseDlfError(response.body());
@@ -571,6 +580,7 @@ public final class DataArtsService {
     }
 
     private static HttpResponse<String> invoke(
+        HttpClient client,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String path,
@@ -578,7 +588,7 @@ public final class DataArtsService {
         @Nullable String workspaceId,
         @Nullable String body
     ) throws IOException, InterruptedException {
-        return invoke(config, endpoint, path, Map.of(), method, workspaceId, body);
+        return invoke(client, config, endpoint, path, Map.of(), method, workspaceId, body);
     }
 
     /**
@@ -597,6 +607,7 @@ public final class DataArtsService {
      *                     encodes it — once — for the request actually sent below.
      */
     private static HttpResponse<String> invoke(
+        HttpClient client,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint,
         String path,
@@ -653,7 +664,7 @@ public final class DataArtsService {
             .method(method, bodyPublisher)
             .build();
 
-        return HTTP_CLIENT.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+        return client.send(jdkReq, HttpResponse.BodyHandlers.ofString());
     }
 
     /**

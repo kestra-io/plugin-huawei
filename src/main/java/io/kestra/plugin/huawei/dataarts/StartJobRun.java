@@ -18,6 +18,7 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.experimental.SuperBuilder;
 
+import java.net.http.HttpClient;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -382,50 +383,52 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
             "Starting DataArts Factory job '{}' as supplement-data run '{}' over {} → {} (run window {})",
             rJobName, rRunName, rStartDate, rEndDate, rRunTimeWindow);
 
-        DataArtsService.createSupplementData(
-            runContext, config, rEndpoint, rProjectId, rWorkspaceId,
-            rRunName, rJobName, rStartDate, rEndDate, rParallel, rDayGranularity, rStopWhenFail,
-            rRunTimeWindow);
+        try (var client = DataArtsService.newHttpClient()) {
+            DataArtsService.createSupplementData(
+                client, runContext, config, rEndpoint, rProjectId, rWorkspaceId,
+                rRunName, rJobName, rStartDate, rEndDate, rParallel, rDayGranularity, rStopWhenFail,
+                rRunTimeWindow);
 
-        killable.set(() -> stopQuietly(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName));
-        // Closes the create->set race: if kill() ran (and found killable still null) while the
-        // create call was in flight, re-invoke it now that the run is confirmed to exist.
-        // stopSupplementData is a no-op on an already-stopped run, so this is safe even if kill()
-        // never actually raced.
-        if (isKilled.get()) {
-            killable.get().run();
-        }
+            killable.set(() -> stopQuietly(runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName));
+            // Closes the create->set race: if kill() ran (and found killable still null) while the
+            // create call was in flight, re-invoke it now that the run is confirmed to exist.
+            // stopSupplementData is a no-op on an already-stopped run, so this is safe even if kill()
+            // never actually raced.
+            if (isKilled.get()) {
+                killable.get().run();
+            }
 
-        // The create response carries only a request ID, so the run has to be read back by name.
-        // Bounded by the same deadline as the status polling below, so both together respect
-        // maxDuration.
-        var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
-        var current = awaitVisible(runContext, config, rEndpoint, rProjectId, rWorkspaceId,
-            rRunName, rInterval, deadline);
+            // The create response carries only a request ID, so the run has to be read back by name.
+            // Bounded by the same deadline as the status polling below, so both together respect
+            // maxDuration.
+            var deadline = System.currentTimeMillis() + rMaxDuration.toMillis();
+            var current = awaitVisible(client, runContext, config, rEndpoint, rProjectId, rWorkspaceId,
+                rRunName, rInterval, deadline);
 
-        runContext.logger().info("Supplement-data run '{}' created, status={}", rRunName, current.getStatus());
+            runContext.logger().info("Supplement-data run '{}' created, status={}", rRunName, current.getStatus());
 
-        if (!rWait) {
+            if (!rWait) {
+                return buildOutput(rJobName, current);
+            }
+
+            current = DataArtsService.pollUntilTerminal(
+                client, runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, current, rInterval, deadline,
+                lastStatus -> "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
+                    "' did not reach a terminal state within " + rMaxDuration +
+                    " — last status: " + lastStatus +
+                    ". Use StopJobRun with runName '" + rRunName + "' to cancel it, or increase maxDuration.");
+
+            runContext.logger().info("Supplement-data run '{}' finished with status={}", rRunName, current.getStatus());
+
+            if (!DataArtsService.isSupplementDataSuccessState(current.getStatus())) {
+                throw new IllegalStateException(
+                    "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
+                        "' finished with status '" + current.getStatus() + "'" +
+                        " — check the run in the DataArts Studio console's Supplement Data view for details.");
+            }
+
             return buildOutput(rJobName, current);
         }
-
-        current = DataArtsService.pollUntilTerminal(
-            runContext, config, rEndpoint, rProjectId, rWorkspaceId, rRunName, current, rInterval, deadline,
-            lastStatus -> "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
-                "' did not reach a terminal state within " + rMaxDuration +
-                " — last status: " + lastStatus +
-                ". Use StopJobRun with runName '" + rRunName + "' to cancel it, or increase maxDuration.");
-
-        runContext.logger().info("Supplement-data run '{}' finished with status={}", rRunName, current.getStatus());
-
-        if (!DataArtsService.isSupplementDataSuccessState(current.getStatus())) {
-            throw new IllegalStateException(
-                "DataArts Factory supplement-data run '" + rRunName + "' for job '" + rJobName +
-                "' finished with status '" + current.getStatus() + "'" +
-                " — check the run in the DataArts Studio console's Supplement Data view for details.");
-        }
-
-        return buildOutput(rJobName, current);
     }
 
     /**
@@ -451,6 +454,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
      * A missing row is therefore retried rather than treated as an error.
      */
     private SupplementDataRun awaitVisible(
+        HttpClient client,
         RunContext runContext,
         AbstractConnection.HuaweiClientConfig config,
         String endpoint, String projectId, String workspaceId,
@@ -458,7 +462,7 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
     ) throws Exception {
         int attempt = 0;
         while (true) {
-            var run = DataArtsService.getSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+            var run = DataArtsService.getSupplementData(client, runContext, config, endpoint, projectId, workspaceId, runName);
             if (run != null) {
                 return run;
             }
@@ -539,8 +543,8 @@ public class StartJobRun extends AbstractDataArts implements RunnableTask<StartJ
         AbstractConnection.HuaweiClientConfig config,
         String endpoint, String projectId, String workspaceId, String runName
     ) {
-        try {
-            DataArtsService.stopSupplementData(runContext, config, endpoint, projectId, workspaceId, runName);
+        try (var client = DataArtsService.newHttpClient()){
+            DataArtsService.stopSupplementData(client, runContext, config, endpoint, projectId, workspaceId, runName);
         } catch (Exception e) {
             runContext.logger().warn(
                 "Failed to stop DataArts Factory supplement-data run '{}' after kill: {}",
