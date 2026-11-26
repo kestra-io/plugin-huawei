@@ -38,6 +38,8 @@ import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.io.IOException;
+
 @KestraTest
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DataArtsTasksTest {
@@ -1213,6 +1215,25 @@ class DataArtsTasksTest {
 
         var ex = assertThrows(IllegalStateException.class, () -> task.run(runContext));
         assertThat(ex.getMessage(), containsString("empty_job"));
+    }
+
+    @Test
+    void getJobRun_unreachableEndpoint_errorMessageIncludesTheEndpoint() {
+        var runContext = runContextFactory.of(Collections.emptyMap());
+        // Nothing listens on port 1, so the connection is refused.
+        var endpoint = "http://localhost:1";
+
+        var task = GetJobRun.builder()
+            .accessKeyId(Property.ofValue(FAKE_AK))
+            .secretAccessKey(Property.ofValue(FAKE_SK))
+            .projectId(Property.ofValue(PROJECT_ID))
+            .endpointOverride(Property.ofValue(endpoint))
+            .jobName(Property.ofValue(JOB_NAME))
+            .instanceId(Property.ofValue(INSTANCE_ID))
+            .build();
+
+        var ex = assertThrows(IOException.class, () -> task.run(runContext));
+        assertThat(ex.getMessage(), containsString(endpoint));
     }
 
     // ── StopJobRun ───────────────────────────────────────────────────────────────

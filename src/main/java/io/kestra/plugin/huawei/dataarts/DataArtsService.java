@@ -664,7 +664,13 @@ public final class DataArtsService {
             .method(method, bodyPublisher)
             .build();
 
-        return client.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+        try {
+            return client.send(jdkReq, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException e) {
+            throw new IOException(
+                "Failed to communicate with DataArts endpoint: " + endpoint + " (" + e + ")", e
+            );
+        }
     }
 
     /**
